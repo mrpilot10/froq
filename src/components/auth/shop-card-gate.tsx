@@ -1,67 +1,50 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { QrCode } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { getCustomerHome, type CustomerHome } from "@/app/actions/customer";
 import { createClient } from "@/lib/supabase/client";
 import { LoyaltyExperience } from "@/components/loyalty/loyalty-experience";
-import { LoginExperience } from "./login-experience";
 
-export function AppGate() {
+interface ShopCardGateProps {
+  slug: string;
+}
+
+export function ShopCardGate({ slug }: ShopCardGateProps) {
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
   const [home, setHome] = useState<CustomerHome | null>(null);
 
   const refresh = useCallback(async () => {
-    setHome(await getCustomerHome());
-  }, []);
+    setHome(await getCustomerHome(slug));
+  }, [slug]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    if (!home) return;
+    if (home.status === "unauthenticated" || home.status === "no_membership") {
+      router.replace(`/join/${slug}`);
+    }
+  }, [home, slug, router]);
+
   const handleLogout = useCallback(async () => {
     await supabase.auth.signOut();
-    setHome({ status: "unauthenticated" });
-  }, [supabase]);
+    router.replace(`/join/${slug}`);
+  }, [supabase, slug, router]);
 
-  if (!home) {
+  if (!home || home.status !== "ready") {
     return (
       <div className="loyalty-page">
         <div className="loyalty-screen auth-screen">
           <div className="auth-card auth-card--placeholder">
             <div className="auth-loading" aria-live="polite" aria-busy="true">
               <div className="processing-spinner" aria-hidden="true" />
-              <p className="processing-title">Loading</p>
+              <p className="processing-title">Loading your card</p>
               <p className="processing-sub">Just a moment…</p>
             </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (home.status === "unauthenticated") return <LoginExperience onComplete={refresh} />;
-
-  if (home.status === "no_membership") {
-    return (
-      <div className="loyalty-page">
-        <div className="loyalty-screen auth-screen">
-          <div className="auth-card">
-            <div className="auth-head">
-              <div className="auth-badge" aria-hidden="true">
-                <QrCode size={24} strokeWidth={2} color="#fff" />
-              </div>
-              <h2 className="auth-title">No loyalty cards yet</h2>
-              <p className="auth-sub">
-                Scan a shop&apos;s Froq QR code at checkout to start collecting stamps.
-              </p>
-            </div>
-            <button type="button" className="cta-btn auth-submit" onClick={handleLogout}>
-              Log out
-            </button>
-          </div>
-          <div className="footer">
-            Powered by <b>froq.io</b>
           </div>
         </div>
       </div>

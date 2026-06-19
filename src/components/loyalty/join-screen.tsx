@@ -6,7 +6,7 @@ import Image from "next/image";
 import { ArrowLeft, Gift, Phone, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { formatPhoneDisplay, isValidPhone } from "@/lib/auth/format";
-import { joinMerchant } from "@/app/actions/customer";
+import { checkShopMembership, joinMerchant } from "@/app/actions/customer";
 import { createClient } from "@/lib/supabase/client";
 import { OtpInput } from "@/components/auth/otp-input";
 
@@ -41,19 +41,39 @@ export function JoinScreen({
   const [name, setName] = useState("");
   const [authedPhone, setAuthedPhone] = useState("");
   const [error, setError] = useState("");
+  const [isReturningMember, setIsReturningMember] = useState(false);
 
   const e164 = authedPhone || `+91${phone}`;
 
+  // Each shop QR is its own login — clear other sessions when joining a new business.
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) {
-        setAuthedPhone(data.user.phone ? `+${data.user.phone}` : "");
-        setStep("details");
-      } else {
-        setStep("phone");
+    let active = true;
+
+    async function init() {
+      const membership = await checkShopMembership(slug);
+
+      if (!active) return;
+
+      if (membership.isMember && membership.isAuthenticated) {
+        router.replace(`/card/${slug}`);
+        return;
       }
-    });
-  }, [supabase]);
+
+      setIsReturningMember(membership.isMember);
+
+      if (!membership.isMember) {
+        await supabase.auth.signOut();
+      }
+
+      if (!active) return;
+      setStep("phone");
+    }
+
+    void init();
+    return () => {
+      active = false;
+    };
+  }, [slug, supabase, router]);
 
   const sendCode = useCallback(async () => {
     if (!isValidPhone(phone)) {
@@ -61,16 +81,15 @@ export function JoinScreen({
       return;
     }
     setError("");
-    const prev = step;
     setStep("checking");
     const { error: otpError } = await supabase.auth.signInWithOtp({ phone: `+91${phone}` });
     if (otpError) {
       setError(otpError.message);
-      setStep(prev);
+      setStep("phone");
       return;
     }
     setStep("otp");
-  }, [phone, step, supabase]);
+  }, [phone, supabase]);
 
   const verify = useCallback(async () => {
     if (otp.length !== OTP_LENGTH) return;
@@ -86,9 +105,18 @@ export function JoinScreen({
       setStep("otp");
       return;
     }
-    setAuthedPhone(data.user?.phone ? `+${data.user.phone}` : `+91${phone}`);
+
+    const verifiedPhone = data.user?.phone ? `+${data.user.phone}` : `+91${phone}`;
+    setAuthedPhone(verifiedPhone);
+
+    const membership = await checkShopMembership(slug);
+    if (membership.isMember) {
+      router.replace(`/card/${slug}`);
+      return;
+    }
+
     setStep("details");
-  }, [otp, phone, supabase]);
+  }, [otp, phone, supabase, slug, router]);
 
   const join = useCallback(async () => {
     if (!name.trim()) {
@@ -104,7 +132,7 @@ export function JoinScreen({
       return;
     }
     toast.success(`Welcome to ${businessName}!`);
-    router.replace("/");
+    router.replace(`/card/${slug}`);
   }, [name, slug, e164, businessName, router]);
 
   return (
@@ -136,9 +164,13 @@ export function JoinScreen({
                 <div className="auth-badge" aria-hidden="true">
                   <Phone size={24} strokeWidth={2} color="#fff" />
                 </div>
-                <h2 className="auth-title">Join the loyalty card</h2>
+                <h2 className="auth-title">
+                  {isReturningMember ? "Welcome back" : "Join the loyalty card"}
+                </h2>
                 <p className="auth-sub">
-                  Collect {totalStamps} stamps to earn {rewardName.toLowerCase()}. Log in to start.
+                  {isReturningMember
+                    ? `Log in with your mobile number to open your ${businessName} card.`
+                    : `Collect ${totalStamps} stamps to earn ${rewardName.toLowerCase()}. Verify your number to join ${businessName}.`}
                 </p>
               </div>
               <label className="auth-field">
@@ -158,16 +190,30 @@ export function JoinScreen({
                   />
                 </div>
               </label>
-              {error && <p className="auth-error" role="alert">{error}</p>}
+              {error && (
+                <p className="auth-error" role="alert">
+                  {error}
+                </p>
+              )}
               <button type="button" className="cta-btn auth-submit" onClick={sendCode}>
                 Continue
               </button>
+              <p className="merchant-auth-note">
+                Each shop has its own loyalty card. Scan this store&apos;s QR to log in here.
+              </p>
             </>
           )}
 
           {step === "otp" && (
             <>
-              <button type="button" className="auth-back" onClick={() => { setStep("phone"); setOtp(""); }}>
+              <button
+                type="button"
+                className="auth-back"
+                onClick={() => {
+                  setStep("phone");
+                  setOtp("");
+                }}
+              >
                 <ArrowLeft size={16} strokeWidth={2.2} />
                 Change number
               </button>
@@ -181,7 +227,11 @@ export function JoinScreen({
                 </p>
               </div>
               <OtpInput value={otp} length={OTP_LENGTH} onChange={setOtp} />
-              {error && <p className="auth-error" role="alert">{error}</p>}
+              {error && (
+                <p className="auth-error" role="alert">
+                  {error}
+                </p>
+              )}
               <button
                 type="button"
                 className="cta-btn auth-submit"
@@ -210,10 +260,17 @@ export function JoinScreen({
                   autoComplete="name"
                   placeholder="Alex Morgan"
                   value={name}
-                  onChange={(e) => { setName(e.target.value); setError(""); }}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setError("");
+                  }}
                 />
               </label>
-              {error && <p className="auth-error" role="alert">{error}</p>}
+              {error && (
+                <p className="auth-error" role="alert">
+                  {error}
+                </p>
+              )}
               <button
                 type="button"
                 className="cta-btn auth-submit"

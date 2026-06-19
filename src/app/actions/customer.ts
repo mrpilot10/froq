@@ -12,17 +12,13 @@ export interface CardData {
   pending: boolean;
 }
 
-export interface CustomerMembership {
-  customerId: string;
-  slug: string;
-  name: string;
-}
 
 export type CustomerHome =
-  | { status: "unauthenticated" }
-  | { status: "no_membership" }
+  | { status: "unauthenticated"; slug: string }
+  | { status: "no_membership"; slug: string }
   | {
       status: "ready";
+      slug: string;
       business: BusinessInfo;
       card: CardData;
       history: HistoryEntry[];
@@ -30,8 +26,12 @@ export type CustomerHome =
       customerName: string;
       customerPhone: string;
       customerEmail?: string;
-      memberships: CustomerMembership[];
     };
+
+export interface ShopMembershipCheck {
+  isMember: boolean;
+  isAuthenticated: boolean;
+}
 
 function toBusinessInfo(m: MerchantRow): BusinessInfo {
   return {
@@ -61,55 +61,69 @@ function shortDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export async function getCustomerHome(activeSlug?: string): Promise<CustomerHome> {
+export async function getCustomerHome(slug: string): Promise<CustomerHome> {
   try {
-    return await loadCustomerHome(activeSlug);
+    return await loadCustomerHome(slug);
   } catch {
-    return { status: "unauthenticated" };
+    return { status: "unauthenticated", slug };
   }
 }
 
-async function loadCustomerHome(activeSlug?: string): Promise<CustomerHome> {
+export async function checkShopMembership(slug: string): Promise<ShopMembershipCheck> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { isMember: false, isAuthenticated: false };
+
+    const { data: merchant } = await supabase.from("merchants").select("id").eq("slug", slug).maybeSingle();
+    if (!merchant) return { isMember: false, isAuthenticated: true };
+
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("merchant_id", merchant.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    return { isMember: !!customer, isAuthenticated: true };
+  } catch {
+    return { isMember: false, isAuthenticated: false };
+  }
+}
+
+async function loadCustomerHome(slug: string): Promise<CustomerHome> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { status: "unauthenticated" };
+  if (!user) return { status: "unauthenticated", slug };
 
-  const { data: rows } = await supabase
+  const { data: merchant } = await supabase.from("merchants").select("*").eq("slug", slug).maybeSingle();
+  if (!merchant) return { status: "no_membership", slug };
+
+  const { data: customer } = await supabase
     .from("customers")
-    .select("id, name, phone, email, member_since, created_at, merchant_id, merchants(*)")
+    .select("id, name, phone, email, member_since")
+    .eq("merchant_id", merchant.id)
     .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+    .maybeSingle();
 
-  const memberships = rows ?? [];
-  if (memberships.length === 0) return { status: "no_membership" };
-
-  const active =
-    (activeSlug &&
-      memberships.find((r) => {
-        const m = Array.isArray(r.merchants) ? r.merchants[0] : r.merchants;
-        return m?.slug === activeSlug;
-      })) ||
-    memberships[0];
-
-  const merchant = (Array.isArray(active.merchants) ? active.merchants[0] : active.merchants) as
-    | MerchantRow
-    | undefined;
-  if (!merchant) return { status: "no_membership" };
+  if (!customer) return { status: "no_membership", slug };
 
   const [cardRes, approvalsRes, redemptionsRes] = await Promise.all([
-    supabase.from("loyalty_cards").select("stamps, status").eq("customer_id", active.id).maybeSingle(),
+    supabase.from("loyalty_cards").select("stamps, status").eq("customer_id", customer.id).maybeSingle(),
     supabase
       .from("approvals")
       .select("id, status, requested_at")
-      .eq("customer_id", active.id)
+      .eq("customer_id", customer.id)
       .order("requested_at", { ascending: false })
       .limit(20),
     supabase
       .from("redemptions")
       .select("id, redeemed_at")
-      .eq("customer_id", active.id)
+      .eq("customer_id", customer.id)
       .order("redeemed_at", { ascending: false })
       .limit(20),
   ]);
@@ -137,23 +151,20 @@ async function loadCustomerHome(activeSlug?: string): Promise<CustomerHome> {
 
   return {
     status: "ready",
-    business: toBusinessInfo(merchant),
+    slug,
+    business: toBusinessInfo(merchant as MerchantRow),
     card: {
-      customerId: active.id,
+      customerId: customer.id,
       filled: card?.stamps ?? 0,
       totalStamps: merchant.total_stamps,
       status: card?.status ?? "active",
       pending,
     },
     history,
-    memberSince: monthYear(active.member_since),
-    customerName: active.name,
-    customerPhone: active.phone,
-    customerEmail: active.email ?? undefined,
-    memberships: memberships.map((r) => {
-      const m = Array.isArray(r.merchants) ? r.merchants[0] : r.merchants;
-      return { customerId: r.id, slug: m?.slug ?? "", name: m?.business_name ?? "Shop" };
-    }),
+    memberSince: monthYear(customer.member_since),
+    customerName: customer.name,
+    customerPhone: customer.phone,
+    customerEmail: customer.email ?? undefined,
   };
 }
 

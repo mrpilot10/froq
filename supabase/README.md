@@ -71,9 +71,10 @@ supabase gen types typescript --linked > src/lib/supabase/database.types.ts
 
 ## Customer flow (live)
 
-- `/join/<slug>` — scanning a shop's QR opens this. Phone OTP → name → `join_merchant`
-  creates the customer + loyalty card, then redirects to `/`.
-- `/` — shows the customer's loyalty card. "Collect Stamp" calls `request_stamp`
+- `/join/<slug>` — scanning a shop's QR opens this. Phone OTP → name (new members) →
+  `join_merchant`, then redirects to `/card/<slug>`.
+- `/card/<slug>` — that shop's loyalty card only. Unauthenticated visitors are sent
+  back to `/join/<slug>` to log in for that business.
   (creates a pending approval). The merchant approves from their dashboard and the
   stamp appears live (Realtime subscription on `approvals` + `loyalty_cards`).
 
@@ -83,4 +84,4 @@ supabase gen types typescript --linked > src/lib/supabase/database.types.ts
   camera-based scan of the customer's reward QR should call `redeem_reward` from
   the merchant scanner (currently the scanner uses manual code entry).
 - Move merchant logos from base64 (`logo_url`) to Supabase Storage.
-- Multi-shop switcher on `/` (the data layer already returns all memberships).
+- Multi-shop switcher (each shop is a separate card at `/card/<slug>`).

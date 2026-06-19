@@ -10,8 +10,8 @@ const plusJakarta = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Froq — Bloom Coffee Co.",
-  description: "Digital loyalty card powered by froq.io",
+  title: "Froq",
+  description: "Digital loyalty for local businesses and their customers.",
 };
 
 export const viewport: Viewport = {
