@@ -1,0 +1,207 @@
+"use server";
+
+import { createClient } from "@/lib/supabase/server";
+import type { MerchantCustomer, MerchantProfile, PendingApproval } from "@/lib/merchant/types";
+import { slugify, toCustomer, toMerchantProfile, toMerchantRowPatch } from "@/lib/merchant/mappers";
+
+export interface MerchantStatsData {
+  totalCustomers: number;
+  activeCards: number;
+  stampsToday: number;
+  pendingApprovals: number;
+  rewardsRedeemed: number;
+  avgLifetimeVisits: number;
+  weeklyVisits: number[];
+}
+
+export type MerchantBundle =
+  | { status: "unauthenticated" }
+  | { status: "needs_setup" }
+  | {
+      status: "ready";
+      profile: MerchantProfile;
+      stats: MerchantStatsData;
+      customers: MerchantCustomer[];
+      approvals: PendingApproval[];
+    };
+
+// Visits over the trailing 7 days bucketed Mon..Sun for the dashboard chart.
+function weeklyBuckets(rows: { created_at: string }[]): number[] {
+  const buckets = [0, 0, 0, 0, 0, 0, 0];
+  const cutoff = Date.now() - 7 * 86_400_000;
+  for (const row of rows) {
+    const date = new Date(row.created_at);
+    if (date.getTime() < cutoff) continue;
+    const jsDay = date.getDay(); // 0 Sun .. 6 Sat
+    const monIndex = (jsDay + 6) % 7; // 0 Mon .. 6 Sun
+    buckets[monIndex] += 1;
+  }
+  return buckets;
+}
+
+export async function getMerchantBundle(): Promise<MerchantBundle> {
+  try {
+    return await loadMerchantBundle();
+  } catch {
+    // Network / config errors fall back to the login screen rather than crashing.
+    return { status: "unauthenticated" };
+  }
+}
+
+async function loadMerchantBundle(): Promise<MerchantBundle> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { status: "unauthenticated" };
+
+  const { data: merchantRow } = await supabase
+    .from("merchants")
+    .select("*")
+    .eq("owner_user_id", user.id)
+    .maybeSingle();
+
+  if (!merchantRow) return { status: "needs_setup" };
+
+  const merchantId = merchantRow.id;
+  const profile = toMerchantProfile(merchantRow);
+
+  const [statsRes, customersRes, approvalsRes, visitsRes] = await Promise.all([
+    supabase.from("merchant_stats").select("*").eq("merchant_id", merchantId).maybeSingle(),
+    supabase
+      .from("customer_overview")
+      .select("*")
+      .eq("merchant_id", merchantId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("approvals")
+      .select("id, customer_id, stamps_before, requested_at")
+      .eq("merchant_id", merchantId)
+      .eq("status", "pending")
+      .order("requested_at", { ascending: true }),
+    supabase
+      .from("visits")
+      .select("created_at")
+      .eq("merchant_id", merchantId)
+      .gte("created_at", new Date(Date.now() - 7 * 86_400_000).toISOString()),
+  ]);
+
+  const statsRow = statsRes.data;
+  const stats: MerchantStatsData = {
+    totalCustomers: statsRow?.total_customers ?? 0,
+    activeCards: statsRow?.active_cards ?? 0,
+    stampsToday: statsRow?.stamps_today ?? 0,
+    pendingApprovals: statsRow?.pending_approvals ?? 0,
+    rewardsRedeemed: statsRow?.rewards_redeemed ?? 0,
+    avgLifetimeVisits: Number(statsRow?.avg_lifetime_visits ?? 0),
+    weeklyVisits: weeklyBuckets(visitsRes.data ?? []),
+  };
+
+  const customers = (customersRes.data ?? []).map(toCustomer);
+  const customerById = new Map(customers.map((c) => [c.id, c]));
+
+  const approvals: PendingApproval[] = (approvalsRes.data ?? []).map((row) => {
+    const customer = customerById.get(row.customer_id);
+    return {
+      id: row.id,
+      customerId: row.customer_id,
+      customerName: customer?.name ?? "Customer",
+      phone: customer?.phone ?? "",
+      requestedAt: new Date(row.requested_at).toLocaleString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+      stampsBefore: row.stamps_before,
+      totalStamps: profile.totalStamps,
+    };
+  });
+
+  return { status: "ready", profile, stats, customers, approvals };
+}
+
+export async function createMerchant(input: {
+  businessName: string;
+  shortName: string;
+  brandColor: string;
+  logoDataUrl?: string;
+  rewardName: string;
+  totalStamps: number;
+  avgOrderValue: number;
+}): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not authenticated" };
+
+  const base = slugify(input.shortName || input.businessName) || "shop";
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const slug = attempt === 0 ? base : `${base}-${Math.random().toString(36).slice(2, 6)}`;
+    const { error } = await supabase.from("merchants").insert({
+      owner_user_id: user.id,
+      business_name: input.businessName,
+      short_name: input.shortName,
+      slug,
+      brand_color: input.brandColor,
+      logo_url: input.logoDataUrl ?? null,
+      reward_title: "Free reward",
+      reward_name: input.rewardName,
+      total_stamps: input.totalStamps,
+      avg_order_value: input.avgOrderValue,
+      phone: user.phone ?? null,
+    });
+    if (!error) return { ok: true };
+    if (error.code !== "23505") return { ok: false, error: error.message };
+  }
+  return { ok: false, error: "Could not generate a unique store link" };
+}
+
+export async function updateMerchantProfile(
+  patch: Partial<MerchantProfile>,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("merchants")
+    .update(toMerchantRowPatch(patch))
+    .eq("owner_user_id", user.id);
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+export async function approveStamp(approvalId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("approve_stamp", { p_approval_id: approvalId });
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+export async function rejectStamp(approvalId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("reject_stamp", { p_approval_id: approvalId });
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+export async function redeemReward(customerId: string, code: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("redeem_reward", {
+    p_customer_id: customerId,
+    p_code: code,
+  });
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+export async function setCustomerBanned(customerId: string, banned: boolean) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("customers").update({ banned }).eq("id", customerId);
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+export async function deleteCustomer(customerId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("customers").delete().eq("id", customerId);
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
