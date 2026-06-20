@@ -11,7 +11,10 @@ import {
   lastRequestAt,
   persistOtp,
   purgeExpired,
+  clearOtps,
+  updateOtpRequestId,
 } from "@/lib/auth/otp/store";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { maskPhone, toCanonicalPhone } from "@/lib/auth/otp/phone";
 import { otpLog } from "@/lib/auth/otp/logger";
 import type { SendOtpResult } from "@/lib/auth/otp/types";
@@ -37,6 +40,18 @@ export async function POST(request: Request) {
   const phone = toCanonicalPhone(parsed.phone);
   if (!phone) {
     return json({ ok: false, message: "Enter a valid mobile number." }, 400);
+  }
+
+  if (!isSupabaseConfigured()) {
+    otpLog.error("supabase_misconfigured", { phone: maskPhone(phone) });
+    return json(
+      {
+        ok: false,
+        message:
+          "Database is not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local (or Vercel), then run migration 0004_otp.sql.",
+      },
+      503,
+    );
   }
 
   await purgeExpired();
@@ -66,16 +81,32 @@ export async function POST(request: Request) {
   }
 
   const otp = generateOtp();
+  const otpHash = hashOtp(otp, phone);
+
+  // Store the hash before sending SMS so we never charge APITxT if persistence fails.
+  const stored = await persistOtp({ phone, otpHash, requestId: undefined });
+  if (!stored.ok) {
+    otpLog.error("persist_failed", { phone: maskPhone(phone), reason: stored.error });
+    const hint = stored.error?.includes("otp_codes")
+      ? " Run supabase/migrations/0004_otp.sql in your Supabase SQL editor."
+      : "";
+    return json(
+      {
+        ok: false,
+        message: `Could not start verification.${hint} Check Supabase credentials and the otp_codes table.`,
+      },
+      500,
+    );
+  }
+
   const delivery = await sendSmsOtp(phone, otp);
   if (!delivery.ok) {
+    await clearOtps(phone);
     return json({ ok: false, message: delivery.message }, 502);
   }
 
-  const stored = await persistOtp({ phone, otpHash: hashOtp(otp, phone), requestId: delivery.requestId });
-  if (!stored.ok) {
-    otpLog.error("persist_failed", { phone: maskPhone(phone), reason: stored.error });
-    return json({ ok: false, message: "Could not start verification. Please try again." }, 500);
-  }
+  // Backfill APITxT request_id now that we have it.
+  await updateOtpRequestId(phone, delivery.requestId);
 
   otpLog.info("otp_issued", { phone: maskPhone(phone), requestId: delivery.requestId });
   return json({ ok: true, message: "Verification code sent.", requestId: delivery.requestId }, 200);

@@ -62,6 +62,18 @@ export async function persistOtp(input: {
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 
+/** Attach the APITxT request_id after SMS delivery succeeds. */
+export async function updateOtpRequestId(phone: string, requestId?: string): Promise<void> {
+  if (!requestId) return;
+  const admin = createAdminClient();
+  await admin
+    .from(TABLE)
+    .update({ request_id: requestId })
+    .eq("phone", phone)
+    .is("consumed_at", null)
+    .gt("expires_at", new Date().toISOString());
+}
+
 /** Latest active (unconsumed, unexpired) OTP record for the phone. */
 export async function findActiveOtp(phone: string): Promise<OtpRecord | null> {
   const admin = createAdminClient();
