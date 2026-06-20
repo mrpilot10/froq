@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Download, Gift, Loader2, Stamp, Users, Clock } from "lucide-react";
-import { toast } from "sonner";
+import { ChevronDown, Gift, Stamp, Users, Clock } from "lucide-react";
 import { getDashboardStats } from "@/app/merchant/actions";
 import type { DashboardDateRange, DashboardFilteredStats } from "@/lib/merchant/types";
 import { computeLtv, formatCompactCurrency, formatCurrency } from "@/lib/merchant/ltv";
+import { MerchantPosterCard } from "./poster-card";
 
 interface DashboardScreenProps {
   businessName: string;
@@ -24,37 +24,12 @@ export function DashboardScreen({ businessName, avgOrderValue, initialStats }: D
   const [range, setRange] = useState<DashboardDateRange>(initialStats.range);
   const [stats, setStats] = useState(initialStats);
   const [loading, setLoading] = useState(false);
-  const [downloadingPoster, setDownloadingPoster] = useState(false);
 
   const loadStats = useCallback(async (nextRange: DashboardDateRange) => {
     setLoading(true);
     const next = await getDashboardStats(nextRange);
     if (next) setStats(next);
     setLoading(false);
-  }, []);
-
-  const downloadPoster = useCallback(async () => {
-    setDownloadingPoster(true);
-    try {
-      const res = await fetch("/api/merchant/poster", { cache: "no-store" });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error ?? "Could not generate the poster.");
-      }
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = "qr-poster.png";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(objectUrl);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not download the poster.");
-    } finally {
-      setDownloadingPoster(false);
-    }
   }, []);
 
   useEffect(() => {
@@ -84,26 +59,29 @@ export function DashboardScreen({ businessName, avgOrderValue, initialStats }: D
 
   return (
     <div className="tab-screen">
-      <div className="tab-head">
-        <h2 className="tab-title">Dashboard</h2>
-        <p className="tab-sub">
-          {businessName} · {stats.rangeLabel}
-        </p>
-      </div>
-
-      <div className="merchant-date-filter" role="group" aria-label="Date range">
-        {DATE_RANGES.map((item) => (
-          <button
-            key={item.value}
-            type="button"
-            className={`merchant-date-filter-btn${range === item.value ? " merchant-date-filter-btn--active" : ""}`}
-            aria-pressed={range === item.value}
-            disabled={loading && range !== item.value}
-            onClick={() => setRange(item.value)}
+      <div className="tab-head merchant-dashboard-head">
+        <div>
+          <h2 className="tab-title">Dashboard</h2>
+          <p className="tab-sub">
+            {businessName} · {stats.rangeLabel}
+          </p>
+        </div>
+        <div className="merchant-date-select">
+          <select
+            className="merchant-date-select-input"
+            aria-label="Date range"
+            value={range}
+            disabled={loading}
+            onChange={(event) => setRange(event.target.value as DashboardDateRange)}
           >
-            {item.label}
-          </button>
-        ))}
+            {DATE_RANGES.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={16} strokeWidth={2.4} className="merchant-date-select-icon" />
+        </div>
       </div>
 
       <div className={`merchant-ltv-card${loading ? " merchant-ltv-card--loading" : ""}`}>
@@ -187,19 +165,12 @@ export function DashboardScreen({ businessName, avgOrderValue, initialStats }: D
         </div>
       </div>
 
-      <button
-        type="button"
-        className="cta-btn merchant-cta-accent merchant-poster-btn"
-        onClick={downloadPoster}
-        disabled={downloadingPoster}
-      >
-        {downloadingPoster ? (
-          <Loader2 size={17} strokeWidth={2.4} className="merchant-poster-spinner" />
-        ) : (
-          <Download size={17} strokeWidth={2.4} />
-        )}
-        {downloadingPoster ? "Preparing poster…" : "Download QR Poster"}
-      </button>
+      <div className="merchant-settings-group">
+        <h3 className="merchant-settings-title">Counter poster</h3>
+        <div className="panel-card">
+          <MerchantPosterCard caption="Print this and place it at your counter. Customers scan the QR to join your loyalty program." />
+        </div>
+      </div>
 
       <div className={`panel-card merchant-summary-card${loading ? " merchant-summary-card--loading" : ""}`}>
         <div className="merchant-summary-row">

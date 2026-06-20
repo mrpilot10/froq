@@ -2944,37 +2944,6 @@ body {
   gap: 12px;
 }
 
-.merchant-date-filter {
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-  margin-bottom: 16px;
-  -webkit-overflow-scrolling: touch;
-}
-
-.merchant-date-filter-btn {
-  flex: 0 0 auto;
-  border: none;
-  border-radius: 999px;
-  padding: 8px 14px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ink-soft);
-  background: color-mix(in srgb, var(--paper) 88%, var(--ink) 12%);
-  cursor: pointer;
-}
-
-.merchant-date-filter-btn--active {
-  color: var(--brand-deep);
-  background: var(--accent);
-}
-
-.merchant-date-filter-btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
 .merchant-ltv-card--loading,
 .merchant-stat-grid--loading,
 .merchant-chart-card--loading,
@@ -2993,20 +2962,6 @@ body {
   white-space: nowrap;
 }
 
-.merchant-poster-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  margin-bottom: 16px;
-}
-
-.merchant-poster-btn:disabled {
-  opacity: 0.7;
-  cursor: default;
-}
-
 .merchant-poster-spinner {
   animation: merchant-spin 0.9s linear infinite;
 }
@@ -3015,6 +2970,133 @@ body {
   to {
     transform: rotate(360deg);
   }
+}
+
+.merchant-dashboard-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.merchant-date-select {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.merchant-date-select-input {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  border-radius: 999px;
+  padding: 9px 34px 9px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--brand-deep);
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.merchant-date-select-input:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.merchant-date-select-icon {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--brand-deep);
+  pointer-events: none;
+}
+
+.merchant-poster-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+}
+
+.merchant-poster-preview {
+  width: 100%;
+  max-width: 280px;
+  aspect-ratio: 721 / 1024;
+  border-radius: 18px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--brand-deep) 5%, var(--paper));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 16px 38px -26px rgba(0, 0, 0, 0.45);
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+}
+
+.merchant-poster-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.merchant-poster-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px;
+}
+
+.merchant-poster-loading-text {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--brand-deep) 58%, transparent);
+}
+
+.merchant-poster-error {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--brand-deep) 70%, transparent);
+}
+
+.merchant-poster-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: color-mix(in srgb, var(--brand-deep) 8%, transparent);
+  color: var(--brand-deep);
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 7px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.merchant-qr-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand-deep) 8%, transparent);
+}
+
+.merchant-qr-tab {
+  border: none;
+  background: transparent;
+  border-radius: 999px;
+  padding: 7px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--brand-deep) 62%, transparent);
+  cursor: pointer;
+}
+
+.merchant-qr-tab--active {
+  background: var(--paper);
+  color: var(--brand-deep);
+  box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.4);
 }
 
 .merchant-ltv-foot--grid {

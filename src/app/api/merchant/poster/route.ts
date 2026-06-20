@@ -42,10 +42,16 @@ export async function GET(request: Request) {
     const loyaltyUrl = loyaltyUrlFor(slug, request);
     const poster = await generatePoster(loyaltyUrl);
 
-    return new NextResponse(poster as unknown as BodyInit, {
+    // Copy into a clean ArrayBuffer-backed view so the PNG is streamed byte-for
+    // byte; handing a Node Buffer straight to the Web Response can truncate it
+    // and produce a "broken image".
+    const body = new Uint8Array(poster);
+
+    return new NextResponse(body, {
       status: 200,
       headers: {
         "Content-Type": "image/png",
+        "Content-Length": String(body.byteLength),
         "Content-Disposition": `attachment; filename="${slug}-qr-poster.png"`,
         "Cache-Control": "no-store",
       },
