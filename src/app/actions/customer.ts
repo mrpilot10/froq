@@ -2,7 +2,7 @@
 
 import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import type { BusinessInfo, HistoryEntry } from "@/lib/loyalty/types";
+import type { BusinessInfo, HistoryEntry, RewardCardGroup } from "@/lib/loyalty/types";
 import type { MerchantRow } from "@/lib/supabase/database.types";
 
 export interface CardData {
@@ -23,6 +23,7 @@ export type CustomerHome =
       business: BusinessInfo;
       card: CardData;
       history: HistoryEntry[];
+      rewardCards: RewardCardGroup[];
       memberSince: string;
       customerName: string;
       customerPhone: string;
@@ -58,7 +59,7 @@ function toBusinessInfo(m: MerchantRow): BusinessInfo {
     rewardSubtitle: m.reward_name,
     rewardName: m.reward_name,
     rewardDescription: `Collect all ${m.total_stamps} stamps and redeem ${m.reward_name.toLowerCase()}.`,
-    rewardImage: "/reward-coffee.png",
+    rewardImage: m.reward_image_url || "/reward-coffee.png",
     totalStamps: m.total_stamps,
     socialLinks: {
       instagram: toExternalUrl(m.instagram_url),
@@ -164,7 +165,36 @@ async function loadCustomerHome(slug: string): Promise<CustomerHome> {
 
   const card = cardRes.data;
   const approvals = approvalsRes.data ?? [];
+  const redemptions = redemptionsRes.data ?? [];
   const pending = approvals.some((a) => a.status === "pending");
+  const filled = card?.stamps ?? 0;
+  const totalStamps = merchant.total_stamps;
+  const rewardReady = (card?.status ?? "active") === "reward_ready";
+
+  // Group activity into discrete loyalty cards. Each redemption closes a card;
+  // the still-open card is the latest. Shown newest-first (highest number).
+  const completedCards: RewardCardGroup[] = redemptions.map((r, i) => ({
+    id: r.id,
+    index: redemptions.length - i, // redemptions are newest-first
+    status: "completed",
+    stampsCollected: totalStamps,
+    totalStamps,
+    rewardName: merchant.reward_name,
+    redeemedDate: shortDate(r.redeemed_at),
+  }));
+
+  const currentCard: RewardCardGroup = {
+    id: "current",
+    index: redemptions.length + 1,
+    status: "active",
+    stampsCollected: filled,
+    totalStamps,
+    rewardName: merchant.reward_name,
+    pending,
+    rewardReady,
+  };
+
+  const rewardCards: RewardCardGroup[] = [currentCard, ...completedCards];
 
   const history: HistoryEntry[] = [
     ...approvals
@@ -175,7 +205,7 @@ async function loadCustomerHome(slug: string): Promise<CustomerHome> {
         label: a.status === "pending" ? "Stamp request submitted" : "Stamp collected",
         status: a.status === "pending" ? ("pending" as const) : ("approved" as const),
       })),
-    ...(redemptionsRes.data ?? []).map((r) => ({
+    ...redemptions.map((r) => ({
       id: r.id,
       date: shortDate(r.redeemed_at),
       label: `${merchant.reward_name} redeemed`,
@@ -189,12 +219,13 @@ async function loadCustomerHome(slug: string): Promise<CustomerHome> {
     business: toBusinessInfo(merchant as MerchantRow),
     card: {
       customerId: customer.id,
-      filled: card?.stamps ?? 0,
-      totalStamps: merchant.total_stamps,
+      filled,
+      totalStamps,
       status: card?.status ?? "active",
       pending,
     },
     history,
+    rewardCards,
     memberSince: monthYear(customer.member_since),
     customerName: customer.name,
     customerPhone: customer.phone,

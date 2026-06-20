@@ -5,6 +5,7 @@ import { ArrowLeft, Lock, Phone } from "lucide-react";
 import Image from "next/image";
 import { formatPhoneDisplay, isValidPhone } from "@/lib/auth/format";
 import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/client";
+import { merchantExistsForPhone } from "@/app/merchant/actions";
 import { OtpInput } from "@/components/auth/otp-input";
 import { FroqFooter } from "@/components/shared/froq-footer";
 
@@ -33,6 +34,18 @@ export function MerchantLogin({ onAuthed }: MerchantLoginProps) {
     }
     setError("");
     setStep("loading");
+
+    // Don't spend an SMS on numbers that aren't Froq merchants.
+    const check = await merchantExistsForPhone(phone);
+    if (!check.exists) {
+      setError(
+        check.error ??
+          "This number isn't registered as a Froq merchant. New stores are onboarded by the Froq team.",
+      );
+      setStep("phone");
+      return;
+    }
+
     const res = await sendOtp(phone);
     if (!res.ok) {
       setError(res.message);

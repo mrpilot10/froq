@@ -24,6 +24,7 @@ export interface MerchantProfile {
   xUrl: string;
   rewardTitle: string;
   rewardName: string;
+  rewardImageDataUrl?: string;
   totalStamps: number;
   avgOrderValue: number;
   stampNotifications: boolean;
@@ -49,6 +50,7 @@ export interface MerchantCustomer {
   stamps: number;
   totalStamps: number;
   lifetimeVisits: number;
+  rewardsClaimed: number;
   status: "active" | "reward_ready" | "claimed";
   banned?: boolean;
   lastVisit: string;

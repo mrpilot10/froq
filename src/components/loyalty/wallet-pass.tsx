@@ -59,6 +59,7 @@ export function WalletPass({
               fill
               sizes="76px"
               className="pass-thumb-img"
+              unoptimized
             />
           </div>
         </div>

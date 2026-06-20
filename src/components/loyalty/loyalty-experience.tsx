@@ -6,10 +6,11 @@ import { toast } from "sonner";
 import { requestStamp, type CardData } from "@/app/actions/customer";
 import { DeleteAccountDrawer } from "@/components/shared/delete-account-drawer";
 import { FroqFooter } from "@/components/shared/froq-footer";
-import type { BusinessInfo, HistoryEntry, NavTab } from "@/lib/loyalty/types";
+import type { BusinessInfo, HistoryEntry, NavTab, RewardCardGroup } from "@/lib/loyalty/types";
 import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { useRealtime } from "@/lib/supabase/use-realtime";
 import { BusinessHeader } from "./business-header";
+import { ClaimedCelebration } from "./claimed-celebration";
 import { Confetti } from "./confetti";
 import { FloatingNav } from "./floating-nav";
 import { HistoryScreen } from "./history-screen";
@@ -23,6 +24,7 @@ interface LoyaltyExperienceProps {
   business: BusinessInfo;
   card: CardData;
   history: HistoryEntry[];
+  rewardCards: RewardCardGroup[];
   memberSince: string;
   customerName: string;
   customerPhone: string;
@@ -43,6 +45,7 @@ export function LoyaltyExperience({
   business,
   card,
   history,
+  rewardCards,
   memberSince,
   customerName,
   customerPhone,
@@ -57,6 +60,7 @@ export function LoyaltyExperience({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
+  const [showClaimed, setShowClaimed] = useState(false);
 
   useBrandTheme(business.brandColor);
 
@@ -77,12 +81,31 @@ export function LoyaltyExperience({
     setPrevFilled(card.filled);
   }, [card.filled, prevFilled]);
 
+  // Celebrate when the merchant redeems: the card transitions out of
+  // reward_ready (the DB resets it to active with 0 stamps). Show the claimed
+  // celebration + confetti and close any open reward sheet so the customer never
+  // sees the "almost there" state right after their reward was approved.
+  const [prevStatus, setPrevStatus] = useState(card.status);
+  useEffect(() => {
+    if (prevStatus === "reward_ready" && card.status !== "reward_ready") {
+      setRewardSheetOpen(false);
+      setShowClaimed(true);
+      setShowConfetti(true);
+    }
+    setPrevStatus(card.status);
+  }, [card.status, prevStatus]);
+
   // Refetch on focus as a fallback to realtime.
   useEffect(() => {
     const onFocus = () => void onRefresh();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [onRefresh]);
+
+  // Jump to the top (no animation) on tab switch so each page starts at its header.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [activeTab]);
 
   const handleCollect = useCallback(async () => {
     if (isRewardReady || card.pending || submitting) return;
@@ -169,7 +192,9 @@ export function LoyaltyExperience({
             </>
           )}
 
-          {activeTab === "history" && <HistoryScreen entries={history} />}
+          {activeTab === "history" && (
+            <HistoryScreen entries={history} rewardCards={rewardCards} />
+          )}
 
           {activeTab === "profile" && (
             <ProfileScreen
@@ -209,6 +234,16 @@ export function LoyaltyExperience({
         isRedeemed={isClaimed}
         onClose={() => setRewardSheetOpen(false)}
         onClaim={() => setRewardSheetOpen(false)}
+      />
+
+      <ClaimedCelebration
+        open={showClaimed}
+        business={business}
+        onStartAgain={() => {
+          setShowClaimed(false);
+          setScreen("card");
+          setActiveTab("collect");
+        }}
       />
 
       <Confetti active={showConfetti} onComplete={() => setShowConfetti(false)} />

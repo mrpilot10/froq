@@ -21,6 +21,7 @@ export interface MerchantRow {
   x_url: string | null;
   reward_title: string;
   reward_name: string;
+  reward_image_url: string | null;
   total_stamps: number;
   avg_order_value: number;
   stamp_notifications: boolean;
@@ -101,6 +102,7 @@ export interface CustomerOverviewRow {
   status: CardStatus;
   total_stamps: number;
   lifetime_visits: number;
+  rewards_claimed: number;
   last_visit: string | null;
 }
 

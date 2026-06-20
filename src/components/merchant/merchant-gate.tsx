@@ -5,7 +5,6 @@ import { getMerchantBundle, type MerchantBundle } from "@/app/merchant/actions";
 import { createClient } from "@/lib/supabase/client";
 import { readCheckoutAccount } from "@/lib/merchant/checkout";
 import { MerchantExperience } from "./merchant-experience";
-import { MerchantAccountNotFound } from "./merchant-account-not-found";
 import { MerchantLogin } from "./merchant-login";
 import { MerchantSetupWizard } from "./merchant-setup-wizard";
 import { MerchantGateSplash } from "./skeletons";
@@ -24,7 +23,14 @@ export function MerchantGate() {
   const [clientReady, setClientReady] = useState(false);
 
   const refresh = useCallback(async () => {
-    setBundle(await getMerchantBundle());
+    const next = await getMerchantBundle();
+    setBundle((prev) => {
+      // A transient fetch error shouldn't tear down a working session. Keep the
+      // last good bundle so the merchant stays on their dashboard; only surface
+      // the error state when we have nothing to show yet.
+      if (next.status === "error") return prev ?? next;
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -42,10 +48,27 @@ export function MerchantGate() {
 
   if (!bundle) return <MerchantGateSplash />;
 
-  if (bundle.status === "unauthenticated") return <MerchantLogin onAuthed={refresh} />;
+  if (bundle.status === "error") {
+    return (
+      <div className="merchant-page merchant-theme">
+        <div className="merchant-screen merchant-gate-error">
+          <p className="merchant-gate-error-title">Couldn&apos;t reach your dashboard</p>
+          <p className="merchant-gate-error-sub">Check your connection and try again.</p>
+          <button type="button" className="cta-btn merchant-cta-accent" onClick={() => void refresh()}>
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-  if (bundle.status === "not_registered") {
-    return <MerchantAccountNotFound onSignOut={handleLogout} />;
+  // "unauthenticated" = no session. "not_registered" = there IS a session, but it
+  // doesn't belong to a merchant (e.g. a logged-in loyalty customer landing on
+  // /merchant). In both cases show the merchant login rather than auto-entering
+  // the dashboard, so a customer is never silently treated as a merchant. Their
+  // existing customer session is left intact unless they log in here.
+  if (bundle.status === "unauthenticated" || bundle.status === "not_registered") {
+    return <MerchantLogin onAuthed={refresh} />;
   }
 
   // Paid via checkout — store builder for new merchants.

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { Toaster } from "sonner";
+import { KeyboardAware } from "@/components/shared/keyboard-aware";
 import "./globals.css";
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -32,6 +33,9 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: "#004353",
+  // Shrink the layout viewport when the on-screen keyboard opens so fixed
+  // elements (nav, CTAs) reposition above it and inputs stay reachable.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({
@@ -72,6 +76,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-full antialiased">
         {children}
+        <KeyboardAware />
         <Toaster position="top-center" richColors />
         <SpeedInsights />
       </body>

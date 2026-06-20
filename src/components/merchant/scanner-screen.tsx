@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CheckCircle2, ScanLine } from "lucide-react";
+import { PartyPopper, ScanLine } from "lucide-react";
 import { parseRedeemCode } from "@/lib/merchant/parse-redeem-code";
 import { useQrScanner } from "@/lib/merchant/use-qr-scanner";
 
@@ -78,6 +78,53 @@ export function ScannerScreen({ onRedeem }: ScannerScreenProps) {
     void startCamera();
   };
 
+  if (submitting) {
+    return (
+      <div className="tab-screen">
+        <div className="tab-head">
+          <h2 className="tab-title">Scan reward</h2>
+          <p className="tab-sub">Hold on a moment</p>
+        </div>
+
+        <div className="panel-card merchant-claimed-card" aria-busy="true" role="status">
+          <div className="processing-spinner" aria-hidden="true" />
+          <h3 className="merchant-claimed-title">Redeeming reward…</h3>
+          <p className="merchant-claimed-sub">Verifying the code and updating the customer&apos;s card.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (success) {
+    return (
+      <div className="tab-screen">
+        <div className="tab-head">
+          <h2 className="tab-title">Reward claimed</h2>
+          <p className="tab-sub">All done — the customer&apos;s card has been reset</p>
+        </div>
+
+        <div className="panel-card merchant-claimed-card" role="status">
+          <div className="merchant-claimed-badge" aria-hidden="true">
+            <PartyPopper size={40} strokeWidth={2} />
+          </div>
+          <h3 className="merchant-claimed-title">Reward claimed!</h3>
+          <p className="merchant-claimed-sub">
+            <strong>{success.name}</strong> just redeemed their reward. Hand it over and
+            they&apos;ll start a fresh card.
+          </p>
+          <div className="merchant-claimed-code">{success.code}</div>
+          <button
+            type="button"
+            className="cta-btn merchant-cta-accent"
+            onClick={handleOpenCamera}
+          >
+            Scan another reward
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="tab-screen">
       <div className="tab-head">
@@ -150,18 +197,6 @@ export function ScannerScreen({ onRedeem }: ScannerScreenProps) {
           <p className="auth-error" role="alert">
             {error}
           </p>
-        )}
-
-        {success && (
-          <div className="merchant-scan-success" role="status">
-            <CheckCircle2 size={20} strokeWidth={2.2} />
-            <div>
-              <div className="merchant-scan-success-title">Reward marked as claimed</div>
-              <div className="merchant-scan-success-sub">
-                {success.name} · {success.code}
-              </div>
-            </div>
-          </div>
         )}
 
         <button

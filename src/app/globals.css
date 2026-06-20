@@ -1683,6 +1683,121 @@ body {
   opacity: 0.9;
 }
 
+/* Reward claimed celebration */
+.claimed-celebrate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 8px 4px 4px;
+}
+
+.claimed-thumb-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.claimed-thumb {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  border-radius: 28px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand);
+  box-shadow: 0 20px 44px -20px color-mix(in srgb, var(--brand) 85%, black);
+  animation: claimedThumbIn 0.55s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.claimed-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.claimed-thumb-glow {
+  position: absolute;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--brand) 28%, transparent) 0%,
+    transparent 70%
+  );
+  animation: claimedGlow 2s ease-in-out infinite;
+}
+
+.claimed-thumb-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--brand-deep);
+  background: var(--accent);
+  border: 3px solid var(--paper);
+  animation: claimedThumbIn 0.55s cubic-bezier(0.2, 0.9, 0.25, 1) 0.15s both;
+}
+
+@keyframes claimedThumbIn {
+  from {
+    transform: scale(0.3) rotate(-12deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
+}
+
+@keyframes claimedGlow {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+}
+
+.claimed-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.claimed-sub {
+  margin: 0 0 4px;
+  max-width: 320px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .claimed-thumb,
+  .claimed-thumb-badge,
+  .claimed-thumb-glow {
+    animation: none !important;
+  }
+}
+
 /* Confetti */
 .confetti-container {
   position: fixed;
@@ -2218,6 +2333,119 @@ body {
 
 .history-panel {
   padding: 8px 0;
+}
+
+/* Reward cards (grouped loyalty cards, newest first) */
+.reward-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.reward-card-group {
+  border-radius: 20px;
+  padding: 16px 18px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 30px -26px rgba(0, 0, 0, 0.5);
+}
+
+.reward-card-group.is-ready {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--line));
+  background: color-mix(in srgb, var(--brand) 7%, var(--paper));
+}
+
+.reward-card-group.is-completed {
+  background: var(--bg);
+}
+
+.reward-card-group-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.reward-card-group-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.reward-card-group-name {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.reward-card-group-reward {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+
+.reward-card-group-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: var(--bg);
+  color: var(--ink-soft);
+}
+
+.reward-card-group-badge.is-ready {
+  background: var(--brand);
+  color: var(--accent);
+}
+
+.reward-card-group-badge.is-completed {
+  background: color-mix(in srgb, var(--brand) 14%, var(--paper));
+  color: var(--brand-deep);
+}
+
+.reward-card-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.reward-card-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border: 1.5px solid var(--line);
+  color: var(--accent);
+}
+
+.reward-card-dot.filled {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.reward-card-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.history-section-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  margin-bottom: 8px;
 }
 
 .history-empty {
@@ -3185,8 +3413,12 @@ body {
 
 .merchant-drawer-stats {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
+}
+
+.merchant-drawer-stat--accent {
+  grid-column: 1 / -1;
 }
 
 .merchant-drawer-stat {
@@ -3505,6 +3737,35 @@ body {
   transform: scale(0.96);
 }
 
+.merchant-gate-error {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 40px 24px;
+}
+
+.merchant-gate-error-title {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.merchant-gate-error-sub {
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  margin-bottom: 8px;
+}
+
+.merchant-gate-error .cta-btn {
+  width: auto;
+  padding-left: 28px;
+  padding-right: 28px;
+}
+
 .merchant-device-block {
   display: flex;
   flex-direction: column;
@@ -3709,6 +3970,20 @@ body {
   opacity: 0.85;
 }
 
+.merchant-action-btn:disabled {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.merchant-btn-spinner {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+
 .merchant-action-btn--reject {
   background: var(--bg);
   color: var(--ink-soft);
@@ -3841,26 +4116,66 @@ body {
   text-transform: uppercase;
 }
 
-.merchant-scan-success {
+.merchant-claimed-card {
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
   gap: 12px;
-  padding: 14px 16px;
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--accent) 18%, var(--paper));
+  padding: 32px 22px 24px;
+}
+
+.merchant-claimed-badge {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--brand-deep);
+  background: var(--accent);
+  box-shadow: 0 18px 40px -18px color-mix(in srgb, var(--accent) 80%, black);
+  animation: claimedPop 0.5s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+@keyframes claimedPop {
+  from {
+    transform: scale(0.4) rotate(-10deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
+}
+
+.merchant-claimed-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   color: var(--brand-deep);
 }
 
-.merchant-scan-success-title {
-  font-size: 14px;
-  font-weight: 800;
-  margin-bottom: 2px;
+.merchant-claimed-sub {
+  margin: 0;
+  max-width: 300px;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--ink-soft);
 }
 
-.merchant-scan-success-sub {
-  font-size: 12.5px;
-  font-weight: 600;
-  opacity: 0.85;
+.merchant-claimed-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--brand-deep);
+  background: color-mix(in srgb, var(--brand) 10%, var(--bg));
+  padding: 6px 14px;
+  border-radius: 10px;
+  margin-bottom: 4px;
 }
 
 .merchant-scanner-note {

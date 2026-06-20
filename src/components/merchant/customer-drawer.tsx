@@ -86,6 +86,10 @@ export function CustomerDrawer({
                 {customer.stamps}/{customer.totalStamps}
               </span>
             </div>
+            <div className="merchant-drawer-stat">
+              <span className="merchant-drawer-stat-label">Rewards claimed</span>
+              <span className="merchant-drawer-stat-value">{customer.rewardsClaimed}</span>
+            </div>
           </div>
 
           <div className="merchant-drawer-rows">

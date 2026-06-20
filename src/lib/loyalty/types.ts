@@ -29,6 +29,22 @@ export interface HistoryEntry {
   status: "approved" | "pending" | "redeemed";
 }
 
+export interface RewardCardGroup {
+  id: string;
+  /** 1-based card number in chronological order (Card 1 is the oldest). */
+  index: number;
+  status: "active" | "completed";
+  stampsCollected: number;
+  totalStamps: number;
+  rewardName: string;
+  /** A stamp request on the current card is awaiting approval. */
+  pending?: boolean;
+  /** Current card has all stamps and is waiting to be redeemed. */
+  rewardReady?: boolean;
+  /** Date the reward was redeemed (completed cards only). */
+  redeemedDate?: string;
+}
+
 export interface LoyaltyState {
   filled: number;
   pending: boolean;

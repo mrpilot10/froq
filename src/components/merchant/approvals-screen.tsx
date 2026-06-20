@@ -1,13 +1,30 @@
+"use client";
+
+import { useState } from "react";
 import { Check, X } from "lucide-react";
 import type { PendingApproval } from "@/lib/merchant/types";
 
 interface ApprovalsScreenProps {
   approvals: PendingApproval[];
-  onApprove: (id: string) => void;
-  onDisapprove: (id: string) => void;
+  onApprove: (id: string) => void | Promise<unknown>;
+  onDisapprove: (id: string) => void | Promise<unknown>;
 }
 
+type BusyState = { id: string; action: "approve" | "disapprove" } | null;
+
 export function ApprovalsScreen({ approvals, onApprove, onDisapprove }: ApprovalsScreenProps) {
+  const [busy, setBusy] = useState<BusyState>(null);
+
+  async function run(id: string, action: "approve" | "disapprove") {
+    if (busy) return;
+    setBusy({ id, action });
+    try {
+      await (action === "approve" ? onApprove(id) : onDisapprove(id));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="tab-screen">
       <div className="tab-head">
@@ -22,39 +39,54 @@ export function ApprovalsScreen({ approvals, onApprove, onDisapprove }: Approval
         </div>
       ) : (
         <div className="merchant-approval-list">
-          {approvals.map((approval) => (
-            <div key={approval.id} className="panel-card merchant-approval-card">
-              <div className="merchant-approval-top">
-                <div className="merchant-avatar">{getInitials(approval.customerName)}</div>
-                <div className="merchant-approval-copy">
-                  <div className="merchant-list-title">{approval.customerName}</div>
-                  <div className="merchant-list-sub">{approval.phone}</div>
-                  <div className="merchant-approval-meta">
-                    Stamp {approval.stampsBefore + 1} of {approval.totalStamps} ·{" "}
-                    {approval.requestedAt}
+          {approvals.map((approval) => {
+            const isBusy = busy?.id === approval.id;
+            const isApproving = isBusy && busy?.action === "approve";
+            const isRejecting = isBusy && busy?.action === "disapprove";
+            return (
+              <div key={approval.id} className="panel-card merchant-approval-card">
+                <div className="merchant-approval-top">
+                  <div className="merchant-avatar">{getInitials(approval.customerName)}</div>
+                  <div className="merchant-approval-copy">
+                    <div className="merchant-list-title">{approval.customerName}</div>
+                    <div className="merchant-list-sub">{approval.phone}</div>
+                    <div className="merchant-approval-meta">
+                      Stamp {approval.stampsBefore + 1} of {approval.totalStamps} ·{" "}
+                      {approval.requestedAt}
+                    </div>
                   </div>
                 </div>
+                <div className="merchant-approval-actions">
+                  <button
+                    type="button"
+                    className="merchant-action-btn merchant-action-btn--reject"
+                    disabled={isBusy}
+                    onClick={() => void run(approval.id, "disapprove")}
+                  >
+                    {isRejecting ? (
+                      <span className="merchant-btn-spinner" aria-hidden="true" />
+                    ) : (
+                      <X size={16} strokeWidth={2.4} />
+                    )}
+                    {isRejecting ? "Working…" : "Disapprove"}
+                  </button>
+                  <button
+                    type="button"
+                    className="merchant-action-btn merchant-action-btn--approve"
+                    disabled={isBusy}
+                    onClick={() => void run(approval.id, "approve")}
+                  >
+                    {isApproving ? (
+                      <span className="merchant-btn-spinner" aria-hidden="true" />
+                    ) : (
+                      <Check size={16} strokeWidth={2.4} />
+                    )}
+                    {isApproving ? "Approving…" : "Approve"}
+                  </button>
+                </div>
               </div>
-              <div className="merchant-approval-actions">
-                <button
-                  type="button"
-                  className="merchant-action-btn merchant-action-btn--reject"
-                  onClick={() => onDisapprove(approval.id)}
-                >
-                  <X size={16} strokeWidth={2.4} />
-                  Disapprove
-                </button>
-                <button
-                  type="button"
-                  className="merchant-action-btn merchant-action-btn--approve"
-                  onClick={() => onApprove(approval.id)}
-                >
-                  <Check size={16} strokeWidth={2.4} />
-                  Approve
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

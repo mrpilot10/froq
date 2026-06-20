@@ -26,6 +26,7 @@ export function toMerchantProfile(row: MerchantRow): MerchantProfile {
     xUrl: row.x_url ?? "",
     rewardTitle: row.reward_title,
     rewardName: row.reward_name,
+    rewardImageDataUrl: row.reward_image_url ?? undefined,
     totalStamps: row.total_stamps,
     avgOrderValue: Number(row.avg_order_value),
     stampNotifications: row.stamp_notifications,
@@ -54,6 +55,8 @@ export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<Mer
   if (patch.xUrl !== undefined) row.x_url = patch.xUrl;
   if (patch.rewardTitle !== undefined) row.reward_title = patch.rewardTitle;
   if (patch.rewardName !== undefined) row.reward_name = patch.rewardName;
+  if (patch.rewardImageDataUrl !== undefined)
+    row.reward_image_url = patch.rewardImageDataUrl ?? null;
   if (patch.totalStamps !== undefined) row.total_stamps = patch.totalStamps;
   if (patch.avgOrderValue !== undefined) row.avg_order_value = patch.avgOrderValue;
   if (patch.stampNotifications !== undefined) row.stamp_notifications = patch.stampNotifications;
@@ -86,6 +89,7 @@ export function toCustomer(row: CustomerOverviewRow): MerchantCustomer {
     stamps: row.stamps,
     totalStamps: row.total_stamps,
     lifetimeVisits: Number(row.lifetime_visits),
+    rewardsClaimed: Number(row.rewards_claimed ?? 0),
     status: row.status,
     banned: row.banned,
     lastVisit: relativeDay(row.last_visit),

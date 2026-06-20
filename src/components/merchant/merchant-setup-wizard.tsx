@@ -34,6 +34,7 @@ interface ShopDraft {
   logoDataUrl?: string;
   rewardTitle: string;
   rewardName: string;
+  rewardImageDataUrl?: string;
   avgOrderValue: number;
 }
 
@@ -112,9 +113,11 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
     logoDataUrl: undefined,
     rewardTitle: "",
     rewardName: "",
+    rewardImageDataUrl: undefined,
     avgOrderValue: 200,
   }));
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rewardImageInputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -132,6 +135,15 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
     if (!file) return;
     const dataUrl = await fileToLogoDataUrl(file);
     update("logoDataUrl", dataUrl);
+    input.value = "";
+  }
+
+  async function handleRewardImageUpload(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.target;
+    const file = input.files?.[0];
+    if (!file) return;
+    const dataUrl = await fileToLogoDataUrl(file);
+    update("rewardImageDataUrl", dataUrl);
     input.value = "";
   }
 
@@ -154,6 +166,7 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
         address: draft.address,
         rewardTitle: draft.rewardTitle.trim() || undefined,
         rewardName: draft.rewardName.trim() || "Free reward",
+        rewardImageDataUrl: draft.rewardImageDataUrl,
         avgOrderValue: draft.avgOrderValue,
         totalStamps: 5,
       });
@@ -365,6 +378,53 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
                   placeholder="Free coffee"
                   onChange={(v) => update("rewardName", v)}
                 />
+                <div className="merchant-logo-field">
+                  <span className="auth-label">Reward image</span>
+                  <div className="merchant-logo-upload">
+                    <div className="merchant-logo-preview">
+                      {draft.rewardImageDataUrl ? (
+                        <Image
+                          src={draft.rewardImageDataUrl}
+                          alt="Reward"
+                          width={64}
+                          height={64}
+                          unoptimized
+                        />
+                      ) : (
+                        <ImagePlus size={22} strokeWidth={2} />
+                      )}
+                    </div>
+                    <div className="merchant-logo-actions">
+                      <button
+                        type="button"
+                        className="merchant-action-btn merchant-action-btn--reject"
+                        onClick={() => rewardImageInputRef.current?.click()}
+                      >
+                        {draft.rewardImageDataUrl ? "Replace" : "Upload"}
+                      </button>
+                      {draft.rewardImageDataUrl && (
+                        <button
+                          type="button"
+                          className="merchant-logo-remove"
+                          onClick={() => update("rewardImageDataUrl", undefined)}
+                          aria-label="Remove reward image"
+                        >
+                          <Trash2 size={16} strokeWidth={2.3} />
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      ref={rewardImageInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                      className="merchant-file-input"
+                      onChange={(event) => void handleRewardImageUpload(event)}
+                    />
+                  </div>
+                  <span className="merchant-field-hint">
+                    Optional — shown to customers when they claim the reward.
+                  </span>
+                </div>
                 <label className="auth-field">
                   <span className="auth-label">Order value (₹)</span>
                   <input

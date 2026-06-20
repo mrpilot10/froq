@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { MerchantCustomer, MerchantProfile, PendingApproval } from "@/lib/merchant/types";
 import { slugify, toCustomer, toMerchantProfile, toMerchantRowPatch } from "@/lib/merchant/mappers";
 import { parseRedeemCode } from "@/lib/merchant/parse-redeem-code";
+import { toCanonicalPhone } from "@/lib/auth/otp/phone";
 
 export interface MerchantStatsData {
   totalCustomers: number;
@@ -18,6 +19,7 @@ export interface MerchantStatsData {
 
 export type MerchantBundle =
   | { status: "unauthenticated" }
+  | { status: "error" }
   | { status: "not_registered" }
   | { status: "needs_setup" }
   | {
@@ -50,8 +52,10 @@ export async function getMerchantBundle(): Promise<MerchantBundle> {
   try {
     return await loadMerchantBundle();
   } catch {
-    // Network / config errors fall back to the login screen rather than crashing.
-    return { status: "unauthenticated" };
+    // Transient network/query errors must NOT look like a sign-out, otherwise a
+    // single failed realtime refresh would bounce the merchant to the login
+    // screen. Callers keep the last good state when they receive "error".
+    return { status: "error" };
   }
 }
 
@@ -128,6 +132,40 @@ async function loadMerchantBundle(): Promise<MerchantBundle> {
   return { status: "ready", profile, stats, customers, approvals };
 }
 
+/**
+ * Verifies a phone belongs to a Froq merchant (a registered store, or someone
+ * mid-onboarding) BEFORE we spend an SMS OTP on it. Customers and unknown
+ * numbers are rejected so the merchant login never texts non-merchants.
+ */
+export async function merchantExistsForPhone(
+  phone: string,
+): Promise<{ exists: boolean; error?: string }> {
+  try {
+    const canonical = toCanonicalPhone(phone);
+    if (!canonical) return { exists: false, error: "Enter a valid mobile number." };
+
+    const admin = createAdminClient();
+    const { data: userId } = await admin.rpc("auth_user_id_by_phone", { p_phone: canonical });
+    if (!userId) return { exists: false };
+
+    const { data: merchant } = await admin
+      .from("merchants")
+      .select("id")
+      .eq("owner_user_id", userId)
+      .maybeSingle();
+    if (merchant) return { exists: true };
+
+    // Paid via checkout but hasn't built their store yet — still a merchant.
+    const { data: userRes } = await admin.auth.admin.getUserById(userId as string);
+    if (userRes?.user?.app_metadata?.merchant_onboarding === true) return { exists: true };
+
+    return { exists: false };
+  } catch {
+    // On lookup failure, don't hard-block login — let the OTP flow proceed.
+    return { exists: true };
+  }
+}
+
 /** Called after checkout payment — allows this user to access the store setup wizard. */
 export async function markMerchantOnboarding(): Promise<{ ok: boolean; error?: string }> {
   try {
@@ -201,6 +239,7 @@ export async function createMerchant(input: {
   logoDataUrl?: string;
   rewardTitle?: string;
   rewardName: string;
+  rewardImageDataUrl?: string;
   avgOrderValue?: number;
   address?: string;
   // Optional override; a sensible default is derived when omitted.
@@ -230,6 +269,7 @@ export async function createMerchant(input: {
         address: input.address?.trim() || null,
         reward_title: input.rewardTitle?.trim() || "Free reward",
         reward_name: input.rewardName.trim() || "Free reward",
+        reward_image_url: input.rewardImageDataUrl ?? null,
         total_stamps: input.totalStamps ?? 5,
         avg_order_value: input.avgOrderValue ?? 0,
         email: user.email ?? null,

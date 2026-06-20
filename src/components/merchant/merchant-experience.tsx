@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import { LifeBuoy, QrCode } from "lucide-react";
 import { toast } from "sonner";
@@ -50,9 +50,13 @@ export function MerchantExperience({
   const [profile, setProfile] = useState<MerchantProfile>(initialProfile);
   const [qrOpen, setQrOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [, startTransition] = useTransition();
 
   useEffect(() => setProfile(initialProfile), [initialProfile]);
+
+  // Jump to the top (no animation) on tab switch so each page starts at its header.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [activeTab]);
 
   // Register the service worker and (re)subscribe to push if already allowed,
   // so approval alerts arrive even when the dashboard isn't focused.
@@ -96,12 +100,12 @@ export function MerchantExperience({
   );
 
   const handleApprove = useCallback(
-    (id: string) => startTransition(() => void run(() => approveStamp(id), "Stamp approved")),
+    (id: string) => run(() => approveStamp(id), "Stamp approved"),
     [run],
   );
 
   const handleDisapprove = useCallback(
-    (id: string) => startTransition(() => void run(() => rejectStamp(id))),
+    (id: string) => run(() => rejectStamp(id)),
     [run],
   );
 

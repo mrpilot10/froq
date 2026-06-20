@@ -128,6 +128,7 @@ export function MerchantProfileEditScreen({
   onSave,
 }: MerchantProfileEditScreenProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const rewardImageInputRef = useRef<HTMLInputElement>(null);
   const device = useDeviceSetup();
 
   const meta = section ? SECTION_META[section] : null;
@@ -142,6 +143,15 @@ export function MerchantProfileEditScreen({
     if (!file) return;
     const dataUrl = await fileToLogoDataUrl(file);
     updateField("logoDataUrl", dataUrl);
+    input.value = "";
+  }
+
+  async function handleRewardImageUpload(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.target;
+    const file = input.files?.[0];
+    if (!file) return;
+    const dataUrl = await fileToLogoDataUrl(file);
+    updateField("rewardImageDataUrl", dataUrl);
     input.value = "";
   }
 
@@ -299,6 +309,53 @@ export function MerchantProfileEditScreen({
               maxLength={FIELD_LIMITS.rewardName}
               onChange={(v) => updateField("rewardName", v)}
             />
+            <div className="merchant-logo-field">
+              <span className="auth-label">Reward image</span>
+              <div className="merchant-logo-upload">
+                <div className="merchant-logo-preview">
+                  {profile.rewardImageDataUrl ? (
+                    <Image
+                      src={profile.rewardImageDataUrl}
+                      alt="Reward"
+                      width={64}
+                      height={64}
+                      unoptimized
+                    />
+                  ) : (
+                    <ImagePlus size={22} strokeWidth={2} />
+                  )}
+                </div>
+                <div className="merchant-logo-actions">
+                  <button
+                    type="button"
+                    className="merchant-action-btn merchant-action-btn--reject"
+                    onClick={() => rewardImageInputRef.current?.click()}
+                  >
+                    {profile.rewardImageDataUrl ? "Replace" : "Upload"}
+                  </button>
+                  {profile.rewardImageDataUrl && (
+                    <button
+                      type="button"
+                      className="merchant-logo-remove"
+                      onClick={() => updateField("rewardImageDataUrl", undefined)}
+                      aria-label="Remove reward image"
+                    >
+                      <Trash2 size={16} strokeWidth={2.3} />
+                    </button>
+                  )}
+                </div>
+                <input
+                  ref={rewardImageInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="merchant-file-input"
+                  onChange={(event) => void handleRewardImageUpload(event)}
+                />
+              </div>
+              <span className="merchant-field-hint">
+                Shown to customers when they unlock and claim the reward.
+              </span>
+            </div>
             <label className="auth-field">
               <span className="auth-label">Stamps to reward</span>
               <input
