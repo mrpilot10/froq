@@ -5,12 +5,16 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, Check, CreditCard, Lock, Phone, Store } from "lucide-react";
+import { load } from "@cashfreepayments/cashfree-js";
 import { formatPhoneDisplay, isValidEmail, isValidPhone } from "@/lib/auth/format";
 import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/client";
 import { OtpInput } from "@/components/auth/otp-input";
 import { writeCheckoutAccount } from "@/lib/merchant/checkout";
 import { markMerchantOnboarding } from "@/app/merchant/actions";
 import { type PricingPlan } from "@/lib/merchant/pricing";
+
+const CASHFREE_MODE =
+  process.env.NEXT_PUBLIC_CASHFREE_ENV === "production" ? "production" : "sandbox";
 
 type Step = "account" | "otp" | "payment" | "loading";
 
@@ -30,15 +34,12 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
   const [resendIn, setResendIn] = useState(RESEND_SECONDS);
   const [loadingLabel, setLoadingLabel] = useState("Sending your code");
 
-  const completeCheckout = useCallback(async () => {
-    setLoadingLabel("Processing payment");
+  // After a confirmed payment: persist the account details to prefill the store
+  // builder, mark onboarding, then hand off to the merchant gate (setup wizard).
+  const finishOnboarding = useCallback(async () => {
+    setLoadingLabel("Setting up your account");
     setStep("loading");
-    // Demo payment placeholder — a real gateway call goes here later.
-    await new Promise((resolve) => setTimeout(resolve, 1400));
 
-    // The OTP step already created the Supabase session. Persist the account
-    // details to prefill the store builder, then hand off to the merchant gate,
-    // which will show the setup wizard (new merchant → no store yet).
     writeCheckoutAccount({
       planId: plan.id,
       businessName: businessName.trim(),
@@ -49,13 +50,65 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
 
     const marked = await markMerchantOnboarding();
     if (!marked.ok) {
-      setError(marked.error ?? "Could not complete checkout. Please try again.");
+      setError(marked.error ?? "Payment succeeded but setup failed. Please contact support.");
       setStep("payment");
       return;
     }
 
     router.replace("/merchant");
   }, [plan.id, businessName, ownerName, email, phone, router]);
+
+  const completeCheckout = useCallback(async () => {
+    setError("");
+    setLoadingLabel("Starting secure checkout");
+    setStep("loading");
+
+    try {
+      const orderRes = await fetch("/api/checkout/cashfree/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          planId: plan.id,
+          customerName: ownerName.trim(),
+          customerEmail: email.trim(),
+        }),
+      });
+      const orderData = await orderRes.json().catch(() => null);
+      if (!orderRes.ok || !orderData?.paymentSessionId) {
+        throw new Error(orderData?.error ?? "Could not start the payment.");
+      }
+
+      const cashfree = await load({ mode: CASHFREE_MODE });
+      const result = await cashfree.checkout({
+        paymentSessionId: orderData.paymentSessionId,
+        redirectTarget: "_modal",
+      });
+
+      if (result?.error) {
+        setError("Payment was cancelled or failed. Please try again.");
+        setStep("payment");
+        return;
+      }
+
+      setLoadingLabel("Confirming payment");
+      const verifyRes = await fetch("/api/checkout/cashfree/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: orderData.orderId }),
+      });
+      const verifyData = await verifyRes.json().catch(() => null);
+      if (!verifyRes.ok || !verifyData?.paid) {
+        setError("We couldn't confirm your payment. If you were charged, please contact support.");
+        setStep("payment");
+        return;
+      }
+
+      await finishOnboarding();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not complete the payment.");
+      setStep("payment");
+    }
+  }, [plan.id, ownerName, email, finishOnboarding]);
 
   const handleSendCode = useCallback(async () => {
     setError("");
@@ -311,7 +364,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                 </div>
 
                 <p className="checkout-pay-demo">
-                  Demo checkout — payment gateway will be connected later.
+                  You&apos;ll complete payment securely via Cashfree.
                 </p>
 
                 {error && (
