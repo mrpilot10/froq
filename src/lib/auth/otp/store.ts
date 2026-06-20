@@ -31,10 +31,10 @@ export async function countRecentRequests(phone: string): Promise<number> {
       .select("*", { count: "exact", head: true })
       .eq("phone", phone)
       .gte("created_at", since);
-    if (error) throw error;
+    if (error) return 0;
     return count ?? 0;
-  } catch (error) {
-    throw new Error(storeError(error));
+  } catch {
+    return 0;
   }
 }
 
@@ -49,10 +49,10 @@ export async function lastRequestAt(phone: string): Promise<number | null> {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (error) throw error;
+    if (error) return null;
     return data?.created_at ? new Date(data.created_at).getTime() : null;
-  } catch (error) {
-    throw new Error(storeError(error));
+  } catch {
+    return null;
   }
 }
 

@@ -62,7 +62,13 @@ export async function POST(request: Request) {
 
     const session = await establishPhoneSession(phone);
     if (!session.ok) {
-      return json({ ok: false, message: "Could not complete sign in. Please try again." }, 500);
+      const err = session.error ?? "";
+      const message = err.includes("auth_user_id_by_phone")
+        ? "Database migration missing. Run supabase/migrations/0004_otp.sql in Supabase SQL editor."
+        : err.includes("Phone provider")
+          ? "Enable Phone auth in Supabase → Authentication → Providers."
+          : "Could not complete sign in. Please try again.";
+      return json({ ok: false, message }, 500);
     }
 
     await clearOtps(phone);
@@ -72,6 +78,12 @@ export async function POST(request: Request) {
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     otpLog.error("verify_otp_unhandled", { reason });
-    return json({ ok: false, message: "Something went wrong. Please try again." }, 500);
+    const message =
+      reason.includes("OTP_HASH_SECRET")
+        ? "OTP_HASH_SECRET is not set on the server."
+        : reason.toLowerCase().includes("otp_codes") || reason.includes("auth_user_id_by_phone")
+          ? "Database migration missing. Run supabase/migrations/0004_otp.sql in Supabase."
+          : "Something went wrong. Please try again.";
+    return json({ ok: false, message }, 500);
   }
 }
