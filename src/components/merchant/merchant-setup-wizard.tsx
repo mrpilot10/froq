@@ -3,17 +3,14 @@
 import { useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowRight,
-  BarChart3,
   Check,
   Gift,
   ImagePlus,
   Palette,
   PartyPopper,
-  QrCode,
   Sparkles,
   Store,
   Trash2,
-  Zap,
 } from "lucide-react";
 import Image from "next/image";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
@@ -38,27 +35,11 @@ interface ShopDraft {
 
 type StepKind = "intro" | "store" | "color" | "reward" | "outro";
 
-const INTRO_BENEFITS: Array<{ Icon: typeof Gift; title: string; desc: string }> = [
-  {
-    Icon: Gift,
-    title: "Digital loyalty cards",
-    desc: "Reward repeat customers — no plastic punch cards.",
-  },
-  {
-    Icon: BarChart3,
-    title: "Lifetime value insights",
-    desc: "Track visits, active cards, and revenue trends.",
-  },
-  {
-    Icon: Zap,
-    title: "One-tap stamping",
-    desc: "Approve stamps and redeem rewards in seconds.",
-  },
-  {
-    Icon: QrCode,
-    title: "Your branded QR",
-    desc: "Customers join by scanning — no app to download.",
-  },
+const INTRO_BENEFITS = [
+  "Digital loyalty cards for repeat customers",
+  "Customer lifetime-value insights",
+  "One-tap stamping & approvals",
+  "Your own branded join QR",
 ];
 
 const STEPS: Array<{
@@ -182,6 +163,7 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
   }
 
   function handleSkip() {
+    if (submitting) return;
     void finish();
   }
 
@@ -207,30 +189,36 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
             </div>
           </div>
           {!isLast && (
-            <button type="button" className="wizard-skip" onClick={handleSkip}>
-              Skip
+            <button
+              type="button"
+              className="wizard-skip"
+              onClick={handleSkip}
+              disabled={submitting}
+            >
+              {submitting ? "Skipping…" : "Skip"}
             </button>
           )}
         </div>
 
         {isHero ? (
           <div className={`wizard-body${current.kind === "intro" ? " wizard-body--intro" : ""}`}>
-            <div className="wizard-icon-badge" key={step}>
-              <Icon size={44} strokeWidth={2} className={`wizard-icon ${current.anim ?? ""}`} />
-            </div>
+            {current.kind === "intro" ? (
+              <div className="wizard-logo-badge" key={step}>
+                <Image src="/froq-logo.png" alt="Froq" width={72} height={72} priority />
+              </div>
+            ) : (
+              <div className="wizard-icon-badge" key={step}>
+                <Icon size={44} strokeWidth={2} className={`wizard-icon ${current.anim ?? ""}`} />
+              </div>
+            )}
             <h1 className="wizard-title">{current.title}</h1>
             <p className="wizard-desc">{current.desc}</p>
             {current.kind === "intro" && (
               <ul className="wizard-benefits">
-                {INTRO_BENEFITS.map(({ Icon: BenefitIcon, title, desc }) => (
-                  <li key={title} className="wizard-benefit">
-                    <span className="wizard-benefit-icon" aria-hidden="true">
-                      <BenefitIcon size={18} strokeWidth={2.2} />
-                    </span>
-                    <span className="wizard-benefit-copy">
-                      <span className="wizard-benefit-title">{title}</span>
-                      <span className="wizard-benefit-desc">{desc}</span>
-                    </span>
+                {INTRO_BENEFITS.map((label) => (
+                  <li key={label} className="wizard-benefit">
+                    <Check size={15} strokeWidth={2.8} className="wizard-benefit-check" />
+                    <span>{label}</span>
                   </li>
                 ))}
               </ul>

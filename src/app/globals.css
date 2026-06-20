@@ -3545,7 +3545,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
-  padding: 20px 22px calc(28px + env(safe-area-inset-bottom));
+  padding: 10px 22px calc(14px + env(safe-area-inset-bottom));
 }
 
 .wizard-top {
@@ -3608,8 +3608,27 @@ body {
   align-items: center;
   justify-content: center;
   text-align: center;
-  gap: 18px;
-  padding: 12px 4px;
+  gap: 14px;
+  padding: 6px 4px;
+}
+
+.wizard-logo-badge {
+  width: 84px;
+  height: 84px;
+  border-radius: 24px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-deep);
+  box-shadow: 0 18px 40px -22px color-mix(in srgb, var(--brand-deep) 85%, black);
+  animation: wizardBadgeIn 0.5s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.wizard-logo-badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .wizard-icon-badge {
@@ -3802,8 +3821,8 @@ body {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 18px 2px 8px;
+  gap: 14px;
+  padding: 8px 2px 4px;
   animation: wizardFade 0.4s ease both;
 }
 
@@ -3884,89 +3903,40 @@ body {
   flex: none;
 }
 
-/* ===== Intro benefits ===== */
+/* ===== Intro benefits (minimal) ===== */
 .wizard-body--intro {
-  justify-content: flex-start;
-  padding-top: 22px;
+  justify-content: center;
   overflow-y: auto;
 }
 
 .wizard-benefits {
-  width: 100%;
   list-style: none;
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
+  text-align: left;
 }
 
 .wizard-benefit {
   display: flex;
-  align-items: flex-start;
-  gap: 13px;
-  text-align: left;
-  padding: 14px 16px;
-  border-radius: 16px;
-  background: var(--paper);
-  border: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
-  box-shadow: 0 12px 30px -26px rgba(0, 0, 0, 0.5);
-  animation: wizardFade 0.5s ease both;
-}
-
-.wizard-benefit:nth-child(1) {
-  animation-delay: 0.16s;
-}
-.wizard-benefit:nth-child(2) {
-  animation-delay: 0.24s;
-}
-.wizard-benefit:nth-child(3) {
-  animation-delay: 0.32s;
-}
-.wizard-benefit:nth-child(4) {
-  animation-delay: 0.4s;
-}
-
-.wizard-benefit-icon {
-  flex: none;
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  display: flex;
   align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--accent) 22%, var(--paper));
+  gap: 10px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--brand-deep) 80%, transparent);
+}
+
+.wizard-benefit-check {
+  flex: none;
   color: var(--brand-deep);
-}
-
-.wizard-benefit-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.wizard-benefit-title {
-  font-size: 0.94rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--brand-deep);
-}
-
-.wizard-benefit-desc {
-  font-size: 0.82rem;
-  line-height: 1.45;
-  color: color-mix(in srgb, var(--brand-deep) 62%, transparent);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .wizard-benefit {
-    animation: none !important;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .wizard-icon-badge,
   .wizard-icon-badge::after,
+  .wizard-logo-badge,
   .wizard-icon,
   .wizard-title,
   .wizard-desc {
