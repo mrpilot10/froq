@@ -1,7 +1,7 @@
 # Froq × Supabase setup
 
-This turns the demo into a real multi-tenant SaaS: Postgres + Auth (phone OTP) +
-Row-Level Security + Realtime + Storage.
+This turns the demo into a real multi-tenant SaaS: Postgres + Auth (phone, via
+APITxT SMS OTP) + Row-Level Security + Realtime + Storage.
 
 ## 1. Environment variables
 
@@ -12,6 +12,11 @@ NEXT_PUBLIC_SUPABASE_URL=https://<ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon public key>
 SUPABASE_SERVICE_ROLE_KEY=<service_role key>   # server-only, never shipped to the browser
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
+
+# APITxT SMS OTP (server-only)
+APITXT_AUTH_KEY=<your apitxt authkey>
+OTP_COUNTRY_CODE=91
+OTP_HASH_SECRET=<long random string — openssl rand -hex 32>
 ```
 
 On Vercel, add the same variables under **Project → Settings → Environment Variables**.
@@ -23,15 +28,29 @@ In the Supabase dashboard **SQL editor**, run these files in order:
 1. `migrations/0001_init.sql` — tables, RLS policies, stats view, triggers
 2. `migrations/0002_functions.sql` — transactional RPCs (`join_merchant`, `approve_stamp`, …)
 3. `migrations/0003_views.sql` — `customer_overview` read view
+4. `migrations/0004_otp.sql` — `otp_codes` table + `auth_user_id_by_phone` lookup RPC
 
 (Or with the CLI: `supabase link` then `supabase db push`.)
 
-## 3. Enable phone auth
+## 3. Auth: APITxT SMS OTP (not Supabase's built-in OTP)
 
-**Authentication → Providers → Phone**: enable it and connect an SMS provider
-(Twilio, MessageBird, Vonage, or Twilio Verify). Without a provider, OTP codes
-won't be delivered. For local testing you can use Twilio test credentials or
-enable the dashboard's test OTP.
+OTP delivery and verification are handled by the app, **not** Supabase's phone
+provider:
+
+- `POST /api/send-otp` generates a 6-digit code, HMAC-hashes it into `otp_codes`
+  with a 5-minute expiry, and sends it via the APITxT Unified OTP API (system
+  default SMS template). The APITxT `request_id` is stored for tracking.
+- `POST /api/verify-otp` validates the code against the stored hash/expiry, then
+  finds-or-creates the auth user for that phone and mints a Supabase session.
+
+Supabase config required:
+
+- **Authentication → Providers → Phone**: enable the phone provider so phone
+  users can exist and sign in. You do **not** need to configure an SMS provider
+  in Supabase — APITxT sends the messages. Disable "Confirm phone" / OTP expiry
+  concerns are moot since users are created with `phone_confirm: true`.
+- Rate limit: APITxT allows max 3 OTP requests per number per minute; the
+  `/api/send-otp` route enforces this plus a 30-second resend cooldown.
 
 ## 4. Create your first merchant owner
 

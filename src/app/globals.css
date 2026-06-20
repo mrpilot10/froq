@@ -3460,7 +3460,7 @@ body {
   width: 64px;
   height: 64px;
   border-radius: 20px;
-  background: var(--paper);
+  background: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3469,7 +3469,9 @@ body {
 }
 
 .merchant-auth-logo img {
-  object-fit: contain;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .merchant-auth-brand {
@@ -4357,6 +4359,272 @@ body {
 
 .landing-login-link:hover {
   opacity: 1;
+}
+
+.landing-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.landing-section-head {
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.landing-section-title {
+  margin: 10px 0 8px;
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--brand-deep, #004353);
+}
+
+.landing-section-sub {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--brand-deep, #004353) 58%, #ffffff);
+}
+
+.landing-pricing {
+  margin-bottom: 28px;
+}
+
+.landing-pricing-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.landing-plan-card {
+  position: relative;
+  padding: 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.landing-plan-card--featured {
+  border: 2px solid color-mix(in srgb, var(--accent, #00f47b) 70%, #ffffff);
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--accent, #00f47b) 18%, transparent);
+}
+
+.landing-plan-popular {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--brand-deep, #004353);
+  background: color-mix(in srgb, var(--accent, #00f47b) 40%, #ffffff);
+}
+
+.landing-plan-name {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 800;
+  color: var(--brand-deep, #004353);
+}
+
+.landing-plan-desc {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--brand-deep, #004353) 58%, #ffffff);
+}
+
+.landing-plan-price {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--brand-deep, #004353);
+}
+
+.landing-plan-price span {
+  font-size: 0.875rem;
+  font-weight: 600;
+  opacity: 0.65;
+}
+
+.landing-plan-features {
+  margin: 4px 0 8px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.landing-plan-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--brand-deep, #004353) 72%, #ffffff);
+}
+
+.landing-plan-features svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--brand-deep, #004353);
+}
+
+.landing-plan-cta {
+  margin-top: auto;
+  width: 100%;
+  text-decoration: none;
+  justify-content: center;
+}
+
+.landing-plan-cta--ghost {
+  background: color-mix(in srgb, var(--brand-deep, #004353) 8%, #ffffff);
+  color: var(--brand-deep, #004353);
+}
+
+/* Checkout */
+.checkout-page {
+  min-height: 100dvh;
+  background: var(--page-gradient, linear-gradient(180deg, #e8fff3 0%, #f7faf9 45%, #ffffff 100%));
+}
+
+.checkout-screen {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 20px 20px 40px;
+}
+
+.checkout-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+
+.checkout-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--brand-deep, #004353);
+  opacity: 0.72;
+  text-decoration: none;
+}
+
+.checkout-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+  color: var(--brand-deep, #004353);
+}
+
+.checkout-layout {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 768px) {
+  .checkout-layout {
+    grid-template-columns: minmax(240px, 300px) 1fr;
+    align-items: start;
+  }
+
+  .landing-pricing-grid {
+    grid-template-columns: repeat(3, 1fr);
+    align-items: stretch;
+  }
+}
+
+.checkout-summary {
+  padding: 20px 18px;
+}
+
+.checkout-summary-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--brand-deep, #004353) 50%, #ffffff);
+}
+
+.checkout-summary-plan {
+  margin: 8px 0 4px;
+  font-size: 1.375rem;
+  font-weight: 800;
+  color: var(--brand-deep, #004353);
+}
+
+.checkout-summary-price {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--brand-deep, #004353);
+}
+
+.checkout-summary-price span {
+  font-size: 0.875rem;
+  font-weight: 600;
+  opacity: 0.65;
+}
+
+.checkout-summary-features {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.checkout-summary-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--brand-deep, #004353) 68%, #ffffff);
+}
+
+.checkout-summary-note {
+  margin: 16px 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--brand-deep, #004353) 50%, #ffffff);
+}
+
+.checkout-card {
+  margin: 0;
+}
+
+.checkout-pay-box {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--brand-deep, #004353) 6%, #ffffff);
+  margin-bottom: 12px;
+}
+
+.checkout-pay-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.9375rem;
+  color: var(--brand-deep, #004353);
+}
+
+.checkout-pay-row + .checkout-pay-row {
+  margin-top: 8px;
+}
+
+.checkout-pay-row--muted {
+  font-size: 0.8125rem;
+  opacity: 0.65;
+}
+
+.checkout-pay-demo {
+  margin: 0 0 14px;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--brand-deep, #004353) 52%, #ffffff);
 }
 
 .landing-hero {

@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, BarChart3, QrCode, Stamp, Users } from "lucide-react";
+import { PricingTable } from "./pricing-table";
 
 const FEATURES = [
   {
@@ -34,9 +35,14 @@ export function LandingPage() {
             <Image src="/froq-logo.png" alt="Froq" width={36} height={36} priority />
             <span className="landing-brand-name">Froq</span>
           </div>
-          <Link href="/merchant" className="landing-login-link">
-            Business log in
-          </Link>
+          <div className="landing-header-actions">
+            <Link href="#pricing" className="landing-login-link">
+              Pricing
+            </Link>
+            <Link href="/merchant" className="landing-login-link">
+              Log in
+            </Link>
+          </div>
         </header>
 
         <section className="landing-hero">
@@ -48,14 +54,16 @@ export function LandingPage() {
             Run stamps, rewards, and approvals from one dashboard. Track lifetime value,
             approve stamps on the go, and grow repeat visits.
           </p>
-          <Link href="/merchant" className="cta-btn merchant-cta-accent landing-hero-cta">
-            Open business dashboard
+          <Link href="#pricing" className="cta-btn merchant-cta-accent landing-hero-cta">
+            View plans
             <ArrowRight size={17} strokeWidth={2.4} />
           </Link>
           <p className="landing-hero-note">
-            Customers join by scanning your shop&apos;s QR code at checkout.
+            New accounts are created at checkout · Store setup starts after payment.
           </p>
         </section>
+
+        <PricingTable />
 
         <section className="landing-features">
           {FEATURES.map(({ Icon, title, desc }) => (
@@ -71,7 +79,7 @@ export function LandingPage() {
 
         <section className="landing-cta-block">
           <div className="panel-card landing-cta-card">
-            <h2 className="landing-cta-title">Ready to run loyalty on Froq?</h2>
+            <h2 className="landing-cta-title">Already on Froq?</h2>
             <p className="landing-cta-sub">
               Log in with your registered business number to manage your store.
             </p>

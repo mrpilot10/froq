@@ -6,11 +6,10 @@ import Image from "next/image";
 import { ArrowLeft, Gift, Phone, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { formatPhoneDisplay, isValidPhone } from "@/lib/auth/format";
+import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/client";
 import { checkShopMembership, joinMerchant } from "@/app/actions/customer";
 import { createClient } from "@/lib/supabase/client";
 import { OtpInput } from "@/components/auth/otp-input";
-
-const OTP_LENGTH = 6;
 
 type Step = "checking" | "phone" | "otp" | "details" | "joining";
 
@@ -42,6 +41,7 @@ export function JoinScreen({
   const [authedPhone, setAuthedPhone] = useState("");
   const [error, setError] = useState("");
   const [isReturningMember, setIsReturningMember] = useState(false);
+  const [resendIn, setResendIn] = useState(RESEND_SECONDS);
 
   const e164 = authedPhone || `+91${phone}`;
 
@@ -82,32 +82,31 @@ export function JoinScreen({
     }
     setError("");
     setStep("checking");
-    const { error: otpError } = await supabase.auth.signInWithOtp({ phone: `+91${phone}` });
-    if (otpError) {
-      setError(otpError.message);
+    const res = await sendOtp(phone);
+    if (!res.ok) {
+      setError(res.message);
       setStep("phone");
       return;
     }
+    setResendIn(RESEND_SECONDS);
     setStep("otp");
-  }, [phone, supabase]);
+  }, [phone]);
 
   const verify = useCallback(async () => {
-    if (otp.length !== OTP_LENGTH) return;
+    if (otp.length !== OTP_LENGTH) {
+      setError("Enter the 6-digit code we sent you.");
+      return;
+    }
     setError("");
     setStep("checking");
-    const { data, error: verifyError } = await supabase.auth.verifyOtp({
-      phone: `+91${phone}`,
-      token: otp,
-      type: "sms",
-    });
-    if (verifyError) {
-      setError(verifyError.message);
+    const res = await verifyOtp(phone, otp);
+    if (!res.ok) {
+      setError(res.message);
       setStep("otp");
       return;
     }
 
-    const verifiedPhone = data.user?.phone ? `+${data.user.phone}` : `+91${phone}`;
-    setAuthedPhone(verifiedPhone);
+    setAuthedPhone(`+91${phone}`);
 
     const membership = await checkShopMembership(slug);
     if (membership.isMember) {
@@ -116,7 +115,15 @@ export function JoinScreen({
     }
 
     setStep("details");
-  }, [otp, phone, supabase, slug, router]);
+  }, [otp, phone, slug, router]);
+
+  useEffect(() => {
+    if (step !== "otp" || resendIn <= 0) return;
+    const timer = window.setInterval(() => {
+      setResendIn((current) => Math.max(0, current - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [step, resendIn]);
 
   const join = useCallback(async () => {
     if (!name.trim()) {
@@ -240,6 +247,15 @@ export function JoinScreen({
               >
                 Verify &amp; continue
               </button>
+              <p className="auth-resend">
+                {resendIn > 0 ? (
+                  <>Resend code in {resendIn}s</>
+                ) : (
+                  <button type="button" className="auth-link" onClick={sendCode}>
+                    Resend code
+                  </button>
+                )}
+              </p>
             </>
           )}
 

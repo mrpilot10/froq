@@ -15,9 +15,12 @@ import {
 import Image from "next/image";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
 import { createMerchant } from "@/app/merchant/actions";
+import type { CheckoutAccount } from "@/lib/merchant/checkout";
+import { readMerchantSession, writeMerchantSession } from "@/lib/merchant/session";
 
 interface MerchantSetupWizardProps {
   onComplete: () => void | Promise<void>;
+  checkoutAccount?: CheckoutAccount | null;
 }
 
 interface ShopDraft {
@@ -75,11 +78,11 @@ const STEPS: Array<{
   },
 ];
 
-export function MerchantSetupWizard({ onComplete }: MerchantSetupWizardProps) {
+export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSetupWizardProps) {
   const [step, setStep] = useState(0);
-  const [draft, setDraft] = useState<ShopDraft>({
-    businessName: "",
-    shortName: "",
+  const [draft, setDraft] = useState<ShopDraft>(() => ({
+    businessName: checkoutAccount?.businessName ?? "",
+    shortName: checkoutAccount?.businessName ?? "",
     address: "",
     brandColor: BRAND_COLORS[0].value,
     logoDataUrl: undefined,
@@ -87,7 +90,7 @@ export function MerchantSetupWizard({ onComplete }: MerchantSetupWizardProps) {
     rewardName: "",
     totalStamps: 5,
     avgOrderValue: 200,
-  });
+  }));
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -119,7 +122,7 @@ export function MerchantSetupWizard({ onComplete }: MerchantSetupWizardProps) {
   async function finish() {
     setSubmitting(true);
     setError("");
-    const name = draft.businessName.trim() || "My Shop";
+    const name = draft.businessName.trim() || checkoutAccount?.businessName || "My Shop";
     const res = await createMerchant({
       businessName: name,
       shortName: draft.shortName.trim() || name,
@@ -129,11 +132,29 @@ export function MerchantSetupWizard({ onComplete }: MerchantSetupWizardProps) {
       totalStamps: draft.totalStamps,
       avgOrderValue: draft.avgOrderValue,
     });
-    setSubmitting(false);
+
     if (!res.ok) {
-      setError(res.error ?? "Could not create your store. Please try again.");
-      return;
+      const session = readMerchantSession();
+      writeMerchantSession({
+        ...session,
+        profile: {
+          ...session.profile,
+          businessName: name,
+          shortName: draft.shortName.trim() || name,
+          address: draft.address.trim(),
+          brandColor: draft.brandColor,
+          logoDataUrl: draft.logoDataUrl,
+          email: checkoutAccount?.email ?? session.profile.email,
+          phone: checkoutAccount?.phone ?? session.profile.phone,
+          rewardTitle: draft.rewardTitle.trim() || session.profile.rewardTitle,
+          rewardName: draft.rewardName.trim() || session.profile.rewardName,
+          totalStamps: draft.totalStamps,
+          avgOrderValue: draft.avgOrderValue,
+        },
+      });
     }
+
+    setSubmitting(false);
     await onComplete();
   }
 
