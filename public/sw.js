@@ -8,6 +8,10 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+// A (pass-through) fetch handler is required for Chrome/Android to treat the app
+// as installable and fire beforeinstallprompt.
+self.addEventListener("fetch", () => {});
+
 self.addEventListener("push", (event) => {
   let data = {};
   try {

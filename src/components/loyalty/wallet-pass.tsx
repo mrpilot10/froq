@@ -75,11 +75,7 @@ export function WalletPass({
         <div className="pass-bottom">
           <div>
             <div className="pass-bottom-label">Progress</div>
-            <StampProgressLabel
-              filled={filled}
-              total={business.totalStamps}
-              pending={pending}
-            />
+            <StampProgressLabel filled={filled} total={business.totalStamps} />
           </div>
           <div className="pass-bottom-r">
             <div className="pass-reward-caption">

@@ -4,13 +4,17 @@ import { useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowRight,
   Check,
+  CreditCard,
   Gift,
   ImagePlus,
   Palette,
   PartyPopper,
+  QrCode,
   Sparkles,
   Store,
   Trash2,
+  TrendingUp,
+  Zap,
 } from "lucide-react";
 import Image from "next/image";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
@@ -35,11 +39,27 @@ interface ShopDraft {
 
 type StepKind = "intro" | "store" | "color" | "reward" | "outro";
 
-const INTRO_BENEFITS = [
-  "Digital loyalty cards for repeat customers",
-  "Customer lifetime-value insights",
-  "One-tap stamping & approvals",
-  "Your own branded join QR",
+const INTRO_FEATURES: Array<{ Icon: typeof Sparkles; title: string; desc: string }> = [
+  {
+    Icon: CreditCard,
+    title: "Digital loyalty cards",
+    desc: "Turn first-time buyers into regulars.",
+  },
+  {
+    Icon: TrendingUp,
+    title: "Lifetime-value insights",
+    desc: "See what every customer is really worth.",
+  },
+  {
+    Icon: Zap,
+    title: "One-tap stamping",
+    desc: "Approve stamps and rewards instantly.",
+  },
+  {
+    Icon: QrCode,
+    title: "Your own branded QR",
+    desc: "Customers join in just a few seconds.",
+  },
 ];
 
 const STEPS: Array<{
@@ -200,11 +220,16 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
             <h1 className="wizard-title">{current.title}</h1>
             <p className="wizard-desc">{current.desc}</p>
             {current.kind === "intro" && (
-              <ul className="wizard-benefits">
-                {INTRO_BENEFITS.map((label) => (
-                  <li key={label} className="wizard-benefit">
-                    <Check size={15} strokeWidth={2.8} className="wizard-benefit-check" />
-                    <span>{label}</span>
+              <ul className="wizard-features">
+                {INTRO_FEATURES.map(({ Icon: FeatureIcon, title, desc }) => (
+                  <li key={title} className="wizard-feature">
+                    <span className="wizard-feature-icon">
+                      <FeatureIcon size={18} strokeWidth={2.2} />
+                    </span>
+                    <span className="wizard-feature-copy">
+                      <span className="wizard-feature-title">{title}</span>
+                      <span className="wizard-feature-desc">{desc}</span>
+                    </span>
                   </li>
                 ))}
               </ul>

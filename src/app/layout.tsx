@@ -41,6 +41,35 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${plusJakarta.variable} h-full`}>
+      <head>
+        {/*
+          Capture beforeinstallprompt as early as possible. On Android Chrome this
+          event often fires before React mounts its listeners, so without this the
+          native install prompt is lost and we fall back to manual steps.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.__froqInstallPrompt = null;
+              window.addEventListener('beforeinstallprompt', function (e) {
+                e.preventDefault();
+                window.__froqInstallPrompt = e;
+                window.dispatchEvent(new Event('froq:installprompt'));
+              });
+              window.addEventListener('appinstalled', function () {
+                window.__froqInstallPrompt = null;
+              });
+              // Register the service worker on load so Android treats the app as
+              // installable (otherwise beforeinstallprompt never fires).
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function () {
+                  navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
+                });
+              }
+            `,
+          }}
+        />
+      </head>
       <body className="min-h-full antialiased">
         {children}
         <Toaster position="top-center" richColors />

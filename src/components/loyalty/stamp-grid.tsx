@@ -100,22 +100,12 @@ export function StampGrid({
 export function StampProgressLabel({
   filled,
   total,
-  pending,
 }: {
   filled: number;
   total: number;
-  pending?: boolean;
 }) {
   if (filled >= total) {
     return <span className="pass-bottom-value celebrate">Reward ready 🎉</span>;
-  }
-
-  if (pending) {
-    return (
-      <span className="pass-bottom-value">
-        {filled} / {total} Collected · Pending
-      </span>
-    );
   }
 
   return (

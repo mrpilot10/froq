@@ -690,10 +690,6 @@ body {
   vertical-align: middle;
 }
 
-.froq-footer-logo--lead {
-  opacity: 0.85;
-}
-
 .footer b {
   color: var(--ink-soft);
   font-weight: 700;
@@ -1998,14 +1994,40 @@ body {
   opacity: 0.75;
 }
 
+.auth-otp {
+  position: relative;
+  margin: 4px 0 18px;
+}
+
+/* Real input sits transparently over the boxes so a single tap focuses it and
+   iOS one-time-code auto-fill targets one field. */
+.auth-otp-field {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font-size: 16px; /* >=16px avoids iOS zoom-on-focus */
+  text-align: center;
+  outline: none;
+  opacity: 0;
+  z-index: 2;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .auth-otp-row {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
-  margin: 4px 0 18px;
 }
 
 .auth-otp-digit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   aspect-ratio: 1;
   border: 1.5px solid var(--line);
@@ -2016,7 +2038,6 @@ body {
   font-size: 20px;
   font-weight: 800;
   text-align: center;
-  outline: none;
   transition:
     border-color 0.2s ease,
     background 0.2s ease,
@@ -2024,11 +2045,31 @@ body {
     transform 0.15s ease;
 }
 
-.auth-otp-digit:focus {
+.auth-otp-digit.is-filled {
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--line));
+  background: var(--paper);
+}
+
+.auth-otp-digit.is-active {
   border-color: color-mix(in srgb, var(--brand) 55%, var(--line));
   background: var(--paper);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 12%, transparent);
   transform: scale(1.03);
+}
+
+.auth-otp-digit.is-active::after {
+  content: "";
+  width: 2px;
+  height: 22px;
+  border-radius: 2px;
+  background: var(--brand);
+  animation: otpCaret 1s steps(1) infinite;
+}
+
+@keyframes otpCaret {
+  50% {
+    opacity: 0;
+  }
 }
 
 .auth-loading {
@@ -3264,26 +3305,69 @@ body {
   line-height: 1.45;
 }
 
-.merchant-install-steps-list {
+.install-steps {
+  list-style: none;
   margin: 0;
-  padding-left: 20px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  font-size: 13px;
+  gap: 12px;
+}
+
+.install-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.install-step-num {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--accent);
+  background: var(--brand);
+  box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--brand) 70%, transparent);
+}
+
+.install-step-text {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+  font-size: 13.5px;
   font-weight: 500;
   line-height: 1.5;
   color: var(--ink-soft);
 }
 
-.merchant-install-steps-list strong {
+.install-step-text strong {
   font-weight: 700;
   color: var(--ink);
 }
 
-.merchant-install-step-icon {
-  display: inline;
-  vertical-align: -2px;
+.install-step-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  margin: 0 1px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--brand-deep);
+  background: color-mix(in srgb, var(--brand) 14%, var(--card, #fff));
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.install-step-chip svg {
   color: var(--brand);
 }
 
@@ -4330,34 +4414,90 @@ body {
   flex: none;
 }
 
-/* ===== Intro benefits (minimal) ===== */
+/* ===== Intro feature cards ===== */
 .wizard-body--intro {
   justify-content: center;
   overflow-y: auto;
 }
 
-.wizard-benefits {
+.wizard-features {
   list-style: none;
-  margin: 4px 0 0;
+  margin: 8px 0 0;
   padding: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 8px;
   text-align: left;
 }
 
-.wizard-benefit {
+.wizard-feature {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: color-mix(in srgb, var(--brand-deep) 80%, transparent);
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--paper);
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+  box-shadow: 0 10px 26px -22px color-mix(in srgb, var(--brand-deep) 80%, black);
+  animation: wizardFeatureIn 0.45s cubic-bezier(0.2, 0.9, 0.25, 1) both;
 }
 
-.wizard-benefit-check {
+.wizard-feature:nth-child(1) {
+  animation-delay: 0.2s;
+}
+.wizard-feature:nth-child(2) {
+  animation-delay: 0.28s;
+}
+.wizard-feature:nth-child(3) {
+  animation-delay: 0.36s;
+}
+.wizard-feature:nth-child(4) {
+  animation-delay: 0.44s;
+}
+
+@keyframes wizardFeatureIn {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.wizard-feature-icon {
   flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: var(--brand-deep);
+  background: var(--accent);
+}
+
+.wizard-feature-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.wizard-feature-title {
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--brand-deep);
+}
+
+.wizard-feature-desc {
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--brand-deep) 60%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4366,7 +4506,8 @@ body {
   .wizard-logo-badge,
   .wizard-icon,
   .wizard-title,
-  .wizard-desc {
+  .wizard-desc,
+  .wizard-feature {
     animation: none !important;
   }
 }

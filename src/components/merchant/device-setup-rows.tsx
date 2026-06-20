@@ -10,6 +10,12 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
+declare global {
+  interface Window {
+    __froqInstallPrompt?: BeforeInstallPromptEvent | null;
+  }
+}
+
 export function detectInstalled() {
   if (typeof window === "undefined") return false;
   const standalone = window.matchMedia?.("(display-mode: standalone)").matches;
@@ -61,19 +67,36 @@ export function useDeviceSetup(): DeviceSetupState {
   const [stepsOpen, setStepsOpen] = useState(false);
 
   useEffect(() => {
-    const notifSupported = typeof window !== "undefined" && "Notification" in window;
-    const currentNotif = notifSupported ? Notification.permission : "unsupported";
-    const isInstalled = detectInstalled();
     const ios = detectIOS();
-
-    // On iOS the Notification API only exists inside the installed PWA, so an
-    // un-installed Safari tab reporting "unsupported" really means "install first".
-    setNotifState(ios && !isInstalled ? "default" : currentNotif);
-    setInstalled(isInstalled);
     setIsIOS(ios);
     setIosSafari(detectIOSSafari());
+
+    // Re-evaluate install + notification state. Runs on mount and whenever the
+    // user returns to the tab, so the prompt/top bar reflects a freshly installed
+    // PWA or a permission change made elsewhere (e.g. in browser settings).
+    const recheck = () => {
+      const notifSupported = typeof window !== "undefined" && "Notification" in window;
+      const currentNotif = notifSupported ? Notification.permission : "unsupported";
+      const isInstalled = detectInstalled();
+      // On iOS the Notification API only exists inside the installed PWA, so an
+      // un-installed Safari tab reporting "unsupported" really means "install first".
+      setNotifState(ios && !isInstalled ? "default" : currentNotif);
+      setInstalled(isInstalled);
+    };
+
+    recheck();
     // iOS has no install prompt API — surface the Add to Home Screen steps directly.
-    if (ios && !isInstalled) setStepsOpen(true);
+    if (ios && !detectInstalled()) setStepsOpen(true);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") recheck();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", recheck);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", recheck);
+    };
   }, []);
 
   // Best-effort: on Chromium, detect an already-installed PWA even from a tab.
@@ -91,19 +114,29 @@ export function useDeviceSetup(): DeviceSetupState {
   }, []);
 
   useEffect(() => {
+    // The early-capture script in the document head may have already stored the
+    // prompt before React mounted, so pick it up immediately.
+    if (window.__froqInstallPrompt) setInstallEvent(window.__froqInstallPrompt);
+
     const handleBeforeInstall = (event: Event) => {
       event.preventDefault();
       setInstallEvent(event as BeforeInstallPromptEvent);
     };
+    const handleEarlyPrompt = () => {
+      if (window.__froqInstallPrompt) setInstallEvent(window.__froqInstallPrompt);
+    };
     const handleInstalled = () => {
       setInstalled(true);
       setInstallEvent(null);
+      window.__froqInstallPrompt = null;
     };
 
     window.addEventListener("beforeinstallprompt", handleBeforeInstall);
+    window.addEventListener("froq:installprompt", handleEarlyPrompt);
     window.addEventListener("appinstalled", handleInstalled);
     return () => {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
+      window.removeEventListener("froq:installprompt", handleEarlyPrompt);
       window.removeEventListener("appinstalled", handleInstalled);
     };
   }, []);
@@ -159,6 +192,7 @@ export function useDeviceSetup(): DeviceSetupState {
       const choice = await installEvent.userChoice;
       if (choice.outcome === "accepted") setInstalled(true);
       setInstallEvent(null);
+      window.__froqInstallPrompt = null;
       return;
     }
     // No native prompt (iOS / unsupported) — reveal the manual steps.
@@ -268,7 +302,7 @@ export function DeviceSetupRows({ state }: { state: DeviceSetupState }) {
       {!installed && stepsOpen && (
         <div className="merchant-install-steps">
           <div className="merchant-install-steps-title">
-            {isIOS ? "Install Froq on your iPhone" : "Install Froq"}
+            {isIOS ? "Add Froq to your Home Screen" : "Install Froq"}
           </div>
           {isIOS && !iosSafari && (
             <p className="merchant-install-steps-note">
@@ -276,30 +310,54 @@ export function DeviceSetupRows({ state }: { state: DeviceSetupState }) {
               can&apos;t install web apps or receive notifications.
             </p>
           )}
-          <ol className="merchant-install-steps-list">
+          <ol className="install-steps">
             {isIOS ? (
               <>
-                <li>
-                  Tap the{" "}
-                  <Share size={14} strokeWidth={2.4} className="merchant-install-step-icon" />{" "}
-                  <strong>Share</strong> button in Safari.
+                <li className="install-step">
+                  <span className="install-step-num">1</span>
+                  <span className="install-step-text">
+                    Tap the{" "}
+                    <span className="install-step-chip">
+                      <Share size={13} strokeWidth={2.4} />
+                      Share
+                    </span>{" "}
+                    button in Safari&apos;s toolbar.
+                  </span>
                 </li>
-                <li>
-                  Choose{" "}
-                  <SquarePlus size={14} strokeWidth={2.4} className="merchant-install-step-icon" />{" "}
-                  <strong>Add to Home Screen</strong>.
+                <li className="install-step">
+                  <span className="install-step-num">2</span>
+                  <span className="install-step-text">
+                    Scroll down and choose{" "}
+                    <span className="install-step-chip">
+                      <SquarePlus size={13} strokeWidth={2.4} />
+                      Add to Home Screen
+                    </span>
+                    .
+                  </span>
                 </li>
-                <li>
-                  Tap <strong>Add</strong> in the top corner.
+                <li className="install-step">
+                  <span className="install-step-num">3</span>
+                  <span className="install-step-text">
+                    Tap <strong>Add</strong>, then open Froq from your Home Screen.
+                  </span>
                 </li>
               </>
             ) : (
               <>
-                <li>Open your browser menu.</li>
-                <li>
-                  Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.
+                <li className="install-step">
+                  <span className="install-step-num">1</span>
+                  <span className="install-step-text">Open your browser menu.</span>
                 </li>
-                <li>Confirm to install.</li>
+                <li className="install-step">
+                  <span className="install-step-num">2</span>
+                  <span className="install-step-text">
+                    Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.
+                  </span>
+                </li>
+                <li className="install-step">
+                  <span className="install-step-num">3</span>
+                  <span className="install-step-text">Confirm to install.</span>
+                </li>
               </>
             )}
           </ol>

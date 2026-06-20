@@ -149,6 +149,11 @@ export const BRAND_COLORS: Array<{ name: string; value: string }> = [
   { name: "Cocoa", value: "#6b4a37" },
   { name: "Mustard", value: "#a8812e" },
   { name: "Charcoal", value: "#2f3438" },
+  { name: "Sage", value: "#6fae90" },
+  { name: "Sky", value: "#6f9cc4" },
+  { name: "Lavender", value: "#9087c6" },
+  { name: "Rose", value: "#c67f8c" },
+  { name: "Sand", value: "#cf9f5e" },
 ];
 
 export const FIELD_LIMITS = {
