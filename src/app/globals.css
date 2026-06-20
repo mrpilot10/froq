@@ -1718,6 +1718,39 @@ body {
   flex: 1;
 }
 
+.auth-phone-row--readonly .auth-input-phone {
+  opacity: 0.85;
+  cursor: default;
+  background: color-mix(in srgb, var(--brand) 6%, var(--paper));
+}
+
+.auth-input-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 16px;
+  border: 1.5px solid var(--line);
+  background: var(--paper);
+  padding: 0 14px;
+}
+
+.auth-input-with-icon .auth-input {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding-left: 0;
+  flex: 1;
+}
+
+.auth-input-with-icon:focus-within {
+  border-color: color-mix(in srgb, var(--brand) 40%, var(--line));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
+.auth-sub--inline {
+  line-height: 1.55;
+}
+
 .auth-error {
   margin: -2px 0 14px;
   font-size: 13px;
@@ -3517,9 +3550,23 @@ body {
 
 .wizard-top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   padding-top: 8px;
+}
+
+.wizard-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wizard-step-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--brand-deep) 50%, transparent);
 }
 
 .wizard-dots {
@@ -3835,6 +3882,86 @@ body {
   height: 16px;
   border-radius: 6px;
   flex: none;
+}
+
+/* ===== Intro benefits ===== */
+.wizard-body--intro {
+  justify-content: flex-start;
+  padding-top: 22px;
+  overflow-y: auto;
+}
+
+.wizard-benefits {
+  width: 100%;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wizard-benefit {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--paper);
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+  box-shadow: 0 12px 30px -26px rgba(0, 0, 0, 0.5);
+  animation: wizardFade 0.5s ease both;
+}
+
+.wizard-benefit:nth-child(1) {
+  animation-delay: 0.16s;
+}
+.wizard-benefit:nth-child(2) {
+  animation-delay: 0.24s;
+}
+.wizard-benefit:nth-child(3) {
+  animation-delay: 0.32s;
+}
+.wizard-benefit:nth-child(4) {
+  animation-delay: 0.4s;
+}
+
+.wizard-benefit-icon {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent) 22%, var(--paper));
+  color: var(--brand-deep);
+}
+
+.wizard-benefit-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wizard-benefit-title {
+  font-size: 0.94rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--brand-deep);
+}
+
+.wizard-benefit-desc {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--brand-deep) 62%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wizard-benefit {
+    animation: none !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

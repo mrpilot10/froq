@@ -3,14 +3,17 @@
 import { useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowRight,
+  BarChart3,
   Check,
   Gift,
   ImagePlus,
   Palette,
   PartyPopper,
+  QrCode,
   Sparkles,
   Store,
   Trash2,
+  Zap,
 } from "lucide-react";
 import Image from "next/image";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
@@ -34,6 +37,29 @@ interface ShopDraft {
 
 type StepKind = "intro" | "store" | "color" | "reward" | "outro";
 
+const INTRO_BENEFITS: Array<{ Icon: typeof Gift; title: string; desc: string }> = [
+  {
+    Icon: Gift,
+    title: "Digital loyalty cards",
+    desc: "Reward repeat customers — no plastic punch cards.",
+  },
+  {
+    Icon: BarChart3,
+    title: "Lifetime value insights",
+    desc: "Track visits, active cards, and revenue trends.",
+  },
+  {
+    Icon: Zap,
+    title: "One-tap stamping",
+    desc: "Approve stamps and redeem rewards in seconds.",
+  },
+  {
+    Icon: QrCode,
+    title: "Your branded QR",
+    desc: "Customers join by scanning — no app to download.",
+  },
+];
+
 const STEPS: Array<{
   kind: StepKind;
   Icon: typeof Sparkles;
@@ -46,7 +72,7 @@ const STEPS: Array<{
     Icon: Sparkles,
     anim: "wizard-anim-pop",
     title: "Welcome to Froq",
-    desc: "Let's set up your shop in a few quick steps.",
+    desc: "Everything you need to turn first-time buyers into regulars. Set up your shop in a few quick steps.",
   },
   {
     kind: "store",
@@ -164,15 +190,20 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
     <div className="merchant-page merchant-theme">
       <div className="merchant-screen wizard-screen">
         <div className="wizard-top">
-          <div className="wizard-dots" aria-hidden="true">
-            {STEPS.map((_, index) => (
-              <span
-                key={index}
-                className={`wizard-dot${index === step ? " active" : ""}${
-                  index < step ? " done" : ""
-                }`}
-              />
-            ))}
+          <div className="wizard-progress">
+            <span className="wizard-step-count">
+              Step {step + 1} of {STEPS.length}
+            </span>
+            <div className="wizard-dots" aria-hidden="true">
+              {STEPS.map((_, index) => (
+                <span
+                  key={index}
+                  className={`wizard-dot${index === step ? " active" : ""}${
+                    index < step ? " done" : ""
+                  }`}
+                />
+              ))}
+            </div>
           </div>
           {!isLast && (
             <button type="button" className="wizard-skip" onClick={handleSkip}>
@@ -182,12 +213,27 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
         </div>
 
         {isHero ? (
-          <div className="wizard-body">
+          <div className={`wizard-body${current.kind === "intro" ? " wizard-body--intro" : ""}`}>
             <div className="wizard-icon-badge" key={step}>
               <Icon size={44} strokeWidth={2} className={`wizard-icon ${current.anim ?? ""}`} />
             </div>
             <h1 className="wizard-title">{current.title}</h1>
             <p className="wizard-desc">{current.desc}</p>
+            {current.kind === "intro" && (
+              <ul className="wizard-benefits">
+                {INTRO_BENEFITS.map(({ Icon: BenefitIcon, title, desc }) => (
+                  <li key={title} className="wizard-benefit">
+                    <span className="wizard-benefit-icon" aria-hidden="true">
+                      <BenefitIcon size={18} strokeWidth={2.2} />
+                    </span>
+                    <span className="wizard-benefit-copy">
+                      <span className="wizard-benefit-title">{title}</span>
+                      <span className="wizard-benefit-desc">{desc}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
             {current.kind === "outro" && (
               <div className="wizard-summary">
                 <SummaryRow label="Store" value={draft.businessName.trim() || "—"} />

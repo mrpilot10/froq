@@ -8,7 +8,7 @@ import type { MerchantCustomer, MerchantEditSection, MerchantProfile, MerchantTa
 import {
   approveStamp,
   deleteCustomer,
-  redeemReward,
+  redeemRewardByCode,
   rejectStamp,
   setCustomerBanned,
   updateMerchantProfile,
@@ -84,9 +84,15 @@ export function MerchantExperience({
   );
 
   const handleRedeem = useCallback(
-    (code: string, _name: string, customerId: string) =>
-      void run(() => redeemReward(customerId, code), "Reward redeemed"),
-    [run],
+    async (code: string) => {
+      const res = await redeemRewardByCode(code);
+      if (res.ok) {
+        toast.success(`Reward redeemed for ${res.customerName ?? "customer"}`);
+        await onRefresh();
+      }
+      return res;
+    },
+    [onRefresh],
   );
 
   const handleBanCustomer = useCallback(
@@ -160,7 +166,7 @@ export function MerchantExperience({
             onDisapprove={handleDisapprove}
           />
         )}
-        {activeTab === "scan" && <ScannerScreen usedCodes={[]} onRedeem={handleRedeem} />}
+        {activeTab === "scan" && <ScannerScreen onRedeem={handleRedeem} />}
         {activeTab === "profile" && (
           <MerchantProfileScreen
             profile={profile}

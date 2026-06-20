@@ -2,38 +2,40 @@
 
 import { useState } from "react";
 import { CheckCircle2, ScanLine } from "lucide-react";
-import { VALID_REDEEM_CODES } from "@/lib/merchant/constants";
+
+interface RedeemResult {
+  ok: boolean;
+  error?: string;
+  customerName?: string;
+}
 
 interface ScannerScreenProps {
-  usedCodes: string[];
-  onRedeem: (code: string, customerName: string, customerId: string) => void;
+  onRedeem: (code: string) => Promise<RedeemResult>;
 }
 
-function parseRedeemCode(input: string) {
-  const trimmed = input.trim().toUpperCase();
-  const urlMatch = trimmed.match(/code=([A-Z0-9-]+)/i);
-  return urlMatch ? urlMatch[1].toUpperCase() : trimmed;
-}
-
-export function ScannerScreen({ usedCodes, onRedeem }: ScannerScreenProps) {
+export function ScannerScreen({ onRedeem }: ScannerScreenProps) {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState<{ name: string; code: string } | null>(null);
 
-  const handleScan = () => {
-    setError("");
-    setSuccess(null);
-
-    const parsed = parseRedeemCode(code);
-    const match = VALID_REDEEM_CODES[parsed];
-
-    if (!match || usedCodes.includes(parsed)) {
-      setError("Invalid or already used reward code.");
+  const handleScan = async () => {
+    const value = code.trim();
+    if (!value) {
+      setError("Enter the reward code shown on the customer's card.");
       return;
     }
+    setError("");
+    setSuccess(null);
+    setSubmitting(true);
+    const res = await onRedeem(value);
+    setSubmitting(false);
 
-    onRedeem(parsed, match.customerName, match.customerId);
-    setSuccess({ name: match.customerName, code: parsed });
+    if (!res.ok) {
+      setError(res.error ?? "Invalid or already used reward code.");
+      return;
+    }
+    setSuccess({ name: res.customerName ?? "Customer", code: value.toUpperCase() });
     setCode("");
   };
 
@@ -63,7 +65,7 @@ export function ScannerScreen({ usedCodes, onRedeem }: ScannerScreenProps) {
           <input
             className="auth-input merchant-code-input"
             type="text"
-            placeholder="BLOOM-7Q4X9"
+            placeholder="FROQ-XXXXX"
             value={code}
             onChange={(event) => {
               setCode(event.target.value.toUpperCase());
@@ -91,13 +93,18 @@ export function ScannerScreen({ usedCodes, onRedeem }: ScannerScreenProps) {
           </div>
         )}
 
-        <button type="button" className="cta-btn merchant-cta-accent" onClick={handleScan}>
-          Mark as claimed
+        <button
+          type="button"
+          className="cta-btn merchant-cta-accent"
+          disabled={submitting}
+          onClick={handleScan}
+        >
+          {submitting ? "Redeeming…" : "Mark as claimed"}
         </button>
       </div>
 
       <p className="merchant-scanner-note">
-        Demo codes: <strong>BLOOM-7Q4X9</strong>, <strong>BLOOM-3K8M2</strong>
+        Ask the customer to open their reward and read out the <strong>FROQ-</strong> code.
       </p>
     </div>
   );

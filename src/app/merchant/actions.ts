@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { MerchantCustomer, MerchantProfile, PendingApproval } from "@/lib/merchant/types";
 import { slugify, toCustomer, toMerchantProfile, toMerchantRowPatch } from "@/lib/merchant/mappers";
 
@@ -16,6 +17,7 @@ export interface MerchantStatsData {
 
 export type MerchantBundle =
   | { status: "unauthenticated" }
+  | { status: "not_registered" }
   | { status: "needs_setup" }
   | {
       status: "ready";
@@ -24,6 +26,10 @@ export type MerchantBundle =
       customers: MerchantCustomer[];
       approvals: PendingApproval[];
     };
+
+function hasMerchantOnboarding(user: { app_metadata?: Record<string, unknown> }) {
+  return user.app_metadata?.merchant_onboarding === true;
+}
 
 // Visits over the trailing 7 days bucketed Mon..Sun for the dashboard chart.
 function weeklyBuckets(rows: { created_at: string }[]): number[] {
@@ -61,7 +67,9 @@ async function loadMerchantBundle(): Promise<MerchantBundle> {
     .eq("owner_user_id", user.id)
     .maybeSingle();
 
-  if (!merchantRow) return { status: "needs_setup" };
+  if (!merchantRow) {
+    return hasMerchantOnboarding(user) ? { status: "needs_setup" } : { status: "not_registered" };
+  }
 
   const merchantId = merchantRow.id;
   const profile = toMerchantProfile(merchantRow);
@@ -117,6 +125,28 @@ async function loadMerchantBundle(): Promise<MerchantBundle> {
   });
 
   return { status: "ready", profile, stats, customers, approvals };
+}
+
+/** Called after checkout payment — allows this user to access the store setup wizard. */
+export async function markMerchantOnboarding(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated" };
+
+    const admin = createAdminClient();
+    const { error } = await admin.auth.admin.updateUserById(user.id, {
+      app_metadata: { ...user.app_metadata, merchant_onboarding: true },
+    });
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not complete checkout.",
+    };
+  }
 }
 
 export async function createMerchant(input: {
@@ -211,6 +241,73 @@ export async function redeemReward(customerId: string, code: string) {
     p_code: code,
   });
   return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+/**
+ * Resolves a customer-presented reward code (the `FROQ-XXXXX` shown on the
+ * customer's card, optionally wrapped in a `?code=` URL) to a real reward-ready
+ * card in the current merchant's shop, then persists the redemption.
+ */
+export async function redeemRewardByCode(
+  rawCode: string,
+): Promise<{ ok: boolean; error?: string; customerName?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated. Please log in again." };
+
+    const { data: merchant } = await supabase
+      .from("merchants")
+      .select("id")
+      .eq("owner_user_id", user.id)
+      .maybeSingle();
+    if (!merchant) return { ok: false, error: "Merchant account not found." };
+
+    const urlMatch = rawCode.match(/code=([A-Za-z0-9-]+)/i);
+    const parsed = (urlMatch ? urlMatch[1] : rawCode).trim().toUpperCase();
+    if (!parsed) return { ok: false, error: "Enter a reward code." };
+
+    // Match against reward-ready cards in this shop. The customer's displayed
+    // code is FROQ-{first 5 of customer id}; we also accept the full id.
+    const { data: cards } = await supabase
+      .from("loyalty_cards")
+      .select("customer_id")
+      .eq("merchant_id", merchant.id)
+      .eq("status", "reward_ready");
+
+    const target = (cards ?? []).find(
+      (card) =>
+        `FROQ-${card.customer_id.slice(0, 5).toUpperCase()}` === parsed ||
+        card.customer_id.toUpperCase() === parsed,
+    );
+    if (!target) {
+      return { ok: false, error: "No reward-ready card matches that code." };
+    }
+
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("name")
+      .eq("id", target.customer_id)
+      .maybeSingle();
+
+    // Unique per-merchant redemption code (allows the same customer to redeem
+    // again on a future card without colliding on redemptions.code).
+    const redemptionCode = `${parsed}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+    const { error } = await supabase.rpc("redeem_reward", {
+      p_customer_id: target.customer_id,
+      p_code: redemptionCode,
+    });
+    if (error) return { ok: false, error: error.message };
+
+    return { ok: true, customerName: customer?.name ?? "Customer" };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not redeem the reward.",
+    };
+  }
 }
 
 export async function setCustomerBanned(customerId: string, banned: boolean) {

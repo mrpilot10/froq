@@ -3,15 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { ArrowLeft, Gift, Phone, UserRound } from "lucide-react";
+import { ArrowLeft, Gift, Mail, Phone, UserRound } from "lucide-react";
 import { toast } from "sonner";
-import { formatPhoneDisplay, isValidPhone } from "@/lib/auth/format";
+import { formatPhoneDisplay, isValidEmail, isValidPhone } from "@/lib/auth/format";
 import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/client";
 import { checkShopMembership, joinMerchant } from "@/app/actions/customer";
 import { createClient } from "@/lib/supabase/client";
 import { OtpInput } from "@/components/auth/otp-input";
 
-type Step = "checking" | "phone" | "otp" | "details" | "joining";
+type Step = "checking" | "phone" | "otp" | "signup" | "joining";
 
 interface JoinScreenProps {
   slug: string;
@@ -38,6 +38,7 @@ export function JoinScreen({
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [authedPhone, setAuthedPhone] = useState("");
   const [error, setError] = useState("");
   const [isReturningMember, setIsReturningMember] = useState(false);
@@ -114,7 +115,7 @@ export function JoinScreen({
       return;
     }
 
-    setStep("details");
+    setStep("signup");
   }, [otp, phone, slug, router]);
 
   useEffect(() => {
@@ -130,17 +131,21 @@ export function JoinScreen({
       setError("Please enter your name.");
       return;
     }
+    if (!isValidEmail(email)) {
+      setError("Enter a valid email address.");
+      return;
+    }
     setError("");
     setStep("joining");
-    const res = await joinMerchant(slug, name.trim(), e164);
+    const res = await joinMerchant(slug, name.trim(), e164, email.trim());
     if (!res.ok) {
       setError(res.error ?? "Could not join. Please try again.");
-      setStep("details");
+      setStep("signup");
       return;
     }
     toast.success(`Welcome to ${businessName}!`);
     router.replace(`/card/${slug}`);
-  }, [name, slug, e164, businessName, router]);
+  }, [name, email, slug, e164, businessName, router]);
 
   return (
     <div className="loyalty-page">
@@ -259,14 +264,16 @@ export function JoinScreen({
             </>
           )}
 
-          {(step === "details" || step === "joining") && (
+          {(step === "signup" || step === "joining") && (
             <>
               <div className="auth-head">
                 <div className="auth-badge" aria-hidden="true">
                   <UserRound size={24} strokeWidth={2} color="#fff" />
                 </div>
-                <h2 className="auth-title">Almost there</h2>
-                <p className="auth-sub">What name should {businessName} see on your card?</p>
+                <h2 className="auth-title">Sign up</h2>
+                <p className="auth-sub">
+                  Create your {businessName} loyalty account to start collecting stamps.
+                </p>
               </div>
               <label className="auth-field">
                 <span className="auth-label">Full name</span>
@@ -281,6 +288,39 @@ export function JoinScreen({
                     setError("");
                   }}
                 />
+              </label>
+              <label className="auth-field">
+                <span className="auth-label">Email</span>
+                <div className="auth-input-with-icon">
+                  <Mail size={18} strokeWidth={2} aria-hidden="true" />
+                  <input
+                    className="auth-input"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setError("");
+                    }}
+                  />
+                </div>
+              </label>
+              <label className="auth-field">
+                <span className="auth-label">Mobile number</span>
+                <div className="auth-phone-row auth-phone-row--readonly">
+                  <span className="auth-phone-prefix">+91</span>
+                  <input
+                    className="auth-input auth-input-phone"
+                    type="tel"
+                    value={phone}
+                    readOnly
+                    aria-readonly="true"
+                  />
+                </div>
+                <span className="merchant-field-hint">
+                  Verified as {formatPhoneDisplay(phone)}
+                </span>
               </label>
               {error && (
                 <p className="auth-error" role="alert">

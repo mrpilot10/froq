@@ -172,12 +172,14 @@ export async function joinMerchant(
   slug: string,
   name: string,
   phone: string,
+  email?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
   const { error } = await supabase.rpc("join_merchant", {
     p_slug: slug,
     p_name: name,
     p_phone: phone,
+    p_email: email?.trim() || null,
   });
   return error ? { ok: false, error: error.message } : { ok: true };
 }

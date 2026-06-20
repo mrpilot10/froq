@@ -197,6 +197,37 @@ export function ProfileSkeleton() {
   );
 }
 
+// Neutral brand splash shown during the very first gate load, before we know
+// whether the visitor is logged in. Using the auth-screen layout (logo + spinner)
+// avoids flashing the dashboard skeleton on the way to the login screen.
+export function MerchantGateSplash() {
+  return (
+    <div className="merchant-page merchant-theme">
+      <div className="merchant-screen auth-screen">
+        <header className="merchant-auth-head">
+          <div className="merchant-auth-logo">
+            <Image src="/froq-logo.png" alt="Froq" width={64} height={64} priority />
+          </div>
+          <h1 className="merchant-auth-brand">Froq for Business</h1>
+          <p className="merchant-auth-tag">Merchant dashboard</p>
+        </header>
+
+        <div className="auth-card">
+          <div className="auth-loading" aria-live="polite" aria-busy="true">
+            <div className="processing-spinner" aria-hidden="true" />
+            <p className="processing-title">Loading your workspace</p>
+            <p className="processing-sub">Just a moment…</p>
+          </div>
+        </div>
+
+        <div className="footer">
+          Powered by <b>froq.io</b>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Full-page loading state (header chrome + tab skeleton) shown while the
 // merchant bundle is being fetched.
 export function MerchantLoadingScreen({ tab = "dashboard" }: { tab?: MerchantTab }) {

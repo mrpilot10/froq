@@ -9,6 +9,7 @@ import { formatPhoneDisplay, isValidEmail, isValidPhone } from "@/lib/auth/forma
 import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/client";
 import { OtpInput } from "@/components/auth/otp-input";
 import { writeCheckoutAccount } from "@/lib/merchant/checkout";
+import { markMerchantOnboarding } from "@/app/merchant/actions";
 import { type PricingPlan } from "@/lib/merchant/pricing";
 
 type Step = "account" | "otp" | "payment" | "loading";
@@ -45,6 +46,14 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
       email: email.trim(),
       phone: `+91${phone}`,
     });
+
+    const marked = await markMerchantOnboarding();
+    if (!marked.ok) {
+      setError(marked.error ?? "Could not complete checkout. Please try again.");
+      setStep("payment");
+      return;
+    }
+
     router.replace("/merchant");
   }, [plan.id, businessName, ownerName, email, phone, router]);
 

@@ -5,15 +5,17 @@ import { getMerchantBundle, type MerchantBundle } from "@/app/merchant/actions";
 import { createClient } from "@/lib/supabase/client";
 import { readCheckoutAccount } from "@/lib/merchant/checkout";
 import { MerchantExperience } from "./merchant-experience";
+import { MerchantAccountNotFound } from "./merchant-account-not-found";
 import { MerchantLogin } from "./merchant-login";
 import { MerchantSetupWizard } from "./merchant-setup-wizard";
-import { MerchantLoadingScreen } from "./skeletons";
+import { MerchantGateSplash } from "./skeletons";
 
 /**
  * Single source of truth for the merchant area, driven entirely by the Supabase
  * session + merchant row:
  *   - no session            → OTP login
- *   - session, no store yet  → setup wizard (new merchants only)
+ *   - session, not registered → pricing prompt (no checkout / store)
+ *   - session, checkout done  → setup wizard
  *   - session + store        → dashboard
  */
 export function MerchantGate() {
@@ -38,11 +40,15 @@ export function MerchantGate() {
     setBundle({ status: "unauthenticated" });
   }, [supabase]);
 
-  if (!bundle) return <MerchantLoadingScreen />;
+  if (!bundle) return <MerchantGateSplash />;
 
   if (bundle.status === "unauthenticated") return <MerchantLogin onAuthed={refresh} />;
 
-  // New merchant (or one who hasn't built a store yet) → store builder.
+  if (bundle.status === "not_registered") {
+    return <MerchantAccountNotFound onSignOut={handleLogout} />;
+  }
+
+  // Paid via checkout — store builder for new merchants.
   if (bundle.status === "needs_setup") {
     return <MerchantSetupWizard checkoutAccount={checkoutAccount} onComplete={refresh} />;
   }
