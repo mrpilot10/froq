@@ -38,3 +38,14 @@ export function maskPhone(canonical: string): string {
   if (canonical.length <= 8) return "****";
   return `${canonical.slice(0, 4)}****${canonical.slice(-4)}`;
 }
+
+/** Supabase Auth expects E.164 with a leading '+', e.g. +919876543210. */
+export function toSupabaseAuthPhone(canonical: string): string {
+  const digits = digitsOnly(canonical);
+  return digits.startsWith("+") ? digits : `+${digits}`;
+}
+
+/** Digits-only form for otp_codes storage and APITxT (no '+'). */
+export function toStoragePhone(input: string): string | null {
+  return toCanonicalPhone(input);
+}

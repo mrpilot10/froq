@@ -63,11 +63,14 @@ export async function POST(request: Request) {
     const session = await establishPhoneSession(phone);
     if (!session.ok) {
       const err = session.error ?? "";
+      otpLog.error("verify_session_failed", { phone: maskPhone(phone), reason: err });
       const message = err.includes("auth_user_id_by_phone")
         ? "Database migration missing. Run supabase/migrations/0004_otp.sql in Supabase SQL editor."
-        : err.includes("Phone provider")
+        : err.includes("Phone provider") || err.includes("phone provider")
           ? "Enable Phone auth in Supabase → Authentication → Providers."
-          : "Could not complete sign in. Please try again.";
+          : err.includes("password") || err.includes("Password")
+            ? "Enable phone + password sign-in in Supabase → Authentication → Providers → Phone."
+            : err || "Could not complete sign in. Please try again.";
       return json({ ok: false, message }, 500);
     }
 
