@@ -6,6 +6,12 @@ const nextConfig: NextConfig = {
   // machine's local IP). Without this, Next.js 16 blocks those cross-origin
   // requests and the page renders but never hydrates — so nothing is tappable.
   allowedDevOrigins: ["192.168.1.19"],
+  experimental: {
+    // Logos are downscaled client-side before upload, but keep a comfortable
+    // ceiling so a server action carrying a logo data URL never hits the
+    // default 1 MB limit (which surfaces as a generic server render error).
+    serverActions: { bodySizeLimit: "4mb" },
+  },
 };
 
 export default nextConfig;

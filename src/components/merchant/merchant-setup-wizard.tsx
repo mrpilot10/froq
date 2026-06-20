@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
+import { fileToLogoDataUrl } from "@/lib/merchant/image";
 import { createMerchant } from "@/app/merchant/actions";
 import type { CheckoutAccount } from "@/lib/merchant/checkout";
 
@@ -124,13 +125,13 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
     setDraft((prev) => ({ ...prev, [key]: value }));
   }
 
-  function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+  async function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.target;
+    const file = input.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => update("logoDataUrl", reader.result as string);
-    reader.readAsDataURL(file);
-    event.target.value = "";
+    const dataUrl = await fileToLogoDataUrl(file);
+    update("logoDataUrl", dataUrl);
+    input.value = "";
   }
 
   const canAdvance =
@@ -298,7 +299,7 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
                       type="file"
                       accept="image/png,image/jpeg,image/webp,image/svg+xml"
                       className="merchant-file-input"
-                      onChange={handleLogoUpload}
+                      onChange={(event) => void handleLogoUpload(event)}
                     />
                   </div>
                 </div>

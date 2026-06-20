@@ -5,6 +5,7 @@ import { Check, ImagePlus, Trash2 } from "lucide-react";
 import Image from "next/image";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
+import { fileToLogoDataUrl } from "@/lib/merchant/image";
 import type { MerchantEditSection, MerchantProfile } from "@/lib/merchant/types";
 
 interface MerchantProfileEditScreenProps {
@@ -124,13 +125,13 @@ export function MerchantProfileEditScreen({
     onChange({ ...profile, [key]: value });
   }
 
-  function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+  async function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.target;
+    const file = input.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => updateField("logoDataUrl", reader.result as string);
-    reader.readAsDataURL(file);
-    event.target.value = "";
+    const dataUrl = await fileToLogoDataUrl(file);
+    updateField("logoDataUrl", dataUrl);
+    input.value = "";
   }
 
   return (
@@ -192,7 +193,7 @@ export function MerchantProfileEditScreen({
                   type="file"
                   accept="image/png,image/jpeg,image/webp,image/svg+xml"
                   className="merchant-file-input"
-                  onChange={handleLogoUpload}
+                  onChange={(event) => void handleLogoUpload(event)}
                 />
               </div>
               <span className="merchant-field-hint">PNG, JPG, or SVG. Square works best.</span>
