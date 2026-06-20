@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, Check, Download, Sparkles } from "lucide-react";
+import { Bell, Check, Download, Share, SquarePlus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { enablePushForMerchant } from "@/lib/push/client";
@@ -20,19 +20,35 @@ function detectInstalled() {
   return Boolean(standalone || iosStandalone);
 }
 
+function detectIOS() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const isIPhoneOrPad = /iphone|ipad|ipod/i.test(ua);
+  // iPadOS 13+ presents as desktop Safari; detect via touch + Mac platform.
+  const isIPadOS =
+    navigator.platform === "MacIntel" && (navigator as { maxTouchPoints?: number }).maxTouchPoints! > 1;
+  return isIPhoneOrPad || isIPadOS;
+}
+
 export function OnboardingPrompt() {
   const [open, setOpen] = useState(false);
   const [notifState, setNotifState] = useState<NotificationPermission | "unsupported">("default");
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [installed, setInstalled] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [stepsOpen, setStepsOpen] = useState(false);
 
   useEffect(() => {
     const notifSupported = typeof window !== "undefined" && "Notification" in window;
     const currentNotif = notifSupported ? Notification.permission : "unsupported";
     const isInstalled = detectInstalled();
+    const ios = detectIOS();
 
     setNotifState(currentNotif);
     setInstalled(isInstalled);
+    setIsIOS(ios);
+    // iOS has no install prompt API — surface the Add to Home Screen steps directly.
+    if (ios && !isInstalled) setStepsOpen(true);
 
     const dismissed = sessionStorage.getItem(DISMISS_KEY) === "1";
     const allDone = (currentNotif === "granted" || currentNotif === "unsupported") && isInstalled;
@@ -89,15 +105,18 @@ export function OnboardingPrompt() {
   };
 
   const handleInstall = async () => {
-    if (!installEvent) {
-      toast("To install: open your browser menu and choose “Add to Home Screen” / “Install app”.");
+    if (installEvent) {
+      await installEvent.prompt();
+      const choice = await installEvent.userChoice;
+      if (choice.outcome === "accepted") setInstalled(true);
+      setInstallEvent(null);
       return;
     }
-    await installEvent.prompt();
-    const choice = await installEvent.userChoice;
-    if (choice.outcome === "accepted") setInstalled(true);
-    setInstallEvent(null);
+    // No native prompt (iOS / unsupported) — reveal the manual steps.
+    setStepsOpen((value) => !value);
   };
+
+  const installActionLabel = installEvent ? "Install App" : stepsOpen ? "Hide" : "How?";
 
   const handleClose = () => {
     sessionStorage.setItem(DISMISS_KEY, "1");
@@ -166,7 +185,9 @@ export function OnboardingPrompt() {
                   ? "Installed on this device"
                   : installEvent
                     ? "Add Froq to your home screen"
-                    : "Use your browser menu → Add to Home Screen"}
+                    : isIOS
+                      ? "Add Froq to your iPhone home screen"
+                      : "Add Froq from your browser menu"}
               </div>
             </div>
             {installed ? (
@@ -174,15 +195,50 @@ export function OnboardingPrompt() {
                 <Check size={16} strokeWidth={2.6} />
               </span>
             ) : (
-              <button
-                type="button"
-                className="merchant-onboard-action"
-                onClick={handleInstall}
-              >
-                {installEvent ? "Install" : "How?"}
+              <button type="button" className="merchant-onboard-action" onClick={handleInstall}>
+                {installActionLabel}
               </button>
             )}
           </div>
+
+          {!installed && stepsOpen && (
+            <div className="merchant-install-steps">
+              <div className="merchant-install-steps-title">
+                {isIOS ? "Install Froq on your iPhone" : "Install Froq"}
+              </div>
+              <ol className="merchant-install-steps-list">
+                {isIOS ? (
+                  <>
+                    <li>
+                      Tap the{" "}
+                      <Share size={14} strokeWidth={2.4} className="merchant-install-step-icon" />{" "}
+                      <strong>Share</strong> button in Safari.
+                    </li>
+                    <li>
+                      Choose{" "}
+                      <SquarePlus
+                        size={14}
+                        strokeWidth={2.4}
+                        className="merchant-install-step-icon"
+                      />{" "}
+                      <strong>Add to Home Screen</strong>.
+                    </li>
+                    <li>
+                      Tap <strong>Add</strong> in the top corner.
+                    </li>
+                  </>
+                ) : (
+                  <>
+                    <li>Open your browser menu.</li>
+                    <li>
+                      Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.
+                    </li>
+                    <li>Confirm to install.</li>
+                  </>
+                )}
+              </ol>
+            </div>
+          )}
         </div>
 
         <button type="button" className="cta-btn merchant-cta-accent" onClick={handleClose}>

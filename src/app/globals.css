@@ -2983,6 +2983,45 @@ body {
   background: var(--bg);
 }
 
+.merchant-install-steps {
+  margin-top: -2px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--brand) 8%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--brand) 16%, transparent);
+}
+
+.merchant-install-steps-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin-bottom: 10px;
+  color: var(--brand-deep);
+}
+
+.merchant-install-steps-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.merchant-install-steps-list strong {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.merchant-install-step-icon {
+  display: inline;
+  vertical-align: -2px;
+  color: var(--brand);
+}
+
 .merchant-onboard-copy {
   flex: 1;
   min-width: 0;
