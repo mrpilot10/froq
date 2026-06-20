@@ -1,48 +1,139 @@
-import { Gift, Stamp, TrendingUp, Users, Clock } from "lucide-react";
-import type { MerchantStats } from "@/lib/merchant/types";
-import { avgLtv, formatCompactCurrency, formatCurrency, totalLtv } from "@/lib/merchant/ltv";
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { Download, Gift, Loader2, Stamp, Users, Clock } from "lucide-react";
+import { toast } from "sonner";
+import { getDashboardStats } from "@/app/merchant/actions";
+import type { DashboardDateRange, DashboardFilteredStats } from "@/lib/merchant/types";
+import { computeLtv, formatCompactCurrency, formatCurrency } from "@/lib/merchant/ltv";
 
 interface DashboardScreenProps {
-  stats: MerchantStats;
   businessName: string;
   avgOrderValue: number;
+  initialStats: DashboardFilteredStats;
 }
 
-export function DashboardScreen({ stats, businessName, avgOrderValue }: DashboardScreenProps) {
-  const maxVisits = Math.max(...stats.weeklyVisits, 1);
-  const averageLtv = avgLtv(stats, avgOrderValue);
-  const lifetimeTotal = totalLtv(stats, avgOrderValue);
+const DATE_RANGES: { value: DashboardDateRange; label: string }[] = [
+  { value: "today", label: "Today" },
+  { value: "7d", label: "7 days" },
+  { value: "30d", label: "30 days" },
+  { value: "all", label: "All time" },
+];
+
+export function DashboardScreen({ businessName, avgOrderValue, initialStats }: DashboardScreenProps) {
+  const [range, setRange] = useState<DashboardDateRange>(initialStats.range);
+  const [stats, setStats] = useState(initialStats);
+  const [loading, setLoading] = useState(false);
+  const [downloadingPoster, setDownloadingPoster] = useState(false);
+
+  const loadStats = useCallback(async (nextRange: DashboardDateRange) => {
+    setLoading(true);
+    const next = await getDashboardStats(nextRange);
+    if (next) setStats(next);
+    setLoading(false);
+  }, []);
+
+  const downloadPoster = useCallback(async () => {
+    setDownloadingPoster(true);
+    try {
+      const res = await fetch("/api/merchant/poster", { cache: "no-store" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "Could not generate the poster.");
+      }
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = "qr-poster.png";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not download the poster.");
+    } finally {
+      setDownloadingPoster(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (range === initialStats.range) {
+      setStats(initialStats);
+      return;
+    }
+    void loadStats(range);
+  }, [range, initialStats, loadStats]);
+
+  // Parent refresh (realtime) updates the default "today" view.
+  useEffect(() => {
+    if (range === "today") setStats(initialStats);
+  }, [initialStats, range]);
+
+  const maxVisits = Math.max(...stats.chartBuckets.map((bucket) => bucket.value), 1);
+  const averageLtv = computeLtv(stats.avgLifetimeVisits, avgOrderValue);
+  const lifetimeTotal = averageLtv * stats.totalCustomers;
+  const stampsLabel =
+    stats.range === "today"
+      ? "Stamps today"
+      : stats.range === "all"
+        ? "Total stamps"
+        : "Stamps in period";
+  const rewardsLabel =
+    stats.range === "all" ? "Rewards redeemed" : "Rewards in period";
 
   return (
     <div className="tab-screen">
       <div className="tab-head">
         <h2 className="tab-title">Dashboard</h2>
-        <p className="tab-sub">{businessName} · Today&apos;s overview</p>
+        <p className="tab-sub">
+          {businessName} · {stats.rangeLabel}
+        </p>
       </div>
 
-      <div className="merchant-ltv-card">
+      <div className="merchant-date-filter" role="group" aria-label="Date range">
+        {DATE_RANGES.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            className={`merchant-date-filter-btn${range === item.value ? " merchant-date-filter-btn--active" : ""}`}
+            aria-pressed={range === item.value}
+            disabled={loading && range !== item.value}
+            onClick={() => setRange(item.value)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <div className={`merchant-ltv-card${loading ? " merchant-ltv-card--loading" : ""}`}>
         <div className="merchant-ltv-head">
           <span className="merchant-ltv-eyebrow">Average customer LTV</span>
-          <span className="merchant-ltv-trend">
-            <TrendingUp size={14} strokeWidth={2.4} />
-            +8.2%
-          </span>
         </div>
         <div className="merchant-ltv-value">{formatCurrency(averageLtv)}</div>
-        <div className="merchant-ltv-foot">
+        <div className="merchant-ltv-foot merchant-ltv-foot--grid">
           <div className="merchant-ltv-foot-item">
             <span className="merchant-ltv-foot-label">Total lifetime value</span>
             <span className="merchant-ltv-foot-value">{formatCompactCurrency(lifetimeTotal)}</span>
           </div>
-          <div className="merchant-ltv-foot-divider" />
           <div className="merchant-ltv-foot-item">
             <span className="merchant-ltv-foot-label">Avg. order</span>
             <span className="merchant-ltv-foot-value">{formatCurrency(avgOrderValue)}</span>
           </div>
+          <div className="merchant-ltv-foot-item">
+            <span className="merchant-ltv-foot-label">Total customers</span>
+            <span className="merchant-ltv-foot-value">{stats.totalCustomers}</span>
+          </div>
+          <div className="merchant-ltv-foot-item">
+            <span className="merchant-ltv-foot-label">Avg. visits</span>
+            <span className="merchant-ltv-foot-value">
+              {stats.avgLifetimeVisits.toFixed(1)}
+            </span>
+          </div>
         </div>
       </div>
 
-      <div className="merchant-stat-grid">
+      <div className={`merchant-stat-grid${loading ? " merchant-stat-grid--loading" : ""}`}>
         <div className="merchant-stat-card">
           <div className="merchant-stat-icon">
             <Users size={18} strokeWidth={2.2} />
@@ -54,8 +145,8 @@ export function DashboardScreen({ stats, businessName, avgOrderValue }: Dashboar
           <div className="merchant-stat-icon">
             <Stamp size={18} strokeWidth={2.2} />
           </div>
-          <div className="merchant-stat-value">{stats.stampsToday}</div>
-          <div className="merchant-stat-label">Stamps today</div>
+          <div className="merchant-stat-value">{stats.stampsInRange}</div>
+          <div className="merchant-stat-label">{stampsLabel}</div>
         </div>
         <div className="merchant-stat-card">
           <div className="merchant-stat-icon">
@@ -68,38 +159,49 @@ export function DashboardScreen({ stats, businessName, avgOrderValue }: Dashboar
           <div className="merchant-stat-icon merchant-stat-icon--accent">
             <Gift size={18} strokeWidth={2.2} />
           </div>
-          <div className="merchant-stat-value">{stats.rewardsRedeemed}</div>
-          <div className="merchant-stat-label">Rewards redeemed</div>
+          <div className="merchant-stat-value">
+            {stats.range === "all" ? stats.rewardsRedeemedAllTime : stats.rewardsInRange}
+          </div>
+          <div className="merchant-stat-label">{rewardsLabel}</div>
         </div>
       </div>
 
-      <div className="panel-card merchant-chart-card">
+      <div className={`panel-card merchant-chart-card${loading ? " merchant-chart-card--loading" : ""}`}>
         <div className="merchant-chart-head">
           <div>
-            <div className="merchant-chart-title">Weekly visits</div>
-            <div className="merchant-chart-sub">Stamp requests per day</div>
+            <div className="merchant-chart-title">{stats.chartTitle}</div>
+            <div className="merchant-chart-sub">{stats.chartSub}</div>
           </div>
-          <div className="merchant-chart-trend">
-            <TrendingUp size={16} strokeWidth={2.2} />
-            +12%
-          </div>
+          <div className="merchant-chart-total">{stats.stampsInRange} total</div>
         </div>
         <div className="merchant-chart-bars">
-          {stats.weeklyVisits.map((value, index) => (
-            <div key={index} className="merchant-chart-bar-col">
+          {stats.chartBuckets.map((bucket) => (
+            <div key={bucket.label} className="merchant-chart-bar-col">
               <div
                 className="merchant-chart-bar"
-                style={{ height: `${(value / maxVisits) * 100}%` }}
+                style={{ height: `${(bucket.value / maxVisits) * 100}%` }}
               />
-              <span className="merchant-chart-bar-label">
-                {["M", "T", "W", "T", "F", "S", "S"][index]}
-              </span>
+              <span className="merchant-chart-bar-label">{bucket.label}</span>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="panel-card merchant-summary-card">
+      <button
+        type="button"
+        className="cta-btn merchant-cta-accent merchant-poster-btn"
+        onClick={downloadPoster}
+        disabled={downloadingPoster}
+      >
+        {downloadingPoster ? (
+          <Loader2 size={17} strokeWidth={2.4} className="merchant-poster-spinner" />
+        ) : (
+          <Download size={17} strokeWidth={2.4} />
+        )}
+        {downloadingPoster ? "Preparing poster…" : "Download QR Poster"}
+      </button>
+
+      <div className={`panel-card merchant-summary-card${loading ? " merchant-summary-card--loading" : ""}`}>
         <div className="merchant-summary-row">
           <span className="merchant-summary-label">Active loyalty cards</span>
           <span className="merchant-summary-value">{stats.activeCards}</span>
@@ -107,7 +209,14 @@ export function DashboardScreen({ stats, businessName, avgOrderValue }: Dashboar
         <div className="merchant-summary-divider" />
         <div className="merchant-summary-row">
           <span className="merchant-summary-label">Conversion to reward</span>
-          <span className="merchant-summary-value merchant-summary-value--accent">21%</span>
+          <span className="merchant-summary-value merchant-summary-value--accent">
+            {stats.conversionRate}%
+          </span>
+        </div>
+        <div className="merchant-summary-divider" />
+        <div className="merchant-summary-row">
+          <span className="merchant-summary-label">Rewards redeemed (all time)</span>
+          <span className="merchant-summary-value">{stats.rewardsRedeemedAllTime}</span>
         </div>
       </div>
     </div>

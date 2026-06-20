@@ -168,7 +168,8 @@ export function CustomersScreen({
                     <div className="merchant-list-title">{customer.name}</div>
                     <div className="merchant-list-sub">
                       {customer.lifetimeVisits} visits · {customer.stamps}/{customer.totalStamps}{" "}
-                      stamps
+                      stamps · {customer.rewardsClaimed} reward
+                      {customer.rewardsClaimed === 1 ? "" : "s"} redeemed
                     </div>
                   </div>
                   <div className="merchant-list-trailing">

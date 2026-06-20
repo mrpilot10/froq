@@ -25,6 +25,7 @@ interface LoyaltyExperienceProps {
   card: CardData;
   history: HistoryEntry[];
   rewardCards: RewardCardGroup[];
+  totalStampsCollected: number;
   memberSince: string;
   customerName: string;
   customerPhone: string;
@@ -46,6 +47,7 @@ export function LoyaltyExperience({
   card,
   history,
   rewardCards,
+  totalStampsCollected,
   memberSince,
   customerName,
   customerPhone,
@@ -204,6 +206,7 @@ export function LoyaltyExperience({
               phone={customerPhone}
               email={customerEmail}
               filled={card.filled}
+              totalStampsCollected={totalStampsCollected}
               memberSince={memberSince}
               onLogout={onLogout}
               onDeleteAccount={() => setDeleteOpen(true)}

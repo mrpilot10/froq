@@ -32,6 +32,24 @@ function urlBase64ToUint8Array(base64String: string): BufferSource {
   return output;
 }
 
+async function waitForServiceWorkerReady(
+  registration: ServiceWorkerRegistration,
+  timeoutMs = 8000,
+): Promise<ServiceWorkerRegistration> {
+  if (registration.active) return registration;
+  try {
+    await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<ServiceWorkerRegistration>((_, reject) => {
+        window.setTimeout(() => reject(new Error("Service worker timeout")), timeoutMs);
+      }),
+    ]);
+  } catch {
+    // Fall back to the registration we already have.
+  }
+  return registration;
+}
+
 /**
  * Ensures the service worker is registered and the browser is subscribed to
  * push, then persists the subscription against the current merchant. Safe to
@@ -41,13 +59,17 @@ export async function enablePushForMerchant(): Promise<boolean> {
   if (!isPushSupported() || !VAPID_PUBLIC_KEY) return false;
   if (Notification.permission !== "granted") return false;
 
-  const registration = (await navigator.serviceWorker.ready.catch(() => null)) ?? (await registerServiceWorker());
+  const registration =
+    (await registerServiceWorker()) ??
+    (await navigator.serviceWorker.getRegistration("/").catch(() => null));
   if (!registration) return false;
 
-  let subscription = await registration.pushManager.getSubscription();
+  const ready = await waitForServiceWorkerReady(registration);
+
+  let subscription = await ready.pushManager.getSubscription();
   if (!subscription) {
     try {
-      subscription = await registration.pushManager.subscribe({
+      subscription = await ready.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
       });

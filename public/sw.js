@@ -27,7 +27,7 @@ self.addEventListener("push", (event) => {
     badge: "/froq-logo.png",
     tag: data.tag || "froq-approval",
     renotify: true,
-    data: { url: data.url || "/merchant" },
+    data: { url: data.url || "/merchant?tab=approvals" },
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -35,12 +35,13 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || "/merchant";
+  const targetUrl = (event.notification.data && event.notification.data.url) || "/merchant?tab=approvals";
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
         if (client.url.includes("/merchant") && "focus" in client) {
+          client.postMessage({ type: "froq:navigate", url: targetUrl });
           return client.focus();
         }
       }

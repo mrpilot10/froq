@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import { LifeBuoy, QrCode } from "lucide-react";
 import { toast } from "sonner";
-import type { MerchantCustomer, MerchantEditSection, MerchantProfile, MerchantTab, PendingApproval } from "@/lib/merchant/types";
+import type { MerchantCustomer, MerchantEditSection, MerchantProfile, MerchantTab, PendingApproval, DashboardFilteredStats } from "@/lib/merchant/types";
 import {
   approveStamp,
   deleteCustomer,
@@ -13,7 +13,6 @@ import {
   rejectStamp,
   setCustomerBanned,
   updateMerchantProfile,
-  type MerchantStatsData,
 } from "@/app/merchant/actions";
 import { DeleteAccountDrawer } from "@/components/shared/delete-account-drawer";
 import { useRealtime } from "@/lib/supabase/use-realtime";
@@ -30,7 +29,7 @@ import { ScannerScreen } from "./scanner-screen";
 
 interface MerchantExperienceProps {
   profile: MerchantProfile;
-  stats: MerchantStatsData;
+  dashboardStats: DashboardFilteredStats;
   customers: MerchantCustomer[];
   approvals: PendingApproval[];
   onRefresh: () => Promise<void>;
@@ -39,7 +38,7 @@ interface MerchantExperienceProps {
 
 export function MerchantExperience({
   profile: initialProfile,
-  stats,
+  dashboardStats,
   customers,
   approvals,
   onRefresh,
@@ -53,6 +52,33 @@ export function MerchantExperience({
 
   useEffect(() => setProfile(initialProfile), [initialProfile]);
 
+  // Open the tab from a push-notification deep link (?tab=approvals).
+  useEffect(() => {
+    const openTabFromUrl = (url?: string) => {
+      const search = url
+        ? new URL(url, window.location.origin).search
+        : window.location.search;
+      const tab = new URLSearchParams(search).get("tab");
+      const valid: MerchantTab[] = ["dashboard", "customers", "scan", "approvals", "profile"];
+      if (tab && valid.includes(tab as MerchantTab)) {
+        setActiveTab(tab as MerchantTab);
+        const next = new URL(window.location.href);
+        next.searchParams.set("tab", tab);
+        window.history.replaceState(null, "", next.toString());
+      }
+    };
+
+    openTabFromUrl();
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type !== "froq:navigate") return;
+      openTabFromUrl(event.data.url as string | undefined);
+    };
+
+    navigator.serviceWorker?.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker?.removeEventListener("message", onMessage);
+  }, []);
+
   // Jump to the top (no animation) on tab switch so each page starts at its header.
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -61,10 +87,21 @@ export function MerchantExperience({
   // Register the service worker and (re)subscribe to push if already allowed,
   // so approval alerts arrive even when the dashboard isn't focused.
   useEffect(() => {
-    void registerServiceWorker();
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-      void enablePushForMerchant();
-    }
+    const syncPush = () => {
+      void registerServiceWorker();
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        void enablePushForMerchant();
+      }
+    };
+
+    syncPush();
+    window.addEventListener("focus", syncPush);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") syncPush();
+    });
+    return () => {
+      window.removeEventListener("focus", syncPush);
+    };
   }, []);
 
   // Live dashboard: refetch when stamp requests or redemptions change.
@@ -112,10 +149,7 @@ export function MerchantExperience({
   const handleRedeem = useCallback(
     async (code: string) => {
       const res = await redeemRewardByCode(code);
-      if (res.ok) {
-        toast.success(`Reward redeemed for ${res.customerName ?? "customer"}`);
-        await onRefresh();
-      }
+      if (res.ok) await onRefresh();
       return res;
     },
     [onRefresh],
@@ -173,7 +207,7 @@ export function MerchantExperience({
 
         {activeTab === "dashboard" && (
           <DashboardScreen
-            stats={stats}
+            initialStats={dashboardStats}
             businessName={profile.businessName}
             avgOrderValue={profile.avgOrderValue}
           />

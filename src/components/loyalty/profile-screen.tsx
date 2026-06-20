@@ -10,6 +10,7 @@ interface ProfileScreenProps {
   phone: string;
   email?: string;
   filled: number;
+  totalStampsCollected: number;
   memberSince: string;
   onLogout: () => void;
   onDeleteAccount?: () => void;
@@ -22,6 +23,7 @@ export function ProfileScreen({
   phone,
   email,
   filled,
+  totalStampsCollected,
   memberSince,
   onLogout,
   onDeleteAccount,
@@ -37,7 +39,8 @@ export function ProfileScreen({
           <div>
             <h3 className="profile-name">{name}</h3>
             <p className="profile-meta">
-              {filled} stamp{filled === 1 ? "" : "s"} collected · Member since {memberSince}
+              {totalStampsCollected} stamp{totalStampsCollected === 1 ? "" : "s"} collected
+              {filled > 0 ? ` · ${filled} on current card` : ""} · Member since {memberSince}
             </p>
           </div>
         </div>

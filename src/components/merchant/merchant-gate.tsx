@@ -79,7 +79,7 @@ export function MerchantGate() {
   return (
     <MerchantExperience
       profile={bundle.profile}
-      stats={bundle.stats}
+      dashboardStats={bundle.dashboardStats}
       customers={bundle.customers}
       approvals={bundle.approvals}
       onRefresh={refresh}

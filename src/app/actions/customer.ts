@@ -1,6 +1,5 @@
 "use server";
 
-import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import type { BusinessInfo, HistoryEntry, RewardCardGroup } from "@/lib/loyalty/types";
 import type { MerchantRow } from "@/lib/supabase/database.types";
@@ -24,6 +23,7 @@ export type CustomerHome =
       card: CardData;
       history: HistoryEntry[];
       rewardCards: RewardCardGroup[];
+      totalStampsCollected: number;
       memberSince: string;
       customerName: string;
       customerPhone: string;
@@ -147,7 +147,7 @@ async function loadCustomerHome(slug: string): Promise<CustomerHome> {
 
   if (!customer) return { status: "no_membership", slug };
 
-  const [cardRes, approvalsRes, redemptionsRes] = await Promise.all([
+  const [cardRes, approvalsRes, redemptionsRes, visitsRes] = await Promise.all([
     supabase.from("loyalty_cards").select("stamps, status").eq("customer_id", customer.id).maybeSingle(),
     supabase
       .from("approvals")
@@ -161,6 +161,10 @@ async function loadCustomerHome(slug: string): Promise<CustomerHome> {
       .eq("customer_id", customer.id)
       .order("redeemed_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("visits")
+      .select("*", { count: "exact", head: true })
+      .eq("customer_id", customer.id),
   ]);
 
   const card = cardRes.data;
@@ -226,6 +230,7 @@ async function loadCustomerHome(slug: string): Promise<CustomerHome> {
     },
     history,
     rewardCards,
+    totalStampsCollected: visitsRes.count ?? 0,
     memberSince: monthYear(customer.member_since),
     customerName: customer.name,
     customerPhone: customer.phone,
@@ -254,27 +259,26 @@ export async function requestStamp(customerId: string): Promise<{ ok: boolean; e
   const { error } = await supabase.rpc("request_stamp", { p_customer_id: customerId });
   if (error) return { ok: false, error: error.message };
 
-  // Notify the merchant (best-effort, off the response path).
-  after(async () => {
-    try {
-      const { data: customer } = await supabase
-        .from("customers")
-        .select("name, merchant_id")
-        .eq("id", customerId)
-        .maybeSingle();
-      if (!customer) return;
-
+  // Notify the merchant. Await delivery so the push isn't dropped when the
+  // serverless function exits (after() is unreliable for web push on Vercel).
+  try {
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("name, merchant_id")
+      .eq("id", customerId)
+      .maybeSingle();
+    if (customer) {
       const { sendPushToMerchant } = await import("@/lib/push/server");
       await sendPushToMerchant(customer.merchant_id, {
         title: "New stamp request",
         body: `${customer.name} is waiting for you to approve a stamp.`,
-        url: "/merchant",
+        url: "/merchant?tab=approvals",
         tag: "froq-approval",
       });
-    } catch {
-      // Never let notification failures affect the stamp request.
     }
-  });
+  } catch {
+    // Never let notification failures affect the stamp request.
+  }
 
   return { ok: true };
 }

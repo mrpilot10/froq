@@ -55,6 +55,7 @@ export function ShopCardGate({ slug }: ShopCardGateProps) {
       card={home.card}
       history={home.history}
       rewardCards={home.rewardCards}
+      totalStampsCollected={home.totalStampsCollected}
       memberSince={home.memberSince}
       customerName={home.customerName}
       customerPhone={home.customerPhone}

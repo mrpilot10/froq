@@ -2,7 +2,14 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { MerchantCustomer, MerchantProfile, PendingApproval } from "@/lib/merchant/types";
+import type {
+  DashboardChartBucket,
+  DashboardDateRange,
+  DashboardFilteredStats,
+  MerchantCustomer,
+  MerchantProfile,
+  PendingApproval,
+} from "@/lib/merchant/types";
 import { slugify, toCustomer, toMerchantProfile, toMerchantRowPatch } from "@/lib/merchant/mappers";
 import { parseRedeemCode } from "@/lib/merchant/parse-redeem-code";
 import { toCanonicalPhone } from "@/lib/auth/otp/phone";
@@ -17,6 +24,54 @@ export interface MerchantStatsData {
   weeklyVisits: number[];
 }
 
+function buildDashboardStats(
+  range: DashboardDateRange,
+  statsRow: {
+    total_customers?: number | null;
+    active_cards?: number | null;
+    pending_approvals?: number | null;
+    rewards_redeemed?: number | null;
+    avg_lifetime_visits?: number | null;
+  } | null,
+  visits: { created_at: string }[],
+  redemptions: { customer_id: string | null; redeemed_at: string }[],
+  allTimeRedeemers: { customer_id: string | null }[],
+): DashboardFilteredStats {
+  const rangeStart = dashboardRangeStart(range);
+  const filteredVisits = rangeStart
+    ? visits.filter((row) => new Date(row.created_at) >= rangeStart)
+    : visits;
+  const filteredRedemptions = rangeStart
+    ? redemptions.filter((row) => new Date(row.redeemed_at) >= rangeStart)
+    : redemptions;
+  const chart = chartBucketsForRange(range, filteredVisits);
+
+  const totalCustomers = statsRow?.total_customers ?? 0;
+  const allTimeRedeemingCustomers = new Set(
+    allTimeRedeemers.map((row) => row.customer_id).filter(Boolean) as string[],
+  );
+  const conversionRate =
+    totalCustomers > 0
+      ? Math.round((allTimeRedeemingCustomers.size / totalCustomers) * 100)
+      : 0;
+
+  return {
+    range,
+    rangeLabel: DASHBOARD_RANGE_LABELS[range],
+    totalCustomers,
+    activeCards: statsRow?.active_cards ?? 0,
+    stampsInRange: filteredVisits.length,
+    pendingApprovals: statsRow?.pending_approvals ?? 0,
+    rewardsInRange: filteredRedemptions.length,
+    rewardsRedeemedAllTime: statsRow?.rewards_redeemed ?? 0,
+    avgLifetimeVisits: Number(statsRow?.avg_lifetime_visits ?? 0),
+    conversionRate,
+    chartBuckets: chart.buckets,
+    chartTitle: chart.title,
+    chartSub: chart.sub,
+  };
+}
+
 export type MerchantBundle =
   | { status: "unauthenticated" }
   | { status: "error" }
@@ -26,6 +81,7 @@ export type MerchantBundle =
       status: "ready";
       profile: MerchantProfile;
       stats: MerchantStatsData;
+      dashboardStats: DashboardFilteredStats;
       customers: MerchantCustomer[];
       approvals: PendingApproval[];
     };
@@ -46,6 +102,210 @@ function weeklyBuckets(rows: { created_at: string }[]): number[] {
     buckets[monIndex] += 1;
   }
   return buckets;
+}
+
+const DASHBOARD_RANGE_LABELS: Record<DashboardDateRange, string> = {
+  today: "Today",
+  "7d": "Last 7 days",
+  "30d": "Last 30 days",
+  all: "All time",
+};
+
+function dashboardRangeStart(range: DashboardDateRange): Date | null {
+  const now = new Date();
+  if (range === "today") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+  if (range === "7d") {
+    const start = new Date(now);
+    start.setDate(start.getDate() - 6);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+  if (range === "30d") {
+    const start = new Date(now);
+    start.setDate(start.getDate() - 29);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+  return null;
+}
+
+function chartBucketsForRange(
+  range: DashboardDateRange,
+  visits: { created_at: string }[],
+): { title: string; sub: string; buckets: DashboardChartBucket[] } {
+  if (range === "today") {
+    const labels = ["12–6a", "6–12p", "12–6p", "6–12a"];
+    const values = [0, 0, 0, 0];
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    for (const row of visits) {
+      const date = new Date(row.created_at);
+      if (date < startOfDay) continue;
+      const hour = date.getHours();
+      const idx = hour < 6 ? 0 : hour < 12 ? 1 : hour < 18 ? 2 : 3;
+      values[idx] += 1;
+    }
+    return {
+      title: "Today's visits",
+      sub: "Stamps approved by time of day",
+      buckets: labels.map((label, index) => ({ label, value: values[index] })),
+    };
+  }
+
+  if (range === "7d") {
+    const days: { label: string; value: number; start: Date; end: Date }[] = [];
+    const now = new Date();
+    for (let offset = 6; offset >= 0; offset -= 1) {
+      const start = new Date(now);
+      start.setDate(start.getDate() - offset);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      days.push({
+        label: start.toLocaleDateString("en-US", { weekday: "narrow" }),
+        value: 0,
+        start,
+        end,
+      });
+    }
+    for (const row of visits) {
+      const date = new Date(row.created_at);
+      for (const day of days) {
+        if (date >= day.start && date < day.end) {
+          day.value += 1;
+          break;
+        }
+      }
+    }
+    return {
+      title: "Daily visits",
+      sub: "Stamps approved per day",
+      buckets: days.map(({ label, value }) => ({ label, value })),
+    };
+  }
+
+  if (range === "30d") {
+    const weeks: { label: string; value: number; start: Date; end: Date }[] = [];
+    const now = new Date();
+    now.setHours(23, 59, 59, 999);
+    for (let week = 3; week >= 0; week -= 1) {
+      const end = new Date(now);
+      end.setDate(end.getDate() - week * 7);
+      end.setHours(23, 59, 59, 999);
+      const start = new Date(end);
+      start.setDate(start.getDate() - 6);
+      start.setHours(0, 0, 0, 0);
+      weeks.push({
+        label: week === 0 ? "Now" : `-${week * 7}d`,
+        value: 0,
+        start,
+        end,
+      });
+    }
+    for (const row of visits) {
+      const date = new Date(row.created_at);
+      for (const week of weeks) {
+        if (date >= week.start && date <= week.end) {
+          week.value += 1;
+          break;
+        }
+      }
+    }
+    return {
+      title: "Weekly visits",
+      sub: "Stamps approved per week",
+      buckets: weeks.map(({ label, value }) => ({ label, value })),
+    };
+  }
+
+  const months: { label: string; value: number; start: Date; end: Date }[] = [];
+  for (let offset = 5; offset >= 0; offset -= 1) {
+    const start = new Date();
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+    start.setMonth(start.getMonth() - offset);
+    const end = new Date(start);
+    end.setMonth(end.getMonth() + 1);
+    months.push({
+      label: start.toLocaleDateString("en-US", { month: "short" }),
+      value: 0,
+      start,
+      end,
+    });
+  }
+  for (const row of visits) {
+    const date = new Date(row.created_at);
+    for (const month of months) {
+      if (date >= month.start && date < month.end) {
+        month.value += 1;
+        break;
+      }
+    }
+  }
+  return {
+    title: "Monthly visits",
+    sub: "Stamps approved per month",
+    buckets: months.map(({ label, value }) => ({ label, value })),
+  };
+}
+
+export async function getDashboardStats(
+  range: DashboardDateRange = "today",
+): Promise<DashboardFilteredStats | null> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const { data: merchantRow } = await supabase
+      .from("merchants")
+      .select("id")
+      .eq("owner_user_id", user.id)
+      .maybeSingle();
+    if (!merchantRow) return null;
+
+    const merchantId = merchantRow.id;
+    const rangeStart = dashboardRangeStart(range);
+
+    let visitsQuery = supabase.from("visits").select("created_at").eq("merchant_id", merchantId);
+    let redemptionsQuery = supabase
+      .from("redemptions")
+      .select("customer_id, redeemed_at")
+      .eq("merchant_id", merchantId);
+
+    if (rangeStart) {
+      const iso = rangeStart.toISOString();
+      visitsQuery = visitsQuery.gte("created_at", iso);
+      redemptionsQuery = redemptionsQuery.gte("redeemed_at", iso);
+    }
+
+    const [statsRes, visitsRes, redemptionsRes, allRedemptionsRes] = await Promise.all([
+      supabase.from("merchant_stats").select("*").eq("merchant_id", merchantId).maybeSingle(),
+      visitsQuery,
+      redemptionsQuery,
+      supabase.from("redemptions").select("customer_id").eq("merchant_id", merchantId),
+    ]);
+
+    const statsRow = statsRes.data;
+    const visits = visitsRes.data ?? [];
+    const redemptions = redemptionsRes.data ?? [];
+
+    return buildDashboardStats(
+      range,
+      statsRow,
+      visits,
+      redemptions,
+      allRedemptionsRes.data ?? [],
+    );
+  } catch {
+    return null;
+  }
 }
 
 export async function getMerchantBundle(): Promise<MerchantBundle> {
@@ -79,7 +339,7 @@ async function loadMerchantBundle(): Promise<MerchantBundle> {
   const merchantId = merchantRow.id;
   const profile = toMerchantProfile(merchantRow);
 
-  const [statsRes, customersRes, approvalsRes, visitsRes] = await Promise.all([
+  const [statsRes, customersRes, approvalsRes, visitsRes, redemptionsRes] = await Promise.all([
     supabase.from("merchant_stats").select("*").eq("merchant_id", merchantId).maybeSingle(),
     supabase
       .from("customer_overview")
@@ -92,14 +352,16 @@ async function loadMerchantBundle(): Promise<MerchantBundle> {
       .eq("merchant_id", merchantId)
       .eq("status", "pending")
       .order("requested_at", { ascending: true }),
+    supabase.from("visits").select("created_at").eq("merchant_id", merchantId),
     supabase
-      .from("visits")
-      .select("created_at")
-      .eq("merchant_id", merchantId)
-      .gte("created_at", new Date(Date.now() - 7 * 86_400_000).toISOString()),
+      .from("redemptions")
+      .select("customer_id, redeemed_at")
+      .eq("merchant_id", merchantId),
   ]);
 
   const statsRow = statsRes.data;
+  const visits = visitsRes.data ?? [];
+  const redemptions = redemptionsRes.data ?? [];
   const stats: MerchantStatsData = {
     totalCustomers: statsRow?.total_customers ?? 0,
     activeCards: statsRow?.active_cards ?? 0,
@@ -107,8 +369,15 @@ async function loadMerchantBundle(): Promise<MerchantBundle> {
     pendingApprovals: statsRow?.pending_approvals ?? 0,
     rewardsRedeemed: statsRow?.rewards_redeemed ?? 0,
     avgLifetimeVisits: Number(statsRow?.avg_lifetime_visits ?? 0),
-    weeklyVisits: weeklyBuckets(visitsRes.data ?? []),
+    weeklyVisits: weeklyBuckets(visits),
   };
+  const dashboardStats = buildDashboardStats(
+    "today",
+    statsRow,
+    visits,
+    redemptions,
+    redemptions,
+  );
 
   const customers = (customersRes.data ?? []).map(toCustomer);
   const customerById = new Map(customers.map((c) => [c.id, c]));
@@ -129,7 +398,7 @@ async function loadMerchantBundle(): Promise<MerchantBundle> {
     };
   });
 
-  return { status: "ready", profile, stats, customers, approvals };
+  return { status: "ready", profile, stats, dashboardStats, customers, approvals };
 }
 
 /**

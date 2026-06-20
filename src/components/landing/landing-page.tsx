@@ -40,6 +40,14 @@ export function LandingPage() {
             <Link href="#pricing" className="landing-login-link">
               Pricing
             </Link>
+            <a
+              href="https://froq.tawk.help/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="landing-login-link"
+            >
+              Help
+            </a>
             <Link href="/merchant" className="landing-login-link">
               Log in
             </Link>

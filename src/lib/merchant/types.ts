@@ -42,6 +42,29 @@ export interface MerchantStats {
   weeklyVisits: number[];
 }
 
+export type DashboardDateRange = "today" | "7d" | "30d" | "all";
+
+export interface DashboardChartBucket {
+  label: string;
+  value: number;
+}
+
+export interface DashboardFilteredStats {
+  range: DashboardDateRange;
+  rangeLabel: string;
+  totalCustomers: number;
+  activeCards: number;
+  stampsInRange: number;
+  pendingApprovals: number;
+  rewardsInRange: number;
+  rewardsRedeemedAllTime: number;
+  avgLifetimeVisits: number;
+  conversionRate: number;
+  chartBuckets: DashboardChartBucket[];
+  chartTitle: string;
+  chartSub: string;
+}
+
 export interface MerchantCustomer {
   id: string;
   name: string;
