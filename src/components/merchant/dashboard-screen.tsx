@@ -57,14 +57,24 @@ export function DashboardScreen({ businessName, avgOrderValue, initialStats }: D
   const rewardsLabel =
     stats.range === "all" ? "Rewards redeemed" : "Rewards in period";
 
+  const stampCards = [
+    { Icon: Users, value: stats.totalCustomers, label: "Total customers" },
+    { Icon: Stamp, value: stats.stampsInRange, label: stampsLabel },
+    { Icon: Clock, value: stats.pendingApprovals, label: "Pending approval" },
+    {
+      Icon: Gift,
+      value: stats.range === "all" ? stats.rewardsRedeemedAllTime : stats.rewardsInRange,
+      label: rewardsLabel,
+      accent: true,
+    },
+  ];
+
   return (
-    <div className="tab-screen">
+    <div className="tab-screen merchant-dashboard">
       <div className="tab-head merchant-dashboard-head">
         <div>
           <h2 className="tab-title">Dashboard</h2>
-          <p className="tab-sub">
-            {businessName} · {stats.rangeLabel}
-          </p>
+          <p className="tab-sub">{businessName}</p>
         </div>
         <div className="merchant-date-select">
           <select
@@ -104,92 +114,87 @@ export function DashboardScreen({ businessName, avgOrderValue, initialStats }: D
           </div>
           <div className="merchant-ltv-foot-item">
             <span className="merchant-ltv-foot-label">Avg. visits</span>
-            <span className="merchant-ltv-foot-value">
-              {stats.avgLifetimeVisits.toFixed(1)}
-            </span>
+            <span className="merchant-ltv-foot-value">{stats.avgLifetimeVisits.toFixed(1)}</span>
           </div>
         </div>
       </div>
 
-      <div className={`merchant-stat-grid${loading ? " merchant-stat-grid--loading" : ""}`}>
-        <div className="merchant-stat-card">
-          <div className="merchant-stat-icon">
-            <Users size={18} strokeWidth={2.2} />
-          </div>
-          <div className="merchant-stat-value">{stats.totalCustomers}</div>
-          <div className="merchant-stat-label">Total customers</div>
+      <section className="merchant-section">
+        <div className="merchant-section-head">
+          <h3 className="merchant-section-label">Overview</h3>
+          <span className="merchant-section-meta">{stats.rangeLabel}</span>
         </div>
-        <div className="merchant-stat-card">
-          <div className="merchant-stat-icon">
-            <Stamp size={18} strokeWidth={2.2} />
-          </div>
-          <div className="merchant-stat-value">{stats.stampsInRange}</div>
-          <div className="merchant-stat-label">{stampsLabel}</div>
-        </div>
-        <div className="merchant-stat-card">
-          <div className="merchant-stat-icon">
-            <Clock size={18} strokeWidth={2.2} />
-          </div>
-          <div className="merchant-stat-value">{stats.pendingApprovals}</div>
-          <div className="merchant-stat-label">Pending approval</div>
-        </div>
-        <div className="merchant-stat-card">
-          <div className="merchant-stat-icon merchant-stat-icon--accent">
-            <Gift size={18} strokeWidth={2.2} />
-          </div>
-          <div className="merchant-stat-value">
-            {stats.range === "all" ? stats.rewardsRedeemedAllTime : stats.rewardsInRange}
-          </div>
-          <div className="merchant-stat-label">{rewardsLabel}</div>
-        </div>
-      </div>
-
-      <div className={`panel-card merchant-chart-card${loading ? " merchant-chart-card--loading" : ""}`}>
-        <div className="merchant-chart-head">
-          <div>
-            <div className="merchant-chart-title">{stats.chartTitle}</div>
-            <div className="merchant-chart-sub">{stats.chartSub}</div>
-          </div>
-          <div className="merchant-chart-total">{stats.stampsInRange} total</div>
-        </div>
-        <div className="merchant-chart-bars">
-          {stats.chartBuckets.map((bucket) => (
-            <div key={bucket.label} className="merchant-chart-bar-col">
-              <div
-                className="merchant-chart-bar"
-                style={{ height: `${(bucket.value / maxVisits) * 100}%` }}
-              />
-              <span className="merchant-chart-bar-label">{bucket.label}</span>
+        <div className={`merchant-stat-grid${loading ? " merchant-stat-grid--loading" : ""}`}>
+          {stampCards.map(({ Icon, value, label, accent }) => (
+            <div key={label} className="merchant-stat-card">
+              <div className={`merchant-stat-icon${accent ? " merchant-stat-icon--accent" : ""}`}>
+                <Icon size={18} strokeWidth={2.2} />
+              </div>
+              <div className="merchant-stat-value">{value}</div>
+              <div className="merchant-stat-label">{label}</div>
             </div>
           ))}
         </div>
-      </div>
+      </section>
 
-      <div className="merchant-settings-group">
-        <h3 className="merchant-settings-title">Counter poster</h3>
+      <section className="merchant-section">
+        <div className="merchant-section-head">
+          <h3 className="merchant-section-label">Activity</h3>
+          <span className="merchant-section-meta">{stats.stampsInRange} total</span>
+        </div>
+        <div className={`panel-card merchant-chart-card${loading ? " merchant-chart-card--loading" : ""}`}>
+          <div className="merchant-chart-head">
+            <div>
+              <div className="merchant-chart-title">{stats.chartTitle}</div>
+              <div className="merchant-chart-sub">{stats.chartSub}</div>
+            </div>
+          </div>
+          <div className="merchant-chart-bars">
+            {stats.chartBuckets.map((bucket) => (
+              <div key={bucket.label} className="merchant-chart-bar-col">
+                <div
+                  className="merchant-chart-bar"
+                  style={{ height: `${(bucket.value / maxVisits) * 100}%` }}
+                />
+                <span className="merchant-chart-bar-label">{bucket.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="merchant-section">
+        <div className="merchant-section-head">
+          <h3 className="merchant-section-label">Performance</h3>
+        </div>
+        <div className={`panel-card merchant-summary-card${loading ? " merchant-summary-card--loading" : ""}`}>
+          <div className="merchant-summary-row">
+            <span className="merchant-summary-label">Active loyalty cards</span>
+            <span className="merchant-summary-value">{stats.activeCards}</span>
+          </div>
+          <div className="merchant-summary-divider" />
+          <div className="merchant-summary-row">
+            <span className="merchant-summary-label">Conversion to reward</span>
+            <span className="merchant-summary-value merchant-summary-value--accent">
+              {stats.conversionRate}%
+            </span>
+          </div>
+          <div className="merchant-summary-divider" />
+          <div className="merchant-summary-row">
+            <span className="merchant-summary-label">Rewards redeemed (all time)</span>
+            <span className="merchant-summary-value">{stats.rewardsRedeemedAllTime}</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="merchant-section">
+        <div className="merchant-section-head">
+          <h3 className="merchant-section-label">Grow your loyalty</h3>
+        </div>
         <div className="panel-card">
           <MerchantPosterCard caption="Print this and place it at your counter. Customers scan the QR to join your loyalty program." />
         </div>
-      </div>
-
-      <div className={`panel-card merchant-summary-card${loading ? " merchant-summary-card--loading" : ""}`}>
-        <div className="merchant-summary-row">
-          <span className="merchant-summary-label">Active loyalty cards</span>
-          <span className="merchant-summary-value">{stats.activeCards}</span>
-        </div>
-        <div className="merchant-summary-divider" />
-        <div className="merchant-summary-row">
-          <span className="merchant-summary-label">Conversion to reward</span>
-          <span className="merchant-summary-value merchant-summary-value--accent">
-            {stats.conversionRate}%
-          </span>
-        </div>
-        <div className="merchant-summary-divider" />
-        <div className="merchant-summary-row">
-          <span className="merchant-summary-label">Rewards redeemed (all time)</span>
-          <span className="merchant-summary-value">{stats.rewardsRedeemedAllTime}</span>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }

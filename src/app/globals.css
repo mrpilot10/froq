@@ -2938,6 +2938,39 @@ body {
   color: var(--brand-deep);
 }
 
+.merchant-dashboard {
+  gap: 22px;
+}
+
+.merchant-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.merchant-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px;
+}
+
+.merchant-section-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.merchant-section-meta {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--brand);
+}
+
 .merchant-stat-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -3111,21 +3144,22 @@ body {
 
 .merchant-stat-card {
   background: var(--paper);
-  border-radius: 22px;
-  padding: 18px 16px;
-  box-shadow: 0 14px 32px -22px rgba(0, 0, 0, 0.28);
+  border-radius: 20px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 6%, transparent);
+  box-shadow: 0 12px 28px -24px rgba(0, 0, 0, 0.3);
 }
 
 .merchant-stat-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--accent) 22%, var(--paper));
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 20%, var(--paper));
   color: var(--brand-deep);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .merchant-stat-icon--accent {
@@ -3134,11 +3168,11 @@ body {
 }
 
 .merchant-stat-value {
-  font-size: 26px;
+  font-size: 27px;
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
 }
 
 .merchant-stat-label {
@@ -3157,7 +3191,7 @@ body {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 .merchant-chart-title {
