@@ -2,6 +2,7 @@ export interface BusinessInfo {
   name: string;
   shortName: string;
   address: string;
+  brandColor: string;
   rewardTitle: string;
   rewardSubtitle: string;
   rewardName: string;

@@ -39,6 +39,7 @@ function toBusinessInfo(m: MerchantRow): BusinessInfo {
     name: m.business_name,
     shortName: m.short_name,
     address: m.address ?? "",
+    brandColor: m.brand_color,
     rewardTitle: m.reward_title,
     rewardSubtitle: m.reward_name,
     rewardName: m.reward_name,

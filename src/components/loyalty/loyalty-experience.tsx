@@ -5,6 +5,7 @@ import { Gift, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { requestStamp, type CardData } from "@/app/actions/customer";
 import type { BusinessInfo, HistoryEntry, NavTab } from "@/lib/loyalty/types";
+import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { useRealtime } from "@/lib/supabase/use-realtime";
 import { BusinessHeader } from "./business-header";
 import { Confetti } from "./confetti";
@@ -51,6 +52,8 @@ export function LoyaltyExperience({
   const [rewardSheetOpen, setRewardSheetOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
+
+  useBrandTheme(business.brandColor);
 
   const initials = getInitials(customerName);
   const isRewardReady = card.status === "reward_ready";

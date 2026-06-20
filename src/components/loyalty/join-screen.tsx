@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { formatPhoneDisplay, isValidEmail, isValidPhone } from "@/lib/auth/format";
 import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/client";
 import { checkShopMembership, joinMerchant } from "@/app/actions/customer";
+import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { createClient } from "@/lib/supabase/client";
 import { OtpInput } from "@/components/auth/otp-input";
 
@@ -45,6 +46,8 @@ export function JoinScreen({
   const [resendIn, setResendIn] = useState(RESEND_SECONDS);
 
   const e164 = authedPhone || `+91${phone}`;
+
+  useBrandTheme(brandColor);
 
   // Each shop QR is its own login — clear other sessions when joining a new business.
   useEffect(() => {

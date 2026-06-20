@@ -1,9 +1,11 @@
 @import "tailwindcss";
 
 :root {
+  /* Customer-facing brand color. Override --brand (e.g. per merchant) and the
+     darker shades derive automatically. Defaults reproduce the originals. */
   --brand: #2b6f5c;
-  --brand-dark: #1e4f41;
-  --brand-deep: #15372d;
+  --brand-dark: color-mix(in srgb, var(--brand) 70%, black);
+  --brand-deep: color-mix(in srgb, var(--brand) 50%, black);
   --ink: #1b1b1d;
   --ink-soft: #6e6e73;
   --ink-faint: #a8a8ad;

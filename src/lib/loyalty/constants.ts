@@ -6,6 +6,7 @@ export const DEMO_BUSINESS: BusinessInfo = {
   name: "Bloom Coffee Co.",
   shortName: "Bloom Coffee",
   address: "42 Market Street, San Francisco, CA 94105",
+  brandColor: "#2b6f5c",
   rewardTitle: "Buy 4 coffees,\nget your 5th free",
   rewardSubtitle: "Any handcrafted drink, any size",
   rewardName: "Free coffee",
