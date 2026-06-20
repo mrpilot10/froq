@@ -1,4 +1,4 @@
-import { ChevronRight, LogOut, Mail, MapPin, Phone, Store } from "lucide-react";
+import { LogOut, Mail, Phone } from "lucide-react";
 import { formatPhoneDisplay } from "@/lib/auth/format";
 import type { BusinessInfo } from "@/lib/loyalty/types";
 import { TabPageShell } from "./tab-page-shell";
@@ -27,7 +27,7 @@ export function ProfileScreen({
   return (
     <TabPageShell
       title="Profile"
-      subtitle={`Your account at ${business.shortName}`}
+      subtitle={`Your account at ${business.name}`}
     >
       <div className="panel-card profile-panel">
         <div className="profile-hero">
@@ -63,27 +63,6 @@ export function ProfileScreen({
             </div>
           </div>
         )}
-
-        <div className="profile-row">
-          <div className="profile-row-icon">
-            <Store size={18} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
-          </div>
-          <div className="profile-row-copy">
-            <div className="profile-row-label">Store</div>
-            <div className="profile-row-value">{business.name}</div>
-          </div>
-          <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" aria-hidden />
-        </div>
-
-        <div className="profile-row">
-          <div className="profile-row-icon">
-            <MapPin size={18} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
-          </div>
-          <div className="profile-row-copy">
-            <div className="profile-row-label">Address</div>
-            <div className="profile-row-value profile-row-value--soft">{business.address}</div>
-          </div>
-        </div>
       </div>
 
       <button type="button" className="profile-logout" onClick={onLogout}>

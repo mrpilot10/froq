@@ -40,7 +40,7 @@ export function RewardSheet({
     QRCode.toDataURL(payload, {
       margin: 1,
       width: 320,
-      color: { dark: "#15372d", light: "#ffffff" },
+      color: { dark: "#000000", light: "#ffffff" },
     })
       .then((url) => {
         if (active) setQrUrl(url);

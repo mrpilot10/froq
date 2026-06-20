@@ -12,8 +12,8 @@ export function MerchantQrPanel({ profile }: { profile: MerchantProfile }) {
       <h3 className="merchant-settings-title">Loyalty QR</h3>
       <div className="panel-card merchant-qr-panel">
         <p className="merchant-qr-caption">
-          Display this at your counter. Customers scan it to join {profile.shortName}&apos;s loyalty
-          program.
+          Display this at your counter. Customers scan it to join {profile.businessName}&apos;s
+          loyalty program.
         </p>
 
         <div className="merchant-qr-frame">

@@ -12,7 +12,6 @@ export interface MerchantProfile {
   id?: string;
   slug?: string;
   businessName: string;
-  shortName: string;
   email: string;
   phone: string;
   address: string;

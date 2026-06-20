@@ -56,7 +56,7 @@ export function MerchantProfileScreen({
   onEditSection,
   onLogout,
 }: MerchantProfileScreenProps) {
-  const initials = profile.shortName
+  const initials = profile.businessName
     .split(/\s+/)
     .map((w) => w[0])
     .join("")

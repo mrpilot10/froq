@@ -4,13 +4,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getCustomerHome, type CustomerHome } from "@/app/actions/customer";
 import { createClient } from "@/lib/supabase/client";
+import { CardSkeleton } from "@/components/loyalty/card-skeleton";
 import { LoyaltyExperience } from "@/components/loyalty/loyalty-experience";
 
 interface ShopCardGateProps {
   slug: string;
+  brandColor?: string;
 }
 
-export function ShopCardGate({ slug }: ShopCardGateProps) {
+export function ShopCardGate({ slug, brandColor }: ShopCardGateProps) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [home, setHome] = useState<CustomerHome | null>(null);
@@ -36,19 +38,7 @@ export function ShopCardGate({ slug }: ShopCardGateProps) {
   }, [supabase, slug, router]);
 
   if (!home || home.status !== "ready") {
-    return (
-      <div className="loyalty-page">
-        <div className="loyalty-screen auth-screen">
-          <div className="auth-card auth-card--placeholder">
-            <div className="auth-loading" aria-live="polite" aria-busy="true">
-              <div className="processing-spinner" aria-hidden="true" />
-              <p className="processing-title">Loading your card</p>
-              <p className="processing-sub">Just a moment…</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <CardSkeleton brandColor={brandColor} />;
   }
 
   return (

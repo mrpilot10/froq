@@ -12,12 +12,25 @@ const plusJakarta = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   title: "Froq",
   description: "Digital loyalty for local businesses and their customers.",
+  manifest: "/manifest.webmanifest",
+  // Ensures iOS launches the home-screen app in standalone mode, which is
+  // required for navigator.standalone and iOS 16.4+ web push to work.
+  appleWebApp: {
+    capable: true,
+    title: "Froq",
+    statusBarStyle: "default",
+  },
+  icons: {
+    icon: "/froq-logo.png",
+    apple: "/froq-logo.png",
+  },
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  themeColor: "#004353",
 };
 
 export default function RootLayout({

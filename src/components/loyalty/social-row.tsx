@@ -29,8 +29,8 @@ export function SocialRow({ links, className = "social-row" }: SocialRowProps) {
           className="social-btn"
           href={item.href}
           aria-label={item.label}
-          target={item.href?.startsWith("http") ? "_blank" : undefined}
-          rel={item.href?.startsWith("http") ? "noopener noreferrer" : undefined}
+          target="_blank"
+          rel="noopener noreferrer"
         >
           {item.icon}
         </a>

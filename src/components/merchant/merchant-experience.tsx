@@ -138,6 +138,7 @@ export function MerchantExperience({
   return (
     <div className="merchant-page merchant-theme">
       <div className="merchant-screen">
+        <OnboardingPrompt />
         <header className="merchant-header">
           <div className="merchant-header-brand">
             <div className="merchant-header-logo">
@@ -166,7 +167,7 @@ export function MerchantExperience({
         {activeTab === "dashboard" && (
           <DashboardScreen
             stats={stats}
-            businessName={profile.shortName}
+            businessName={profile.businessName}
             avgOrderValue={profile.avgOrderValue}
           />
         )}
@@ -206,8 +207,6 @@ export function MerchantExperience({
       />
 
       <MerchantQrDrawer open={qrOpen} profile={profile} onClose={() => setQrOpen(false)} />
-
-      <OnboardingPrompt />
     </div>
   );
 }

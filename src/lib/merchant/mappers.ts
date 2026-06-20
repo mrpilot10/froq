@@ -14,7 +14,6 @@ export function toMerchantProfile(row: MerchantRow): MerchantProfile {
     id: row.id,
     slug: row.slug,
     businessName: row.business_name,
-    shortName: row.short_name,
     email: row.email ?? "",
     phone: row.phone ?? "",
     address: row.address ?? "",
@@ -38,8 +37,11 @@ export function toMerchantProfile(row: MerchantRow): MerchantProfile {
 // Maps a UI profile patch back to db column names for updates.
 export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<MerchantRow> {
   const row: Partial<MerchantRow> = {};
-  if (patch.businessName !== undefined) row.business_name = patch.businessName;
-  if (patch.shortName !== undefined) row.short_name = patch.shortName;
+  if (patch.businessName !== undefined) {
+    row.business_name = patch.businessName;
+    // short_name is a NOT NULL legacy column; keep it mirrored to business name.
+    row.short_name = patch.businessName;
+  }
   if (patch.email !== undefined) row.email = patch.email;
   if (patch.phone !== undefined) row.phone = patch.phone;
   if (patch.address !== undefined) row.address = patch.address;

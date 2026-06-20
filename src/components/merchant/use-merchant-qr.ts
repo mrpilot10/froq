@@ -13,7 +13,7 @@ function slugify(value: string) {
 }
 
 export function joinUrlFor(profile: MerchantProfile) {
-  const slug = profile.slug || slugify(profile.shortName || profile.businessName) || "shop";
+  const slug = profile.slug || slugify(profile.businessName) || "shop";
   const base =
     process.env.NEXT_PUBLIC_SITE_URL ||
     (typeof window !== "undefined" ? window.location.origin : "https://froq.io");
@@ -23,14 +23,13 @@ export function joinUrlFor(profile: MerchantProfile) {
 export function useMerchantQr(profile: MerchantProfile) {
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const joinUrl = joinUrlFor(profile);
-  const dark = profile.brandColor || "#004353";
 
   useEffect(() => {
     let active = true;
     QRCode.toDataURL(joinUrl, {
       margin: 1,
       width: 520,
-      color: { dark, light: "#ffffff" },
+      color: { dark: "#000000", light: "#ffffff" },
     })
       .then((url) => {
         if (active) setQrUrl(url);
@@ -41,15 +40,15 @@ export function useMerchantQr(profile: MerchantProfile) {
     return () => {
       active = false;
     };
-  }, [joinUrl, dark]);
+  }, [joinUrl]);
 
   const download = useCallback(() => {
     if (!qrUrl) return;
     const link = document.createElement("a");
     link.href = qrUrl;
-    link.download = `${slugify(profile.shortName || "froq") || "froq"}-loyalty-qr.png`;
+    link.download = `${slugify(profile.businessName || "froq") || "froq"}-loyalty-qr.png`;
     link.click();
-  }, [qrUrl, profile.shortName]);
+  }, [qrUrl, profile.businessName]);
 
   return { qrUrl, joinUrl, download };
 }

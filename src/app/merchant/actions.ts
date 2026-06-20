@@ -202,8 +202,7 @@ export async function createMerchant(input: {
   rewardName: string;
   avgOrderValue?: number;
   address?: string;
-  // Optional overrides; sensible defaults are derived when omitted.
-  shortName?: string;
+  // Optional override; a sensible default is derived when omitted.
   totalStamps?: number;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
@@ -216,9 +215,6 @@ export async function createMerchant(input: {
     const businessName = input.businessName.trim();
     if (!businessName) return { ok: false, error: "Business name is required." };
 
-    // Short name is no longer collected in the wizard — derive it from the
-    // business name (capped to the column-friendly length).
-    const shortName = (input.shortName?.trim() || businessName).slice(0, 22);
     const base = slugify(businessName) || "shop";
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -226,14 +222,14 @@ export async function createMerchant(input: {
       const { error } = await supabase.from("merchants").insert({
         owner_user_id: user.id,
         business_name: businessName,
-        short_name: shortName,
+        short_name: businessName,
         slug,
         brand_color: input.brandColor,
         logo_url: input.logoDataUrl ?? null,
         address: input.address?.trim() || null,
         reward_title: input.rewardTitle?.trim() || "Free reward",
         reward_name: input.rewardName.trim() || "Free reward",
-        total_stamps: input.totalStamps ?? 8,
+        total_stamps: input.totalStamps ?? 5,
         avg_order_value: input.avgOrderValue ?? 0,
         email: user.email ?? null,
         phone: user.phone ?? null,

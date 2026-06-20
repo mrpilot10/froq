@@ -7,6 +7,7 @@ import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
 import { fileToLogoDataUrl } from "@/lib/merchant/image";
 import type { MerchantEditSection, MerchantProfile } from "@/lib/merchant/types";
+import { DeviceSetupRows, useDeviceSetup } from "./device-setup-rows";
 
 interface MerchantProfileEditScreenProps {
   section: MerchantEditSection;
@@ -127,6 +128,7 @@ export function MerchantProfileEditScreen({
   onSave,
 }: MerchantProfileEditScreenProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const device = useDeviceSetup();
 
   const meta = section ? SECTION_META[section] : null;
 
@@ -240,12 +242,6 @@ export function MerchantProfileEditScreen({
               onChange={(v) => updateField("businessName", v)}
             />
             <LimitedField
-              label="Short name"
-              value={profile.shortName}
-              maxLength={FIELD_LIMITS.shortName}
-              onChange={(v) => updateField("shortName", v)}
-            />
-            <LimitedField
               label="Address"
               value={profile.address}
               maxLength={FIELD_LIMITS.address}
@@ -320,6 +316,13 @@ export function MerchantProfileEditScreen({
 
         {section === "notifications" && (
           <>
+            <div className="merchant-device-block">
+              <span className="auth-label">This device</span>
+              <DeviceSetupRows state={device} />
+              <span className="merchant-field-hint">
+                Install Froq and allow notifications on each device where you want approval alerts.
+              </span>
+            </div>
             <ToggleRow
               label="Stamp requests"
               description="Notify when a customer collects a stamp"

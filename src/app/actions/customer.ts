@@ -32,14 +32,28 @@ export type CustomerHome =
 export interface ShopMembershipCheck {
   isMember: boolean;
   isAuthenticated: boolean;
+  /** Canonical phone of the signed-in user (digits, no '+'), when authenticated. */
+  phone?: string;
+  /** Name from any existing membership for this user, to pre-fill signup. */
+  name?: string;
+  /** Email from any existing membership for this user, to pre-fill signup. */
+  email?: string;
+}
+
+/** Ensures a stored link (often saved without a scheme) is an absolute URL. */
+function toExternalUrl(raw?: string | null): string | undefined {
+  const trimmed = raw?.trim();
+  if (!trimmed) return undefined;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed.replace(/^\/+/, "")}`;
 }
 
 function toBusinessInfo(m: MerchantRow): BusinessInfo {
   return {
     name: m.business_name,
-    shortName: m.short_name,
     address: m.address ?? "",
     brandColor: m.brand_color,
+    logoUrl: m.logo_url ?? null,
     rewardTitle: m.reward_title,
     rewardSubtitle: m.reward_name,
     rewardName: m.reward_name,
@@ -47,10 +61,10 @@ function toBusinessInfo(m: MerchantRow): BusinessInfo {
     rewardImage: "/reward-coffee.png",
     totalStamps: m.total_stamps,
     socialLinks: {
-      instagram: m.instagram_url || undefined,
-      facebook: m.facebook_url || undefined,
-      website: m.website_url || undefined,
-      googleReviews: m.google_business_url || undefined,
+      instagram: toExternalUrl(m.instagram_url),
+      facebook: toExternalUrl(m.facebook_url),
+      website: toExternalUrl(m.website_url),
+      googleReviews: toExternalUrl(m.google_business_url),
     },
   };
 }
@@ -79,8 +93,10 @@ export async function checkShopMembership(slug: string): Promise<ShopMembershipC
     } = await supabase.auth.getUser();
     if (!user) return { isMember: false, isAuthenticated: false };
 
+    const phone = user.phone || undefined;
+
     const { data: merchant } = await supabase.from("merchants").select("id").eq("slug", slug).maybeSingle();
-    if (!merchant) return { isMember: false, isAuthenticated: true };
+    if (!merchant) return { isMember: false, isAuthenticated: true, phone };
 
     const { data: customer } = await supabase
       .from("customers")
@@ -89,7 +105,23 @@ export async function checkShopMembership(slug: string): Promise<ShopMembershipC
       .eq("user_id", user.id)
       .maybeSingle();
 
-    return { isMember: !!customer, isAuthenticated: true };
+    // Reuse name/email from any prior membership so a logged-in customer can
+    // join a new shop without re-entering details (and without a new OTP/SMS).
+    const { data: priorProfile } = await supabase
+      .from("customers")
+      .select("name, email")
+      .eq("user_id", user.id)
+      .order("member_since", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    return {
+      isMember: !!customer,
+      isAuthenticated: true,
+      phone,
+      name: priorProfile?.name || undefined,
+      email: priorProfile?.email || undefined,
+    };
   } catch {
     return { isMember: false, isAuthenticated: false };
   }

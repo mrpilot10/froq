@@ -39,13 +39,27 @@ export function OtpInput({
     [length, onChange],
   );
 
-  const handleChange = (index: number, digit: string) => {
-    const cleaned = digit.replace(/\D/g, "").slice(-1);
+  const handleChange = (index: number, raw: string) => {
+    const cleaned = raw.replace(/\D/g, "");
+
+    // SMS auto-fill (and paste) deliver the whole code into a single box — spread
+    // the characters across the inputs starting from the current one.
+    if (cleaned.length > 1) {
+      const nextDigits = [...digits];
+      for (let offset = 0; offset < cleaned.length && index + offset < length; offset += 1) {
+        nextDigits[index + offset] = cleaned[offset];
+      }
+      updateValue(nextDigits);
+      focusInput(Math.min(index + cleaned.length, length - 1));
+      return;
+    }
+
+    const single = cleaned.slice(-1);
     const nextDigits = [...digits];
-    nextDigits[index] = cleaned;
+    nextDigits[index] = single;
     updateValue(nextDigits);
 
-    if (cleaned && index < length - 1) {
+    if (single && index < length - 1) {
       focusInput(index + 1);
     }
   };

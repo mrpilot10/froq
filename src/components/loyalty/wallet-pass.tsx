@@ -29,9 +29,20 @@ export function WalletPass({
         <div className="pass-top">
           <div className="pass-brand">
             <div className="pass-brand-mark">
-              <CoffeeIcon stroke="#fff" />
+              {business.logoUrl ? (
+                <Image
+                  src={business.logoUrl}
+                  alt={business.name}
+                  width={32}
+                  height={32}
+                  unoptimized
+                  className="pass-brand-logo-img"
+                />
+              ) : (
+                <CoffeeIcon stroke="#fff" />
+              )}
             </div>
-            <div className="pass-brand-name">{business.shortName}</div>
+            <div className="pass-brand-name">{business.name}</div>
           </div>
         </div>
 

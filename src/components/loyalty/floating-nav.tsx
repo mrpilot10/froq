@@ -6,7 +6,6 @@ import type { NavTab } from "@/lib/loyalty/types";
 interface FloatingNavProps {
   activeTab: NavTab;
   onTabChange: (tab: NavTab) => void;
-  collectDisabled?: boolean;
 }
 
 const NAV_ITEMS: Array<{
@@ -19,17 +18,12 @@ const NAV_ITEMS: Array<{
   { id: "profile", label: "Profile", Icon: User },
 ];
 
-export function FloatingNav({
-  activeTab,
-  onTabChange,
-  collectDisabled = false,
-}: FloatingNavProps) {
+export function FloatingNav({ activeTab, onTabChange }: FloatingNavProps) {
   return (
     <div className="nav-dock">
       <nav className="nav-bar" aria-label="Main navigation">
         {NAV_ITEMS.map(({ id, label, Icon }) => {
           const isActive = activeTab === id;
-          const isCollect = id === "collect";
 
           return (
             <button
@@ -37,7 +31,6 @@ export function FloatingNav({
               type="button"
               className={`nav-item${isActive ? " active" : ""}`}
               aria-current={isActive ? "page" : undefined}
-              disabled={isCollect && collectDisabled}
               onClick={() => onTabChange(id)}
             >
               <Icon

@@ -185,7 +185,7 @@ export function LoyaltyExperience({
         </div>
       </div>
 
-      <FloatingNav activeTab={activeTab} onTabChange={handleTabChange} collectDisabled={card.pending} />
+      <FloatingNav activeTab={activeTab} onTabChange={handleTabChange} />
 
       <SuccessScreen
         open={screen === "success"}

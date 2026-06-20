@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { ArrowLeft, Gift, Mail, Phone, UserRound } from "lucide-react";
@@ -9,7 +9,6 @@ import { formatPhoneDisplay, isValidEmail, isValidPhone } from "@/lib/auth/forma
 import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/client";
 import { checkShopMembership, joinMerchant } from "@/app/actions/customer";
 import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
-import { createClient } from "@/lib/supabase/client";
 import { OtpInput } from "@/components/auth/otp-input";
 
 type Step = "checking" | "phone" | "otp" | "signup" | "joining";
@@ -33,7 +32,6 @@ export function JoinScreen({
   brandColor,
   logoUrl,
 }: JoinScreenProps) {
-  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [step, setStep] = useState<Step>("checking");
   const [phone, setPhone] = useState("");
@@ -49,7 +47,6 @@ export function JoinScreen({
 
   useBrandTheme(brandColor);
 
-  // Each shop QR is its own login — clear other sessions when joining a new business.
   useEffect(() => {
     let active = true;
 
@@ -65,11 +62,17 @@ export function JoinScreen({
 
       setIsReturningMember(membership.isMember);
 
-      if (!membership.isMember) {
-        await supabase.auth.signOut();
+      // Already signed in on this device: the auth identity is the phone number,
+      // so reuse the session to join this shop directly — no OTP, no SMS charge.
+      if (membership.isAuthenticated && membership.phone) {
+        setAuthedPhone(`+${membership.phone}`);
+        setPhone(membership.phone.slice(-10));
+        if (membership.name) setName(membership.name);
+        if (membership.email) setEmail(membership.email);
+        setStep("signup");
+        return;
       }
 
-      if (!active) return;
       setStep("phone");
     }
 
@@ -77,7 +80,7 @@ export function JoinScreen({
     return () => {
       active = false;
     };
-  }, [slug, supabase, router]);
+  }, [slug, router]);
 
   const sendCode = useCallback(async () => {
     if (!isValidPhone(phone)) {

@@ -10,7 +10,7 @@ export default async function JoinPage({ params }: { params: Promise<{ slug: str
       const { data } = await supabase
         .from("merchants")
         .select(
-          "business_name, short_name, brand_color, logo_url, reward_title, reward_name, total_stamps, slug",
+          "business_name, brand_color, logo_url, reward_title, reward_name, total_stamps, slug",
         )
         .eq("slug", slug)
         .maybeSingle();

@@ -7,7 +7,6 @@ import type {
 
 export const MERCHANT_PROFILE: MerchantProfile = {
   businessName: "Bloom Coffee Co.",
-  shortName: "Bloom Coffee",
   email: "hello@bloomcoffee.com",
   phone: "+91 98765 43210",
   address: "42 Market Street, San Francisco, CA 94105",
@@ -154,7 +153,6 @@ export const BRAND_COLORS: Array<{ name: string; value: string }> = [
 
 export const FIELD_LIMITS = {
   businessName: 40,
-  shortName: 22,
   address: 80,
   email: 60,
   phone: 18,

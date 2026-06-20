@@ -73,25 +73,29 @@ export function SuccessScreen({
 
           <div className="thanks-divider" />
 
-          <div className="thanks-section-label">Help us grow</div>
+          {business.socialLinks.googleReviews && (
+            <>
+              <div className="thanks-section-label">Help us grow</div>
 
-          <a
-            className="review-btn"
-            href={business.socialLinks.googleReviews}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <div className="review-btn-icon">
-              <GoogleIcon />
-            </div>
-            <div className="review-btn-text">
-              <div className="review-btn-title">Leave a Google review</div>
-              <div className="review-btn-sub">Takes less than a minute</div>
-            </div>
-            <div className="review-btn-arrow">
-              <ChevronRight size={14} strokeWidth={2.4} color="#fff" />
-            </div>
-          </a>
+              <a
+                className="review-btn"
+                href={business.socialLinks.googleReviews}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <div className="review-btn-icon">
+                  <GoogleIcon />
+                </div>
+                <div className="review-btn-text">
+                  <div className="review-btn-title">Leave a Google review</div>
+                  <div className="review-btn-sub">Takes less than a minute</div>
+                </div>
+                <div className="review-btn-arrow">
+                  <ChevronRight size={14} strokeWidth={2.4} color="#fff" />
+                </div>
+              </a>
+            </>
+          )}
 
           <SocialRow links={business.socialLinks} className="thanks-social-row" />
 
