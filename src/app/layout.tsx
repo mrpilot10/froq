@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
@@ -43,6 +44,7 @@ export default function RootLayout({
       <body className="min-h-full antialiased">
         {children}
         <Toaster position="top-center" richColors />
+        <SpeedInsights />
       </body>
     </html>
   );
