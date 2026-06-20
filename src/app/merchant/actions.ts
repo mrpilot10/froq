@@ -149,6 +149,51 @@ export async function markMerchantOnboarding(): Promise<{ ok: boolean; error?: s
   }
 }
 
+export async function savePushSubscription(input: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated" };
+
+    const { data: merchant } = await supabase
+      .from("merchants")
+      .select("id")
+      .eq("owner_user_id", user.id)
+      .maybeSingle();
+    if (!merchant) return { ok: false, error: "Merchant not found" };
+
+    const { error } = await supabase.from("push_subscriptions").upsert(
+      {
+        merchant_id: merchant.id,
+        endpoint: input.endpoint,
+        p256dh: input.p256dh,
+        auth: input.auth,
+      },
+      { onConflict: "endpoint" },
+    );
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not save subscription.",
+    };
+  }
+}
+
+export async function removePushSubscription(
+  endpoint: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("push_subscriptions").delete().eq("endpoint", endpoint);
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
 export async function createMerchant(input: {
   businessName: string;
   brandColor: string;

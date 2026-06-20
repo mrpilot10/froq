@@ -15,6 +15,7 @@ import {
   type MerchantStatsData,
 } from "@/app/merchant/actions";
 import { useRealtime } from "@/lib/supabase/use-realtime";
+import { enablePushForMerchant, registerServiceWorker } from "@/lib/push/client";
 import { ApprovalsScreen } from "./approvals-screen";
 import { CustomersScreen } from "./customers-screen";
 import { DashboardScreen } from "./dashboard-screen";
@@ -50,6 +51,15 @@ export function MerchantExperience({
 
   useEffect(() => setProfile(initialProfile), [initialProfile]);
 
+  // Register the service worker and (re)subscribe to push if already allowed,
+  // so approval alerts arrive even when the dashboard isn't focused.
+  useEffect(() => {
+    void registerServiceWorker();
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      void enablePushForMerchant();
+    }
+  }, []);
+
   // Live dashboard: refetch when stamp requests or redemptions change.
   const merchantFilter = profile.id ? `merchant_id=eq.${profile.id}` : undefined;
   const refreshFn = useCallback(() => {
@@ -57,6 +67,15 @@ export function MerchantExperience({
   }, [onRefresh]);
   useRealtime("approvals", merchantFilter, refreshFn);
   useRealtime("redemptions", merchantFilter, refreshFn);
+
+  // In-app cue when the pending queue grows while the dashboard is open.
+  const [prevPending, setPrevPending] = useState(approvals.length);
+  useEffect(() => {
+    if (approvals.length > prevPending) {
+      toast("New stamp request awaiting approval");
+    }
+    setPrevPending(approvals.length);
+  }, [approvals.length, prevPending]);
 
   // Runs a server action then refreshes the bundle, surfacing errors as toasts.
   const run = useCallback(

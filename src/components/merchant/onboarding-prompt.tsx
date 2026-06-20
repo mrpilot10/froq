@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Bell, Check, Download, Sparkles } from "lucide-react";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
+import { enablePushForMerchant } from "@/lib/push/client";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -69,6 +70,7 @@ export function OnboardingPrompt() {
     try {
       const result = await Notification.requestPermission();
       setNotifState(result);
+      if (result === "granted") void enablePushForMerchant();
     } catch {
       setNotifState("denied");
     }

@@ -1,5 +1,6 @@
 "use server";
 
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import type { BusinessInfo, HistoryEntry } from "@/lib/loyalty/types";
 import type { MerchantRow } from "@/lib/supabase/database.types";
@@ -187,5 +188,29 @@ export async function joinMerchant(
 export async function requestStamp(customerId: string): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
   const { error } = await supabase.rpc("request_stamp", { p_customer_id: customerId });
-  return error ? { ok: false, error: error.message } : { ok: true };
+  if (error) return { ok: false, error: error.message };
+
+  // Notify the merchant (best-effort, off the response path).
+  after(async () => {
+    try {
+      const { data: customer } = await supabase
+        .from("customers")
+        .select("name, merchant_id")
+        .eq("id", customerId)
+        .maybeSingle();
+      if (!customer) return;
+
+      const { sendPushToMerchant } = await import("@/lib/push/server");
+      await sendPushToMerchant(customer.merchant_id, {
+        title: "New stamp request",
+        body: `${customer.name} is waiting for you to approve a stamp.`,
+        url: "/merchant",
+        tag: "froq-approval",
+      });
+    } catch {
+      // Never let notification failures affect the stamp request.
+    }
+  });
+
+  return { ok: true };
 }

@@ -78,6 +78,15 @@ export interface RedemptionRow {
   redeemed_at: string;
 }
 
+export interface PushSubscriptionRow {
+  id: string;
+  merchant_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  created_at: string;
+}
+
 export interface CustomerOverviewRow {
   id: string;
   merchant_id: string;
@@ -134,6 +143,12 @@ export interface Database {
         Row: RedemptionRow;
         Insert: Insert<RedemptionRow, "id" | "redeemed_at" | "customer_id">;
         Update: Partial<RedemptionRow>;
+        Relationships: [];
+      };
+      push_subscriptions: {
+        Row: PushSubscriptionRow;
+        Insert: Insert<PushSubscriptionRow, "id" | "created_at">;
+        Update: Partial<PushSubscriptionRow>;
         Relationships: [];
       };
     };
