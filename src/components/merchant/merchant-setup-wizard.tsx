@@ -135,6 +135,7 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
         rewardTitle: draft.rewardTitle.trim() || undefined,
         rewardName: draft.rewardName.trim() || "Free reward",
         avgOrderValue: draft.avgOrderValue,
+        totalStamps: 5,
       });
 
       if (!res.ok) {

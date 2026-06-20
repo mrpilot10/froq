@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Gift, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { requestStamp, type CardData } from "@/app/actions/customer";
+import { DeleteAccountDrawer } from "@/components/shared/delete-account-drawer";
+import { FroqFooter } from "@/components/shared/froq-footer";
 import type { BusinessInfo, HistoryEntry, NavTab } from "@/lib/loyalty/types";
 import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { useRealtime } from "@/lib/supabase/use-realtime";
@@ -27,6 +29,7 @@ interface LoyaltyExperienceProps {
   customerEmail?: string;
   onRefresh: () => Promise<void>;
   onLogout: () => void;
+  onDeleteAccount: () => Promise<{ ok: boolean; error?: string }>;
 }
 
 function getInitials(name: string) {
@@ -46,10 +49,12 @@ export function LoyaltyExperience({
   customerEmail,
   onRefresh,
   onLogout,
+  onDeleteAccount,
 }: LoyaltyExperienceProps) {
   const [activeTab, setActiveTab] = useState<NavTab>("collect");
   const [screen, setScreen] = useState<"card" | "success">("card");
   const [rewardSheetOpen, setRewardSheetOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
 
@@ -115,7 +120,7 @@ export function LoyaltyExperience({
   const ctaLabel = card.pending
     ? "Awaiting approval…"
     : isRewardReady
-      ? "Claim Reward"
+      ? "Show reward to staff"
       : "Collect Stamp";
 
   return (
@@ -154,8 +159,8 @@ export function LoyaltyExperience({
                 <div className="cta-note">
                   {card.pending
                     ? "Staff will approve your stamp shortly"
-                    : isClaimed
-                      ? "Reward redeemed — collect again"
+                    : isRewardReady
+                      ? "Staff must redeem this reward before you can start a new card"
                       : "Show this screen to staff at checkout"}
                 </div>
               </div>
@@ -176,12 +181,11 @@ export function LoyaltyExperience({
               filled={card.filled}
               memberSince={memberSince}
               onLogout={onLogout}
+              onDeleteAccount={() => setDeleteOpen(true)}
             />
           )}
 
-          <div className="footer">
-            Powered by <b>froq.io</b>
-          </div>
+          <FroqFooter />
         </div>
       </div>
 
@@ -208,6 +212,14 @@ export function LoyaltyExperience({
       />
 
       <Confetti active={showConfetti} onComplete={() => setShowConfetti(false)} />
+
+      <DeleteAccountDrawer
+        open={deleteOpen}
+        accountName={customerName}
+        description={`This permanently removes your loyalty card at ${business.name}, including stamps and history.`}
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={onDeleteAccount}
+      />
     </>
   );
 }

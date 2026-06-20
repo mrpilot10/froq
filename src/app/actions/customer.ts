@@ -247,3 +247,31 @@ export async function requestStamp(customerId: string): Promise<{ ok: boolean; e
 
   return { ok: true };
 }
+
+export async function deleteCustomerAccount(
+  customerId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("id", customerId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!customer) return { ok: false, error: "Membership not found." };
+
+    const { error } = await supabase.from("customers").delete().eq("id", customerId);
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not delete your account.",
+    };
+  }
+}

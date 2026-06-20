@@ -12,6 +12,7 @@ interface ProfileScreenProps {
   filled: number;
   memberSince: string;
   onLogout: () => void;
+  onDeleteAccount?: () => void;
 }
 
 export function ProfileScreen({
@@ -23,6 +24,7 @@ export function ProfileScreen({
   filled,
   memberSince,
   onLogout,
+  onDeleteAccount,
 }: ProfileScreenProps) {
   return (
     <TabPageShell
@@ -69,6 +71,12 @@ export function ProfileScreen({
         <LogOut size={17} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
         Log out
       </button>
+
+      {onDeleteAccount && (
+        <button type="button" className="profile-delete" onClick={onDeleteAccount}>
+          Delete account
+        </button>
+      )}
     </TabPageShell>
   );
 }

@@ -2,17 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getCustomerHome, type CustomerHome } from "@/app/actions/customer";
+import { deleteCustomerAccount, getCustomerHome, type CustomerHome } from "@/app/actions/customer";
 import { createClient } from "@/lib/supabase/client";
-import { CardSkeleton } from "@/components/loyalty/card-skeleton";
 import { LoyaltyExperience } from "@/components/loyalty/loyalty-experience";
 
 interface ShopCardGateProps {
   slug: string;
-  brandColor?: string;
 }
 
-export function ShopCardGate({ slug, brandColor }: ShopCardGateProps) {
+export function ShopCardGate({ slug }: ShopCardGateProps) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [home, setHome] = useState<CustomerHome | null>(null);
@@ -37,8 +35,18 @@ export function ShopCardGate({ slug, brandColor }: ShopCardGateProps) {
     router.replace(`/join/${slug}`);
   }, [supabase, slug, router]);
 
+  const handleDeleteAccount = useCallback(async () => {
+    if (home?.status !== "ready") return { ok: false, error: "Account not loaded." };
+    const res = await deleteCustomerAccount(home.card.customerId);
+    if (res.ok) {
+      await supabase.auth.signOut();
+      router.replace(`/join/${slug}`);
+    }
+    return res;
+  }, [home, supabase, slug, router]);
+
   if (!home || home.status !== "ready") {
-    return <CardSkeleton brandColor={brandColor} />;
+    return null;
   }
 
   return (
@@ -52,6 +60,7 @@ export function ShopCardGate({ slug, brandColor }: ShopCardGateProps) {
       customerEmail={home.customerEmail}
       onRefresh={refresh}
       onLogout={handleLogout}
+      onDeleteAccount={handleDeleteAccount}
     />
   );
 }

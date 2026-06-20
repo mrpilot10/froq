@@ -1,5 +1,6 @@
 import Image from "next/image";
 import type { MerchantTab } from "@/lib/merchant/types";
+import { FroqFooter } from "@/components/shared/froq-footer";
 
 function SkHead() {
   return (
@@ -220,9 +221,7 @@ export function MerchantGateSplash() {
           </div>
         </div>
 
-        <div className="footer">
-          Powered by <b>froq.io</b>
-        </div>
+        <FroqFooter />
       </div>
     </div>
   );

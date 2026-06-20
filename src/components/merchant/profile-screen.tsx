@@ -8,6 +8,7 @@ interface MerchantProfileScreenProps {
   profile: MerchantProfile;
   onEditSection: (section: MerchantEditSection) => void;
   onLogout?: () => void;
+  onDeleteAccount?: () => void;
 }
 
 const SETTINGS_GROUPS: Array<{
@@ -55,6 +56,7 @@ export function MerchantProfileScreen({
   profile,
   onEditSection,
   onLogout,
+  onDeleteAccount,
 }: MerchantProfileScreenProps) {
   const initials = profile.businessName
     .split(/\s+/)
@@ -133,6 +135,12 @@ export function MerchantProfileScreen({
         <button type="button" className="profile-logout" onClick={onLogout}>
           <LogOut size={17} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
           Log out
+        </button>
+      )}
+
+      {onDeleteAccount && (
+        <button type="button" className="profile-delete" onClick={onDeleteAccount}>
+          Delete account
         </button>
       )}
     </div>

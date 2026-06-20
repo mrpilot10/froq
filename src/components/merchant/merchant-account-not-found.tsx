@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { Store } from "lucide-react";
+import { FroqFooter } from "@/components/shared/froq-footer";
 
 interface MerchantAccountNotFoundProps {
   onSignOut: () => void;
@@ -40,9 +41,7 @@ export function MerchantAccountNotFound({ onSignOut }: MerchantAccountNotFoundPr
           </button>
         </div>
 
-        <div className="footer">
-          Powered by <b>froq.io</b>
-        </div>
+        <FroqFooter />
       </div>
     </div>
   );

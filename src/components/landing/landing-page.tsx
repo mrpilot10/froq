@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, BarChart3, QrCode, Stamp, Users } from "lucide-react";
 import { PricingTable } from "./pricing-table";
+import { FroqFooter } from "@/components/shared/froq-footer";
 
 const FEATURES = [
   {
@@ -89,9 +90,7 @@ export function LandingPage() {
           </div>
         </section>
 
-        <footer className="footer landing-footer">
-          Powered by <b>froq.io</b>
-        </footer>
+        <FroqFooter className="landing-footer" />
       </div>
     </div>
   );

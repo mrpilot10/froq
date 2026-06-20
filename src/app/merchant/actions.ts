@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { MerchantCustomer, MerchantProfile, PendingApproval } from "@/lib/merchant/types";
 import { slugify, toCustomer, toMerchantProfile, toMerchantRowPatch } from "@/lib/merchant/mappers";
+import { parseRedeemCode } from "@/lib/merchant/parse-redeem-code";
 
 export interface MerchantStatsData {
   totalCustomers: number;
@@ -306,8 +307,7 @@ export async function redeemRewardByCode(
       .maybeSingle();
     if (!merchant) return { ok: false, error: "Merchant account not found." };
 
-    const urlMatch = rawCode.match(/code=([A-Za-z0-9-]+)/i);
-    const parsed = (urlMatch ? urlMatch[1] : rawCode).trim().toUpperCase();
+    const parsed = parseRedeemCode(rawCode);
     if (!parsed) return { ok: false, error: "Enter a reward code." };
 
     // Match against reward-ready cards in this shop. The customer's displayed
@@ -361,4 +361,37 @@ export async function deleteCustomer(customerId: string) {
   const supabase = await createClient();
   const { error } = await supabase.from("customers").delete().eq("id", customerId);
   return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+export async function deleteMerchantAccount(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    const { data: merchant } = await supabase
+      .from("merchants")
+      .select("id")
+      .eq("owner_user_id", user.id)
+      .maybeSingle();
+    if (!merchant) return { ok: false, error: "Merchant account not found." };
+
+    const { error: pushError } = await supabase
+      .from("push_subscriptions")
+      .delete()
+      .eq("merchant_id", merchant.id);
+    if (pushError) return { ok: false, error: pushError.message };
+
+    const { error } = await supabase.from("merchants").delete().eq("id", merchant.id);
+    if (error) return { ok: false, error: error.message };
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not delete your account.",
+    };
+  }
 }

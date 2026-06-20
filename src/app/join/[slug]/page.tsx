@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { JoinScreen } from "@/components/loyalty/join-screen";
+import { FroqFooter } from "@/components/shared/froq-footer";
 
 export default async function JoinPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -30,6 +31,7 @@ export default async function JoinPage({ params }: { params: Promise<{ slug: str
               <p className="auth-sub">This loyalty link is invalid or has been removed.</p>
             </div>
           </div>
+          <FroqFooter />
         </div>
       </div>
     );

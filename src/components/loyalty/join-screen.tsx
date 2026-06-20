@@ -10,6 +10,7 @@ import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/c
 import { checkShopMembership, joinMerchant } from "@/app/actions/customer";
 import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { OtpInput } from "@/components/auth/otp-input";
+import { FroqFooter } from "@/components/shared/froq-footer";
 
 type Step = "checking" | "phone" | "otp" | "signup" | "joining";
 
@@ -345,9 +346,7 @@ export function JoinScreen({
           )}
         </div>
 
-        <div className="footer">
-          Powered by <b>froq.io</b>
-        </div>
+        <FroqFooter />
       </div>
     </div>
   );

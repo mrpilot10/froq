@@ -8,12 +8,14 @@ import type { MerchantCustomer, MerchantEditSection, MerchantProfile, MerchantTa
 import {
   approveStamp,
   deleteCustomer,
+  deleteMerchantAccount,
   redeemRewardByCode,
   rejectStamp,
   setCustomerBanned,
   updateMerchantProfile,
   type MerchantStatsData,
 } from "@/app/merchant/actions";
+import { DeleteAccountDrawer } from "@/components/shared/delete-account-drawer";
 import { useRealtime } from "@/lib/supabase/use-realtime";
 import { enablePushForMerchant, registerServiceWorker } from "@/lib/push/client";
 import { ApprovalsScreen } from "./approvals-screen";
@@ -47,6 +49,7 @@ export function MerchantExperience({
   const [editSection, setEditSection] = useState<MerchantEditSection>(null);
   const [profile, setProfile] = useState<MerchantProfile>(initialProfile);
   const [qrOpen, setQrOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [, startTransition] = useTransition();
 
   useEffect(() => setProfile(initialProfile), [initialProfile]);
@@ -192,6 +195,7 @@ export function MerchantExperience({
             profile={profile}
             onEditSection={setEditSection}
             onLogout={onLogout}
+            onDeleteAccount={() => setDeleteOpen(true)}
           />
         )}
       </div>
@@ -207,6 +211,21 @@ export function MerchantExperience({
       />
 
       <MerchantQrDrawer open={qrOpen} profile={profile} onClose={() => setQrOpen(false)} />
+
+      <DeleteAccountDrawer
+        open={deleteOpen}
+        accountName={profile.businessName}
+        description="This permanently deletes your store, customers, loyalty data, and QR code. This cannot be undone."
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={async () => {
+          const res = await deleteMerchantAccount();
+          if (res.ok) {
+            toast.success("Account deleted");
+            onLogout?.();
+          }
+          return res;
+        }}
+      />
     </div>
   );
 }

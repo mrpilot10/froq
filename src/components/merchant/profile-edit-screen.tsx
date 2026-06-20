@@ -300,6 +300,18 @@ export function MerchantProfileEditScreen({
               onChange={(v) => updateField("rewardName", v)}
             />
             <label className="auth-field">
+              <span className="auth-label">Stamps to reward</span>
+              <input
+                className="auth-input"
+                type="number"
+                min={1}
+                max={20}
+                value={profile.totalStamps}
+                onChange={(e) => updateField("totalStamps", Number(e.target.value))}
+              />
+              <span className="merchant-field-hint">How many stamps a customer collects to claim the reward</span>
+            </label>
+            <label className="auth-field">
               <span className="auth-label">Order value (₹)</span>
               <input
                 className="auth-input"
