@@ -1724,6 +1724,12 @@ body {
   background: color-mix(in srgb, var(--brand) 6%, var(--paper));
 }
 
+.auth-input--readonly {
+  opacity: 0.75;
+  cursor: default;
+  background: color-mix(in srgb, var(--brand) 6%, var(--paper));
+}
+
 .auth-input-with-icon {
   display: flex;
   align-items: center;
@@ -3159,6 +3165,18 @@ body {
 .merchant-empty {
   text-align: center;
   padding: 36px 24px;
+}
+
+.merchant-empty-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--brand) 12%, var(--paper));
+  color: var(--brand);
 }
 
 .merchant-empty-title {

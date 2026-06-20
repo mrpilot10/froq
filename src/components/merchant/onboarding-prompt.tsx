@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Bell, Check, Download, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { enablePushForMerchant } from "@/lib/push/client";
 
@@ -65,19 +66,33 @@ export function OnboardingPrompt() {
   const handleEnableNotifications = async () => {
     if (!("Notification" in window)) {
       setNotifState("unsupported");
+      toast.error("Notifications aren't supported on this browser.");
+      return;
+    }
+    if (Notification.permission === "denied") {
+      toast.error("Notifications are blocked. Enable them in your browser site settings.");
       return;
     }
     try {
       const result = await Notification.requestPermission();
       setNotifState(result);
-      if (result === "granted") void enablePushForMerchant();
+      if (result === "granted") {
+        const ok = await enablePushForMerchant();
+        toast.success(ok ? "Notifications on. You'll get approval alerts." : "Notifications enabled.");
+      } else if (result === "denied") {
+        toast.error("Notifications are blocked. Enable them in your browser site settings.");
+      }
     } catch {
       setNotifState("denied");
+      toast.error("Couldn't enable notifications.");
     }
   };
 
   const handleInstall = async () => {
-    if (!installEvent) return;
+    if (!installEvent) {
+      toast("To install: open your browser menu and choose “Add to Home Screen” / “Install app”.");
+      return;
+    }
     await installEvent.prompt();
     const choice = await installEvent.userChoice;
     if (choice.outcome === "accepted") setInstalled(true);
@@ -163,9 +178,8 @@ export function OnboardingPrompt() {
                 type="button"
                 className="merchant-onboard-action"
                 onClick={handleInstall}
-                disabled={!installEvent}
               >
-                Install
+                {installEvent ? "Install" : "How?"}
               </button>
             )}
           </div>

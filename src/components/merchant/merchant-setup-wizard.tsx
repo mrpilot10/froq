@@ -162,11 +162,6 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
     setStep((s) => s + 1);
   }
 
-  function handleSkip() {
-    if (submitting) return;
-    void finish();
-  }
-
   const isHero = current.kind === "intro" || current.kind === "outro";
 
   return (
@@ -188,16 +183,6 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
               ))}
             </div>
           </div>
-          {!isLast && (
-            <button
-              type="button"
-              className="wizard-skip"
-              onClick={handleSkip}
-              disabled={submitting}
-            >
-              {submitting ? "Skipping…" : "Skip"}
-            </button>
-          )}
         </div>
 
         {isHero ? (

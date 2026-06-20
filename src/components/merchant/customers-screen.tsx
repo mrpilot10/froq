@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Download } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Users } from "lucide-react";
 import type { MerchantCustomer } from "@/lib/merchant/types";
 import { customerLtv, formatCurrency } from "@/lib/merchant/ltv";
 import { CustomerDrawer } from "./customer-drawer";
@@ -94,6 +94,28 @@ export function CustomersScreen({
     if (sortKey === "visits") return list.sort((a, b) => b.lifetimeVisits - a.lifetimeVisits);
     return list.sort((a, b) => customerLtv(b, avgOrderValue) - customerLtv(a, avgOrderValue));
   }, [customers, sortKey, avgOrderValue]);
+
+  if (customers.length === 0) {
+    return (
+      <div className="tab-screen">
+        <div className="tab-head">
+          <h2 className="tab-title">Customers</h2>
+          <p className="tab-sub">No loyalty members yet</p>
+        </div>
+
+        <div className="panel-card merchant-empty">
+          <div className="merchant-empty-icon" aria-hidden="true">
+            <Users size={26} strokeWidth={2} />
+          </div>
+          <p className="merchant-empty-title">No customers yet</p>
+          <p className="merchant-empty-sub">
+            Share your loyalty QR so customers can join. They&apos;ll appear here as soon as they
+            sign up and start collecting stamps.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="tab-screen">

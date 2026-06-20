@@ -94,6 +94,15 @@ interface PlainFieldProps {
   inputMode?: "text" | "url" | "email" | "tel";
 }
 
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <label className="auth-field">
+      <span className="auth-label">{label}</span>
+      <input className="auth-input auth-input--readonly" type="text" value={value} readOnly aria-readonly="true" />
+    </label>
+  );
+}
+
 function PlainField({ label, value, onChange, type = "text", placeholder, inputMode }: PlainFieldProps) {
   return (
     <label className="auth-field">
@@ -334,19 +343,12 @@ export function MerchantProfileEditScreen({
 
         {section === "account" && (
           <>
-            <PlainField
-              label="Email"
-              value={profile.email}
-              onChange={(v) => updateField("email", v)}
-              type="email"
-              inputMode="email"
-            />
-            <PlainField
-              label="Phone"
-              value={profile.phone}
-              onChange={(v) => updateField("phone", v)}
-              inputMode="tel"
-            />
+            <ReadOnlyField label="Email" value={profile.email || "Not set"} />
+            <ReadOnlyField label="Phone" value={profile.phone || "Not set"} />
+            <p className="merchant-field-hint">
+              Your email and mobile number are tied to your login and can&apos;t be changed here.
+              Contact Froq support to update them.
+            </p>
           </>
         )}
           </div>
