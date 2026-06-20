@@ -16,7 +16,6 @@ import Image from "next/image";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
 import { createMerchant } from "@/app/merchant/actions";
 import type { CheckoutAccount } from "@/lib/merchant/checkout";
-import { readMerchantSession, writeMerchantSession } from "@/lib/merchant/session";
 
 interface MerchantSetupWizardProps {
   onComplete: () => void | Promise<void>;
@@ -25,13 +24,11 @@ interface MerchantSetupWizardProps {
 
 interface ShopDraft {
   businessName: string;
-  shortName: string;
   address: string;
   brandColor: string;
   logoDataUrl?: string;
   rewardTitle: string;
   rewardName: string;
-  totalStamps: number;
   avgOrderValue: number;
 }
 
@@ -82,13 +79,11 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<ShopDraft>(() => ({
     businessName: checkoutAccount?.businessName ?? "",
-    shortName: checkoutAccount?.businessName ?? "",
     address: "",
     brandColor: BRAND_COLORS[0].value,
     logoDataUrl: undefined,
     rewardTitle: "",
     rewardName: "",
-    totalStamps: 5,
     avgOrderValue: 200,
   }));
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -122,40 +117,32 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
   async function finish() {
     setSubmitting(true);
     setError("");
-    const name = draft.businessName.trim() || checkoutAccount?.businessName || "My Shop";
-    const res = await createMerchant({
-      businessName: name,
-      shortName: draft.shortName.trim() || name,
-      brandColor: draft.brandColor,
-      logoDataUrl: draft.logoDataUrl,
-      rewardName: draft.rewardName.trim() || "Free reward",
-      totalStamps: draft.totalStamps,
-      avgOrderValue: draft.avgOrderValue,
-    });
-
-    if (!res.ok) {
-      const session = readMerchantSession();
-      writeMerchantSession({
-        ...session,
-        profile: {
-          ...session.profile,
-          businessName: name,
-          shortName: draft.shortName.trim() || name,
-          address: draft.address.trim(),
-          brandColor: draft.brandColor,
-          logoDataUrl: draft.logoDataUrl,
-          email: checkoutAccount?.email ?? session.profile.email,
-          phone: checkoutAccount?.phone ?? session.profile.phone,
-          rewardTitle: draft.rewardTitle.trim() || session.profile.rewardTitle,
-          rewardName: draft.rewardName.trim() || session.profile.rewardName,
-          totalStamps: draft.totalStamps,
-          avgOrderValue: draft.avgOrderValue,
-        },
+    try {
+      const name = draft.businessName.trim() || checkoutAccount?.businessName || "My Shop";
+      const res = await createMerchant({
+        businessName: name,
+        brandColor: draft.brandColor,
+        logoDataUrl: draft.logoDataUrl,
+        address: draft.address,
+        rewardTitle: draft.rewardTitle.trim() || undefined,
+        rewardName: draft.rewardName.trim() || "Free reward",
+        avgOrderValue: draft.avgOrderValue,
       });
-    }
 
-    setSubmitting(false);
-    await onComplete();
+      if (!res.ok) {
+        // Surface the failure and stay on this step so the button never hangs.
+        setError(res.error ?? "Could not create your store. Please try again.");
+        setStep((s) => Math.max(0, s - 1));
+        return;
+      }
+
+      await onComplete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create your store. Please try again.");
+      setStep((s) => Math.max(0, s - 1));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function handleNext() {
@@ -278,13 +265,6 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
                   onChange={(v) => update("businessName", v)}
                 />
                 <WizardField
-                  label="Short name"
-                  value={draft.shortName}
-                  maxLength={FIELD_LIMITS.shortName}
-                  placeholder="Bloom Coffee"
-                  onChange={(v) => update("shortName", v)}
-                />
-                <WizardField
                   label="Address"
                   value={draft.address}
                   maxLength={FIELD_LIMITS.address}
@@ -339,17 +319,6 @@ export function MerchantSetupWizard({ onComplete, checkoutAccount }: MerchantSet
                   placeholder="Free coffee"
                   onChange={(v) => update("rewardName", v)}
                 />
-                <label className="auth-field">
-                  <span className="auth-label">Stamps to earn reward</span>
-                  <input
-                    className="auth-input"
-                    type="number"
-                    min={3}
-                    max={20}
-                    value={draft.totalStamps}
-                    onChange={(e) => update("totalStamps", Number(e.target.value))}
-                  />
-                </label>
                 <label className="auth-field">
                   <span className="auth-label">Order value (₹)</span>
                   <input

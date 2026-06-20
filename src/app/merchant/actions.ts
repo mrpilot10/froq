@@ -121,40 +121,59 @@ async function loadMerchantBundle(): Promise<MerchantBundle> {
 
 export async function createMerchant(input: {
   businessName: string;
-  shortName: string;
   brandColor: string;
   logoDataUrl?: string;
+  rewardTitle?: string;
   rewardName: string;
-  totalStamps: number;
-  avgOrderValue: number;
+  avgOrderValue?: number;
+  address?: string;
+  // Optional overrides; sensible defaults are derived when omitted.
+  shortName?: string;
+  totalStamps?: number;
 }): Promise<{ ok: boolean; error?: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated" };
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated. Please log in again." };
 
-  const base = slugify(input.shortName || input.businessName) || "shop";
+    const businessName = input.businessName.trim();
+    if (!businessName) return { ok: false, error: "Business name is required." };
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const slug = attempt === 0 ? base : `${base}-${Math.random().toString(36).slice(2, 6)}`;
-    const { error } = await supabase.from("merchants").insert({
-      owner_user_id: user.id,
-      business_name: input.businessName,
-      short_name: input.shortName,
-      slug,
-      brand_color: input.brandColor,
-      logo_url: input.logoDataUrl ?? null,
-      reward_title: "Free reward",
-      reward_name: input.rewardName,
-      total_stamps: input.totalStamps,
-      avg_order_value: input.avgOrderValue,
-      phone: user.phone ?? null,
-    });
-    if (!error) return { ok: true };
-    if (error.code !== "23505") return { ok: false, error: error.message };
+    // Short name is no longer collected in the wizard — derive it from the
+    // business name (capped to the column-friendly length).
+    const shortName = (input.shortName?.trim() || businessName).slice(0, 22);
+    const base = slugify(businessName) || "shop";
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const slug = attempt === 0 ? base : `${base}-${Math.random().toString(36).slice(2, 6)}`;
+      const { error } = await supabase.from("merchants").insert({
+        owner_user_id: user.id,
+        business_name: businessName,
+        short_name: shortName,
+        slug,
+        brand_color: input.brandColor,
+        logo_url: input.logoDataUrl ?? null,
+        address: input.address?.trim() || null,
+        reward_title: input.rewardTitle?.trim() || "Free reward",
+        reward_name: input.rewardName.trim() || "Free reward",
+        total_stamps: input.totalStamps ?? 8,
+        avg_order_value: input.avgOrderValue ?? 0,
+        email: user.email ?? null,
+        phone: user.phone ?? null,
+      });
+      if (!error) return { ok: true };
+      // 23505 = unique violation on slug; retry with a suffix.
+      if (error.code !== "23505") return { ok: false, error: error.message };
+    }
+    return { ok: false, error: "Could not generate a unique store link. Please try again." };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not create your store. Please try again.",
+    };
   }
-  return { ok: false, error: "Could not generate a unique store link" };
 }
 
 export async function updateMerchantProfile(

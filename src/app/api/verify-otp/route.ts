@@ -64,11 +64,12 @@ export async function POST(request: Request) {
     if (!session.ok) {
       const err = session.error ?? "";
       otpLog.error("verify_session_failed", { phone: maskPhone(phone), reason: err });
+      const errLower = err.toLowerCase();
       const message = err.includes("auth_user_id_by_phone")
         ? "Database migration missing. Run supabase/migrations/0004_otp.sql in Supabase SQL editor."
-        : err.includes("Phone provider") || err.includes("phone provider")
-          ? "Enable Phone auth in Supabase → Authentication → Providers."
-          : err.includes("password") || err.includes("Password")
+        : errLower.includes("phone logins are disabled") || errLower.includes("phone provider")
+          ? "Phone auth is disabled in Supabase. Go to Authentication → Providers → Phone, enable it, and allow phone + password sign-in. You do not need a Supabase SMS provider — APITxT sends the OTP."
+          : errLower.includes("password")
             ? "Enable phone + password sign-in in Supabase → Authentication → Providers → Phone."
             : err || "Could not complete sign in. Please try again.";
       return json({ ok: false, message }, 500);

@@ -9,12 +9,7 @@ import { formatPhoneDisplay, isValidEmail, isValidPhone } from "@/lib/auth/forma
 import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/client";
 import { OtpInput } from "@/components/auth/otp-input";
 import { writeCheckoutAccount } from "@/lib/merchant/checkout";
-import { getPlanById, type PricingPlan } from "@/lib/merchant/pricing";
-import {
-  writeMerchantAuth,
-  writePaymentDone,
-  writeSetupDone,
-} from "@/lib/merchant/auth";
+import { type PricingPlan } from "@/lib/merchant/pricing";
 
 type Step = "account" | "otp" | "payment" | "loading";
 
@@ -40,6 +35,9 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
     // Demo payment placeholder — a real gateway call goes here later.
     await new Promise((resolve) => setTimeout(resolve, 1400));
 
+    // The OTP step already created the Supabase session. Persist the account
+    // details to prefill the store builder, then hand off to the merchant gate,
+    // which will show the setup wizard (new merchant → no store yet).
     writeCheckoutAccount({
       planId: plan.id,
       businessName: businessName.trim(),
@@ -47,9 +45,6 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
       email: email.trim(),
       phone: `+91${phone}`,
     });
-    writeMerchantAuth(true);
-    writePaymentDone(true);
-    writeSetupDone(false);
     router.replace("/merchant");
   }, [plan.id, businessName, ownerName, email, phone, router]);
 
