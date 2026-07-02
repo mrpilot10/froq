@@ -4,20 +4,28 @@ import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowRight,
+  ArrowUpRight,
   BarChart3,
   Database,
-  Gauge,
   Infinity as InfinityIcon,
   LayoutDashboard,
+  Megaphone,
+  Percent,
   QrCode,
+  Search,
   Smartphone,
   Sparkles,
+  ThumbsUp,
+  TrendingDown,
+  Wallet,
   Zap,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { FroqFooter } from "@/components/shared/froq-footer";
 import { PricingTable } from "./pricing-table";
 import { Reveal } from "./reveal";
-import { CustomerJourney } from "./customer-journey";
+import { HowItWorks } from "./how-it-works";
+import { ImagineScenario } from "./imagine-scenario";
 import { RevenueCalculator } from "./revenue-calculator";
 import { ExperienceTabs } from "./experience-tabs";
 import { BusinessTypes } from "./business-types";
@@ -29,6 +37,13 @@ import {
   MerchantDashboardMockup,
   QrOnboardingMockup,
 } from "./product-mockups";
+
+const SPEND_CHANNELS: { Icon: LucideIcon; label: string }[] = [
+  { Icon: ThumbsUp, label: "Facebook ads" },
+  { Icon: Search, label: "Google ads" },
+  { Icon: Percent, label: "Discount campaigns" },
+  { Icon: Megaphone, label: "Influencer promotions" },
+];
 
 const FEATURES = [
   { Icon: QrCode, title: "QR Code Enrollment", desc: "Customers join in seconds." },
@@ -123,84 +138,102 @@ export function LandingPage() {
           </div>
         </section>
 
-        {/* ── INTERACTIVE #1: JOURNEY ───────────────────────────────── */}
+        {/* ── HOW IT WORKS ──────────────────────────────────────────── */}
         <section className="lp-section" id="how">
           <Reveal className="lp-section-head">
-            <span className="lp-kicker">The journey</span>
-            <h2 className="lp-h2">What Happens After A Customer Leaves?</h2>
+            <span className="lp-kicker">How it works</span>
+            <h2 className="lp-h2">Repeat Customers In Three Simple Steps</h2>
+            <p className="lp-section-lead">
+              No paper cards, no app downloads — just a simple reason for customers to come back.
+            </p>
           </Reveal>
 
           <Reveal delay={80}>
-            <CustomerJourney />
-          </Reveal>
-
-          <div className="lp-compare">
-            <Reveal className="lp-compare-card lp-compare-card--bad" delay={40}>
-              <span className="lp-compare-tag">Most businesses</span>
-              <p className="lp-compare-flow">Customer visits → Leaves → Forgets about you.</p>
-            </Reveal>
-            <Reveal className="lp-compare-card lp-compare-card--good" delay={120}>
-              <span className="lp-compare-tag lp-compare-tag--good">With Froq</span>
-              <p className="lp-compare-flow">
-                Customer visits → Scans → Joins → Returns → Earns rewards → Returns again.
-              </p>
-            </Reveal>
-          </div>
-          <Reveal className="lp-section-tail" delay={60}>
-            <p>
-              The difference? <strong>A reason to come back.</strong>
-            </p>
+            <HowItWorks />
           </Reveal>
         </section>
 
         {/* ── PROBLEM ───────────────────────────────────────────────── */}
         <section className="lp-section lp-section--problem">
-          <div className="lp-problem">
-            <Reveal className="lp-problem-copy">
-              <span className="lp-kicker">The problem</span>
-              <h2 className="lp-h2">You&apos;re Spending Money On The Wrong Thing</h2>
-              <p className="lp-body">Most businesses focus entirely on getting new customers.</p>
-              <div className="lp-problem-chips">
-                {["Facebook ads", "Google ads", "Discount campaigns", "Influencer promotions"].map(
-                  (chip) => (
-                    <span key={chip} className="lp-problem-chip">{chip}</span>
-                  ),
-                )}
+          <Reveal className="lp-section-head">
+            <span className="lp-kicker">The problem</span>
+            <h2 className="lp-h2">You&apos;re Spending Money On The Wrong Thing</h2>
+            <p className="lp-section-lead">
+              Most businesses pour their budget into chasing new customers — and ignore the ones
+              they already have.
+            </p>
+          </Reveal>
+
+          <div className="lp-prob-grid">
+            <Reveal className="lp-prob-card lp-prob-card--spend" delay={40}>
+              <div className="lp-prob-card-head">
+                <span className="lp-prob-card-icon">
+                  <Wallet size={18} strokeWidth={2.1} />
+                </span>
+                <div className="lp-prob-card-heading">
+                  <span className="lp-prob-card-title">Where the budget goes</span>
+                  <span className="lp-prob-card-sub">Spend, every month</span>
+                </div>
               </div>
-              <p className="lp-body">
-                Getting a new customer is expensive. Getting an existing customer to return is far
-                easier. Yet most businesses have no system to encourage repeat visits.
-              </p>
-              <p className="lp-body lp-body--muted">
-                Customers buy once. Then disappear. Without repeat customers, growth becomes an
-                endless cycle of spending more money on marketing.
+              <ul className="lp-spend-list">
+                {SPEND_CHANNELS.map(({ Icon, label }) => (
+                  <li key={label} className="lp-spend-item">
+                    <span className="lp-spend-ico">
+                      <Icon size={15} strokeWidth={2.1} />
+                    </span>
+                    <span className="lp-spend-name">{label}</span>
+                    <span className="lp-spend-out">
+                      <ArrowUpRight size={14} strokeWidth={2.6} />
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="lp-prob-note">
+                All chasing first-time visitors — none of it brings them back.
               </p>
             </Reveal>
 
-            <Reveal className="lp-problem-visual" delay={100}>
-              <div className="lp-leak-card">
-                <div className="lp-leak-head">
-                  <span className="lp-leak-title">Cost to acquire</span>
-                  <span className="lp-leak-bad">High</span>
-                </div>
-                <div className="lp-leak-bars">
-                  <div className="lp-leak-bar">
-                    <span className="lp-leak-bar-label">New customer</span>
-                    <span className="lp-leak-bar-track">
-                      <span className="lp-leak-bar-fill lp-leak-bar-fill--bad" style={{ width: "92%" }} />
-                    </span>
-                    <span className="lp-leak-bar-val">₹350</span>
-                  </div>
-                  <div className="lp-leak-bar">
-                    <span className="lp-leak-bar-label">Repeat visit</span>
-                    <span className="lp-leak-bar-track">
-                      <span className="lp-leak-bar-fill lp-leak-bar-fill--good" style={{ width: "22%" }} />
-                    </span>
-                    <span className="lp-leak-bar-val">₹40</span>
-                  </div>
-                </div>
-                <p className="lp-leak-note">Repeat customers cost a fraction to bring back.</p>
+            <Reveal className="lp-prob-card lp-prob-card--cost" delay={120}>
+              <div className="lp-cost-head">
+                <span className="lp-cost-eyebrow">Cost per customer</span>
+                <span className="lp-cost-badge">
+                  <TrendingDown size={14} strokeWidth={2.6} />
+                  9× cheaper to return
+                </span>
               </div>
+              <div className="lp-cost-rows">
+                <div className="lp-cost-row">
+                  <div className="lp-cost-row-head">
+                    <span className="lp-cost-label">New customer</span>
+                    <span className="lp-cost-val lp-cost-val--bad">₹350</span>
+                  </div>
+                  <span className="lp-cost-track">
+                    <span className="lp-cost-fill lp-cost-fill--bad" style={{ width: "92%" }} />
+                  </span>
+                </div>
+                <div className="lp-cost-row">
+                  <div className="lp-cost-row-head">
+                    <span className="lp-cost-label">Repeat visit</span>
+                    <span className="lp-cost-val lp-cost-val--good">₹40</span>
+                  </div>
+                  <span className="lp-cost-track">
+                    <span className="lp-cost-fill lp-cost-fill--good" style={{ width: "22%" }} />
+                  </span>
+                </div>
+              </div>
+              <p className="lp-prob-note">Cost to acquire vs. cost to bring back.</p>
+            </Reveal>
+
+            <Reveal className="lp-prob-card lp-prob-card--insight" delay={80}>
+              <p className="lp-prob-insight">
+                Getting a new customer is <strong>expensive</strong>. Bringing an existing one back
+                is <strong>far easier</strong> — yet most businesses have <strong>no system</strong>{" "}
+                to make it happen.
+              </p>
+              <p className="lp-prob-insight-sub">
+                Customers buy once, then disappear. Without repeat visits, growth becomes an endless
+                cycle of spending more on marketing.
+              </p>
             </Reveal>
           </div>
         </section>
@@ -309,27 +342,12 @@ export function LandingPage() {
 
         {/* ── SOCIAL PROOF: IMAGINE THIS ────────────────────────────── */}
         <section className="lp-section lp-section--imagine">
-          <Reveal className="lp-imagine">
-            <span className="lp-kicker lp-kicker--on-dark">Imagine this</span>
-            <div className="lp-imagine-story">
-              <p>A customer visits your cafe. They enjoy their coffee. They leave.</p>
-              <p>Two weeks later they&apos;re deciding where to go.</p>
-              <div className="lp-imagine-split">
-                <div className="lp-imagine-choice lp-imagine-choice--forgotten">
-                  <Gauge size={18} strokeWidth={2.2} />
-                  <span className="lp-imagine-choice-label">One business</span>
-                  <span className="lp-imagine-choice-state">is forgotten</span>
-                </div>
-                <div className="lp-imagine-vs">vs</div>
-                <div className="lp-imagine-choice lp-imagine-choice--reward">
-                  <Sparkles size={18} strokeWidth={2.2} />
-                  <span className="lp-imagine-choice-label">The other</span>
-                  <span className="lp-imagine-choice-state">offers a reward</span>
-                </div>
-              </div>
-              <p className="lp-imagine-q">Which one do they choose?</p>
-              <p className="lp-imagine-tail">That&apos;s the power of repeat customer marketing.</p>
-            </div>
+          <Reveal className="lp-section-head">
+            <span className="lp-kicker">Imagine this</span>
+            <h2 className="lp-h2">Every Customer Chooses Where To Return</h2>
+          </Reveal>
+          <Reveal delay={60}>
+            <ImagineScenario />
           </Reveal>
         </section>
 
