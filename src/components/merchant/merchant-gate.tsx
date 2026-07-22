@@ -12,8 +12,8 @@ import { MerchantGateSplash } from "./skeletons";
 /**
  * Single source of truth for the merchant area, driven entirely by the Supabase
  * session + merchant row:
- *   - no session            → OTP login
- *   - session, not registered → pricing prompt (no checkout / store)
+ *   - no session            → email/password login
+ *   - session, not registered → email/password login (blocks loyalty customers)
  *   - session, checkout done  → setup wizard
  *   - session + store        → dashboard
  */

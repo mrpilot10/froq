@@ -30,7 +30,7 @@ const STEPS: Step[] = [
 ];
 
 export function HowItWorks() {
-  const { ref, inView } = useInView({ threshold: 0.2 });
+  const { ref, inView } = useInView<HTMLOListElement>({ threshold: 0.2 });
 
   return (
     <ol ref={ref} className={`lp-how${inView ? " is-in" : ""}`}>

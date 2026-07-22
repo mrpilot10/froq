@@ -1,22 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Check, CreditCard, Lock, Phone, Store } from "lucide-react";
+import { ArrowLeft, Check, CreditCard, Eye, EyeOff, Lock, Store } from "lucide-react";
 import { load } from "@cashfreepayments/cashfree-js";
-import { formatPhoneDisplay, isValidEmail, isValidPhone } from "@/lib/auth/format";
-import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/client";
-import { OtpInput } from "@/components/auth/otp-input";
+import { isValidEmail, isValidPassword, isValidPhone } from "@/lib/auth/format";
 import { writeCheckoutAccount } from "@/lib/merchant/checkout";
-import { markMerchantOnboarding } from "@/app/merchant/actions";
+import { markMerchantOnboarding, signUpMerchantWithPassword } from "@/app/merchant/actions";
 import { type PricingPlan } from "@/lib/merchant/pricing";
 
 const CASHFREE_MODE =
   process.env.NEXT_PUBLIC_CASHFREE_ENV === "production" ? "production" : "sandbox";
 
-type Step = "account" | "otp" | "payment" | "loading";
+type Step = "account" | "payment" | "loading";
 
 interface CheckoutExperienceProps {
   plan: PricingPlan;
@@ -28,14 +26,12 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
   const [businessName, setBusinessName] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
-  const [resendIn, setResendIn] = useState(RESEND_SECONDS);
-  const [loadingLabel, setLoadingLabel] = useState("Sending your code");
+  const [loadingLabel, setLoadingLabel] = useState("Creating your account");
 
-  // After a confirmed payment: persist the account details to prefill the store
-  // builder, mark onboarding, then hand off to the merchant gate (setup wizard).
   const finishOnboarding = useCallback(async () => {
     setLoadingLabel("Setting up your account");
     setStep("loading");
@@ -110,7 +106,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
     }
   }, [plan.id, ownerName, email, finishOnboarding]);
 
-  const handleSendCode = useCallback(async () => {
+  const handleCreateAccount = useCallback(async () => {
     setError("");
     if (!businessName.trim()) {
       setError("Enter your business name.");
@@ -124,46 +120,30 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
       setError("Enter a valid email address.");
       return;
     }
+    if (!isValidPassword(password)) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
     if (!isValidPhone(phone)) {
       setError("Enter a valid 10-digit mobile number.");
       return;
     }
-    setLoadingLabel("Sending your code");
+
+    setLoadingLabel("Creating your account");
     setStep("loading");
-    const res = await sendOtp(phone);
+    const res = await signUpMerchantWithPassword({
+      email,
+      password,
+      ownerName,
+      phone,
+    });
     if (!res.ok) {
-      setError(res.message);
+      setError(res.error ?? "Could not create your account.");
       setStep("account");
       return;
     }
-    setResendIn(RESEND_SECONDS);
-    setStep("otp");
-  }, [businessName, ownerName, email, phone]);
-
-  const handleVerify = useCallback(async () => {
-    if (otp.length !== OTP_LENGTH) {
-      setError("Enter the 6-digit code we sent you.");
-      return;
-    }
-    setError("");
-    setLoadingLabel("Verifying code");
-    setStep("loading");
-    const res = await verifyOtp(phone, otp);
-    if (!res.ok) {
-      setError(res.message);
-      setStep("otp");
-      return;
-    }
     setStep("payment");
-  }, [otp, phone]);
-
-  useEffect(() => {
-    if (step !== "otp" || resendIn <= 0) return;
-    const timer = window.setInterval(() => {
-      setResendIn((current) => Math.max(0, current - 1));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [step, resendIn]);
+  }, [businessName, ownerName, email, password, phone]);
 
   return (
     <div className="checkout-page merchant-theme">
@@ -208,7 +188,9 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                     <Store size={24} strokeWidth={2} />
                   </div>
                   <h2 className="auth-title">Create your account</h2>
-                  <p className="auth-sub">We&apos;ll use this to set up your Froq business dashboard.</p>
+                  <p className="auth-sub">
+                    Use email and password to access your Froq business dashboard.
+                  </p>
                 </div>
 
                 <label className="auth-field">
@@ -256,6 +238,35 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                 </label>
 
                 <label className="auth-field">
+                  <span className="auth-label">Password</span>
+                  <div className="auth-input-with-icon">
+                    <input
+                      className="auth-input"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="new-password"
+                      placeholder="At least 8 characters"
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        setError("");
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="auth-input-icon-btn"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      onClick={() => setShowPassword((v) => !v)}
+                    >
+                      {showPassword ? (
+                        <EyeOff size={18} strokeWidth={2} />
+                      ) : (
+                        <Eye size={18} strokeWidth={2} />
+                      )}
+                    </button>
+                  </div>
+                </label>
+
+                <label className="auth-field">
                   <span className="auth-label">Mobile number</span>
                   <div className="auth-phone-row">
                     <span className="auth-phone-prefix">+91</span>
@@ -279,20 +290,30 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                   </p>
                 )}
 
-                <button type="button" className="cta-btn merchant-cta-accent auth-submit" onClick={handleSendCode}>
+                <button
+                  type="button"
+                  className="cta-btn merchant-cta-accent auth-submit"
+                  onClick={handleCreateAccount}
+                >
                   Continue
                 </button>
+
+                <p className="merchant-auth-note">
+                  Already have an account?{" "}
+                  <Link href="/merchant" className="auth-link">
+                    Sign in
+                  </Link>
+                </p>
               </>
             )}
 
-            {step === "otp" && (
+            {step === "payment" && (
               <>
                 <button
                   type="button"
                   className="auth-back"
                   onClick={() => {
                     setStep("account");
-                    setOtp("");
                     setError("");
                   }}
                 >
@@ -300,47 +321,6 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                   Edit details
                 </button>
 
-                <div className="auth-head">
-                  <div className="auth-badge merchant-auth-badge" aria-hidden="true">
-                    <Phone size={24} strokeWidth={2} />
-                  </div>
-                  <h2 className="auth-title">Verify your number</h2>
-                  <p className="auth-sub">
-                    We sent a 6-digit code to <strong>{formatPhoneDisplay(phone)}</strong>
-                  </p>
-                </div>
-
-                <OtpInput value={otp} length={OTP_LENGTH} onChange={setOtp} />
-
-                {error && (
-                  <p className="auth-error" role="alert">
-                    {error}
-                  </p>
-                )}
-
-                <button
-                  type="button"
-                  className="cta-btn merchant-cta-accent auth-submit"
-                  disabled={otp.length !== OTP_LENGTH}
-                  onClick={handleVerify}
-                >
-                  Verify &amp; continue
-                </button>
-
-                <p className="auth-resend">
-                  {resendIn > 0 ? (
-                    <>Resend code in {resendIn}s</>
-                  ) : (
-                    <button type="button" className="auth-link" onClick={handleSendCode}>
-                      Resend code
-                    </button>
-                  )}
-                </p>
-              </>
-            )}
-
-            {step === "payment" && (
-              <>
                 <div className="auth-head">
                   <div className="auth-badge merchant-auth-badge" aria-hidden="true">
                     <CreditCard size={24} strokeWidth={2} />
@@ -363,9 +343,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                   </div>
                 </div>
 
-                <p className="checkout-pay-demo">
-                  You&apos;ll complete payment securely via Cashfree.
-                </p>
+                <p className="checkout-pay-demo">You&apos;ll complete payment securely via Cashfree.</p>
 
                 {error && (
                   <p className="auth-error" role="alert">
@@ -373,7 +351,11 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                   </p>
                 )}
 
-                <button type="button" className="cta-btn merchant-cta-accent auth-submit" onClick={completeCheckout}>
+                <button
+                  type="button"
+                  className="cta-btn merchant-cta-accent auth-submit"
+                  onClick={completeCheckout}
+                >
                   Pay {plan.priceLabel}
                 </button>
 

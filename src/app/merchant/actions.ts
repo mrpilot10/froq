@@ -13,6 +13,13 @@ import type {
 import { slugify, toCustomer, toMerchantProfile, toMerchantRowPatch } from "@/lib/merchant/mappers";
 import { parseRedeemCode } from "@/lib/merchant/parse-redeem-code";
 import { toCanonicalPhone } from "@/lib/auth/otp/phone";
+import {
+  isValidEmail,
+  isValidPassword,
+  isValidPhone,
+  normalizeEmail,
+} from "@/lib/auth/format";
+import { sendPasswordResetEmail } from "@/lib/email/resend";
 
 export interface MerchantStatsData {
   totalCustomers: number;
@@ -432,6 +439,250 @@ export async function merchantExistsForPhone(
   } catch {
     // On lookup failure, don't hard-block login — let the OTP flow proceed.
     return { exists: true };
+  }
+}
+
+async function userIsMerchantAccount(userId: string): Promise<boolean> {
+  const admin = createAdminClient();
+  const { data: merchant } = await admin
+    .from("merchants")
+    .select("id")
+    .eq("owner_user_id", userId)
+    .maybeSingle();
+  if (merchant) return true;
+
+  const { data: userRes } = await admin.auth.admin.getUserById(userId);
+  return userRes?.user?.app_metadata?.merchant_onboarding === true;
+}
+
+/**
+ * Merchant dashboard login — email + password only.
+ * Rejects sessions that aren't tied to a merchant store / onboarding flag so a
+ * loyalty customer can't enter the merchant area with the same auth pool.
+ */
+export async function signInMerchantWithPassword(
+  email: string,
+  password: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const normalized = normalizeEmail(email);
+    if (!isValidEmail(normalized)) {
+      return { ok: false, error: "Enter a valid email address." };
+    }
+    if (!password) {
+      return { ok: false, error: "Enter your password." };
+    }
+
+    const supabase = await createClient();
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: normalized,
+      password,
+    });
+    if (error || !data.user) {
+      return { ok: false, error: "Invalid email or password." };
+    }
+
+    const allowed = await userIsMerchantAccount(data.user.id);
+    if (!allowed) {
+      await supabase.auth.signOut();
+      return {
+        ok: false,
+        error:
+          "This email isn’t registered as a Froq merchant. Create an account from pricing, or contact support.",
+      };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not sign in.",
+    };
+  }
+}
+
+/**
+ * Creates (or signs into) a merchant email/password account during checkout.
+ * Phone stays as contact metadata — customers keep SMS OTP separately.
+ */
+export async function signUpMerchantWithPassword(input: {
+  email: string;
+  password: string;
+  ownerName: string;
+  phone: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const email = normalizeEmail(input.email);
+    const password = input.password;
+    const ownerName = input.ownerName.trim();
+    const phoneDigits = input.phone.replace(/\D/g, "");
+
+    if (!ownerName) return { ok: false, error: "Enter your name." };
+    if (!isValidEmail(email)) return { ok: false, error: "Enter a valid email address." };
+    if (!isValidPassword(password)) {
+      return { ok: false, error: "Password must be at least 8 characters." };
+    }
+    if (!isValidPhone(phoneDigits)) {
+      return { ok: false, error: "Enter a valid 10-digit mobile number." };
+    }
+
+    const supabase = await createClient();
+    const admin = createAdminClient();
+    const phoneE164 = `+91${phoneDigits}`;
+
+    // Prefer creating a confirmed email user so checkout isn't blocked on inbox
+    // verification. If the email already exists, fall through to password sign-in.
+    const { data: created, error: createError } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: ownerName,
+        phone: phoneE164,
+      },
+    });
+
+    if (createError) {
+      const alreadyExists =
+        /already|registered|exists/i.test(createError.message) ||
+        createError.message.toLowerCase().includes("email");
+
+      if (!alreadyExists) {
+        return { ok: false, error: createError.message };
+      }
+
+      const { data: signedIn, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (signInError || !signedIn.user) {
+        return {
+          ok: false,
+          error: "An account with this email already exists. Sign in with the correct password.",
+        };
+      }
+
+      // Keep contact metadata fresh for returning checkout attempts.
+      await admin.auth.admin.updateUserById(signedIn.user.id, {
+        user_metadata: {
+          ...signedIn.user.user_metadata,
+          full_name: ownerName,
+          phone: phoneE164,
+        },
+      });
+
+      return { ok: true };
+    }
+
+    if (!created.user) {
+      return { ok: false, error: "Could not create your account." };
+    }
+
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (signInError) {
+      return { ok: false, error: signInError.message };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not create your account.",
+    };
+  }
+}
+
+function siteOrigin() {
+  const fromEnv = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "");
+  if (fromEnv && !fromEnv.includes("localhost")) return fromEnv;
+  return fromEnv || "http://localhost:3000";
+}
+
+/**
+ * Sends a password-reset email via Resend.
+ * Uses Supabase admin to mint a recovery link, then delivers it with Resend
+ * (instead of Supabase's default mailer). Always returns success to the client
+ * when the email isn't registered, so we don't leak account existence.
+ */
+export async function requestMerchantPasswordReset(
+  email: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const normalized = normalizeEmail(email);
+    if (!isValidEmail(normalized)) {
+      return { ok: false, error: "Enter a valid email address." };
+    }
+
+    const admin = createAdminClient();
+    const redirectTo = `${siteOrigin()}/auth/callback?next=${encodeURIComponent("/merchant/reset-password")}`;
+
+    const { data, error } = await admin.auth.admin.generateLink({
+      type: "recovery",
+      email: normalized,
+      options: { redirectTo },
+    });
+
+    // Don't reveal whether the email exists.
+    if (error || !data?.properties?.action_link) {
+      return { ok: true };
+    }
+
+    const sent = await sendPasswordResetEmail({
+      to: normalized,
+      resetUrl: data.properties.action_link,
+      name:
+        (typeof data.user?.user_metadata?.full_name === "string"
+          ? data.user.user_metadata.full_name
+          : undefined) || undefined,
+    });
+
+    if (!sent.ok) {
+      return { ok: false, error: sent.error ?? "Could not send reset email." };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not send reset email.",
+    };
+  }
+}
+
+/** Completes the recovery flow once the user has a valid recovery session. */
+export async function updateMerchantPassword(
+  password: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    if (!isValidPassword(password)) {
+      return { ok: false, error: "Password must be at least 8 characters." };
+    }
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return {
+        ok: false,
+        error: "This reset link is invalid or has expired. Request a new one from the login page.",
+      };
+    }
+
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update password.",
+    };
   }
 }
 

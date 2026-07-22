@@ -418,8 +418,8 @@ export function MerchantProfileEditScreen({
             <ReadOnlyField label="Email" value={profile.email || "Not set"} />
             <ReadOnlyField label="Phone" value={profile.phone || "Not set"} />
             <p className="merchant-field-hint">
-              Your email and mobile number are tied to your login and can&apos;t be changed here.
-              Contact Froq support to update them.
+              Your email is used to sign in to the merchant dashboard. Contact Froq support to
+              update account credentials.
             </p>
           </>
         )}

@@ -11,3 +11,12 @@ export function isValidPhone(phone: string) {
 export function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
+
+/** Merchant account passwords — keep simple but reject obviously weak values. */
+export function isValidPassword(password: string) {
+  return password.length >= 8;
+}
+
+export function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
