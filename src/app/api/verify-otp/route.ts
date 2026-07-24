@@ -60,6 +60,8 @@ export async function POST(request: Request) {
       return json({ ok: false, message: "That code is incorrect. Please try again." }, 401);
     }
 
+    const deliveryChannel = record.channel === "whatsapp" ? "whatsapp" : "sms";
+
     const session = await establishPhoneSession(phone);
     if (!session.ok) {
       const err = session.error ?? "";
@@ -75,9 +77,20 @@ export async function POST(request: Request) {
       return json({ ok: false, message }, 500);
     }
 
+    // WhatsApp OTP success → permanently prefer WhatsApp for this customer.
+    // SMS OTP success → leave whatsapp_available / preferred channel unchanged.
+    if (deliveryChannel === "whatsapp") {
+      const { markWhatsAppAvailableForPhone } = await import("@/lib/notifications/prefs");
+      await markWhatsAppAvailableForPhone({ phone, userId: session.userId });
+    }
+
     await clearOtps(phone);
 
-    otpLog.info("otp_verified", { phone: maskPhone(phone), isNewUser: session.isNewUser });
+    otpLog.info("otp_verified", {
+      phone: maskPhone(phone),
+      isNewUser: session.isNewUser,
+      channel: deliveryChannel,
+    });
     return json({ ok: true, message: "Verified.", isNewUser: session.isNewUser }, 200);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";

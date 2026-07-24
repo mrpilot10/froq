@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Gift, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { requestStamp, type CardData } from "@/app/actions/customer";
 import { DeleteAccountDrawer } from "@/components/shared/delete-account-drawer";
 import { FroqFooter } from "@/components/shared/froq-footer";
+import { cooldownUnlockCopy } from "@/lib/loyalty/rules";
 import type { BusinessInfo, HistoryEntry, NavTab, RewardCardGroup } from "@/lib/loyalty/types";
 import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { useRealtime } from "@/lib/supabase/use-realtime";
@@ -69,7 +70,15 @@ export function LoyaltyExperience({
   const initials = getInitials(customerName);
   const isRewardReady = card.status === "reward_ready";
   const isClaimed = card.status === "claimed";
-  const redeemCode = `FROQ-${card.customerId.slice(0, 5).toUpperCase()}`;
+  const canRestart = business.restartAfterReward !== false;
+  const qrUnlockAt = card.rewardStatus === "waiting" ? card.rewardUnlockAt ?? null : null;
+  const lockMessage = useMemo(() => {
+    if (isClaimed && !canRestart) return "You've completed this rewards program";
+    if (isRewardReady) return null;
+    return cooldownUnlockCopy(card.cooldownUntil);
+  }, [isClaimed, canRestart, card.cooldownUntil, isRewardReady]);
+  const isLocked = Boolean(lockMessage) && !isRewardReady;
+  const redeemCode = card.rewardCode || `FROQ-${card.customerId.slice(0, 5).toUpperCase()}`;
 
   // Live updates: refetch when the merchant approves a stamp or redeems.
   const filter = `customer_id=eq.${card.customerId}`;
@@ -110,7 +119,7 @@ export function LoyaltyExperience({
   }, [activeTab]);
 
   const handleCollect = useCallback(async () => {
-    if (isRewardReady || card.pending || submitting) return;
+    if (isRewardReady || isLocked || card.pending || submitting) return;
     setSubmitting(true);
     const res = await requestStamp(card.customerId);
     setSubmitting(false);
@@ -120,16 +129,16 @@ export function LoyaltyExperience({
     }
     setScreen("success");
     await onRefresh();
-  }, [isRewardReady, card.pending, card.customerId, submitting, onRefresh]);
+  }, [isRewardReady, isLocked, card.pending, card.customerId, submitting, onRefresh]);
 
   const handlePrimaryAction = useCallback(() => {
-    if (card.pending || submitting) return;
+    if (card.pending || submitting || isLocked) return;
     if (isRewardReady) {
       setRewardSheetOpen(true);
       return;
     }
     void handleCollect();
-  }, [card.pending, submitting, isRewardReady, handleCollect]);
+  }, [card.pending, submitting, isLocked, isRewardReady, handleCollect]);
 
   const handleTabChange = useCallback(
     (tab: NavTab) => {
@@ -146,7 +155,9 @@ export function LoyaltyExperience({
     ? "Awaiting approval…"
     : isRewardReady
       ? "Show reward to staff"
-      : "Collect Stamp";
+      : isLocked
+        ? lockMessage || "Card locked"
+        : "Collect Stamp";
 
   return (
     <>
@@ -164,6 +175,7 @@ export function LoyaltyExperience({
                   customerName={customerName}
                   customerInitials={initials}
                   onRewardClick={() => setRewardSheetOpen(true)}
+                  lockMessage={lockMessage}
                 />
               </div>
 
@@ -171,7 +183,7 @@ export function LoyaltyExperience({
                 <button
                   type="button"
                   className="cta-btn"
-                  disabled={card.pending || submitting}
+                  disabled={card.pending || submitting || (isLocked && !isRewardReady)}
                   onClick={handlePrimaryAction}
                 >
                   {isRewardReady ? (
@@ -185,8 +197,10 @@ export function LoyaltyExperience({
                   {card.pending
                     ? "Staff will approve your stamp shortly"
                     : isRewardReady
-                      ? "Staff must redeem this reward before you can start a new card"
-                      : "Show this screen to staff at checkout"}
+                      ? "Show your reward QR to staff"
+                      : isLocked
+                        ? lockMessage
+                        : "Show this screen to staff at checkout"}
                 </div>
               </div>
 
@@ -235,6 +249,8 @@ export function LoyaltyExperience({
         filled={card.filled}
         redeemCode={redeemCode}
         isRedeemed={isClaimed}
+        cooldownUntil={qrUnlockAt}
+        forceLocked={card.rewardStatus === "waiting"}
         onClose={() => setRewardSheetOpen(false)}
         onClaim={() => setRewardSheetOpen(false)}
       />
@@ -242,6 +258,8 @@ export function LoyaltyExperience({
       <ClaimedCelebration
         open={showClaimed}
         business={business}
+        canRestart={canRestart}
+        cooldownMessage={cooldownUnlockCopy(card.cooldownUntil)}
         onStartAgain={() => {
           setShowClaimed(false);
           setScreen("card");

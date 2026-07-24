@@ -7,6 +7,7 @@ import Link from "next/link";
 import { ArrowLeft, Check, CreditCard, Eye, EyeOff, Lock, Store } from "lucide-react";
 import { load } from "@cashfreepayments/cashfree-js";
 import { isValidEmail, isValidPassword, isValidPhone } from "@/lib/auth/format";
+import { INDIA_CITIES, stateForCity } from "@/lib/geo/india-cities";
 import { writeCheckoutAccount } from "@/lib/merchant/checkout";
 import { markMerchantOnboarding, signUpMerchantWithPassword } from "@/app/merchant/actions";
 import { type PricingPlan } from "@/lib/merchant/pricing";
@@ -24,13 +25,18 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("account");
   const [businessName, setBusinessName] = useState("");
-  const [ownerName, setOwnerName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [phone, setPhone] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
   const [error, setError] = useState("");
   const [loadingLabel, setLoadingLabel] = useState("Creating your account");
+
+  const ownerName = [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
 
   const finishOnboarding = useCallback(async () => {
     setLoadingLabel("Setting up your account");
@@ -39,12 +45,16 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
     writeCheckoutAccount({
       planId: plan.id,
       businessName: businessName.trim(),
-      ownerName: ownerName.trim(),
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      ownerName,
       email: email.trim(),
       phone: `+91${phone}`,
+      city,
+      state,
     });
 
-    const marked = await markMerchantOnboarding();
+    const marked = await markMerchantOnboarding(plan.product);
     if (!marked.ok) {
       setError(marked.error ?? "Payment succeeded but setup failed. Please contact support.");
       setStep("payment");
@@ -52,7 +62,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
     }
 
     router.replace("/merchant");
-  }, [plan.id, businessName, ownerName, email, phone, router]);
+  }, [plan.id, plan.product, businessName, firstName, lastName, ownerName, email, phone, city, state, router]);
 
   const completeCheckout = useCallback(async () => {
     setError("");
@@ -65,8 +75,9 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planId: plan.id,
-          customerName: ownerName.trim(),
+          customerName: ownerName,
           customerEmail: email.trim(),
+          customerPhone: phone,
         }),
       });
       const orderData = await orderRes.json().catch(() => null);
@@ -104,7 +115,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
       setError(err instanceof Error ? err.message : "Could not complete the payment.");
       setStep("payment");
     }
-  }, [plan.id, ownerName, email, finishOnboarding]);
+  }, [plan.id, ownerName, email, phone, finishOnboarding]);
 
   const handleCreateAccount = useCallback(async () => {
     setError("");
@@ -112,8 +123,12 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
       setError("Enter your business name.");
       return;
     }
-    if (!ownerName.trim()) {
-      setError("Enter your name.");
+    if (!firstName.trim()) {
+      setError("Enter your first name.");
+      return;
+    }
+    if (!lastName.trim()) {
+      setError("Enter your last name.");
       return;
     }
     if (!isValidEmail(email)) {
@@ -128,14 +143,21 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
       setError("Enter a valid 10-digit mobile number.");
       return;
     }
+    if (!city || !state) {
+      setError("Select your city.");
+      return;
+    }
 
     setLoadingLabel("Creating your account");
     setStep("loading");
     const res = await signUpMerchantWithPassword({
       email,
       password,
-      ownerName,
+      firstName,
+      lastName,
       phone,
+      city,
+      state,
     });
     if (!res.ok) {
       setError(res.error ?? "Could not create your account.");
@@ -143,7 +165,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
       return;
     }
     setStep("payment");
-  }, [businessName, ownerName, email, password, phone]);
+  }, [businessName, firstName, lastName, email, password, phone, city, state]);
 
   return (
     <div className="checkout-page merchant-theme">
@@ -193,6 +215,37 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                   </p>
                 </div>
 
+                <div className="checkout-field-row">
+                  <label className="auth-field">
+                    <span className="auth-label">First name</span>
+                    <input
+                      className="auth-input"
+                      type="text"
+                      autoComplete="given-name"
+                      placeholder="Alex"
+                      value={firstName}
+                      onChange={(e) => {
+                        setFirstName(e.target.value);
+                        setError("");
+                      }}
+                    />
+                  </label>
+                  <label className="auth-field">
+                    <span className="auth-label">Last name</span>
+                    <input
+                      className="auth-input"
+                      type="text"
+                      autoComplete="family-name"
+                      placeholder="Morgan"
+                      value={lastName}
+                      onChange={(e) => {
+                        setLastName(e.target.value);
+                        setError("");
+                      }}
+                    />
+                  </label>
+                </div>
+
                 <label className="auth-field">
                   <span className="auth-label">Business name</span>
                   <input
@@ -202,21 +255,6 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                     value={businessName}
                     onChange={(e) => {
                       setBusinessName(e.target.value);
-                      setError("");
-                    }}
-                  />
-                </label>
-
-                <label className="auth-field">
-                  <span className="auth-label">Your name</span>
-                  <input
-                    className="auth-input"
-                    type="text"
-                    autoComplete="name"
-                    placeholder="Alex Morgan"
-                    value={ownerName}
-                    onChange={(e) => {
-                      setOwnerName(e.target.value);
                       setError("");
                     }}
                   />
@@ -283,6 +321,41 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                     />
                   </div>
                 </label>
+
+                <div className="checkout-field-row">
+                  <label className="auth-field">
+                    <span className="auth-label">City</span>
+                    <select
+                      className="auth-input auth-select"
+                      value={city}
+                      onChange={(e) => {
+                        const nextCity = e.target.value;
+                        setCity(nextCity);
+                        setState(stateForCity(nextCity));
+                        setError("");
+                      }}
+                    >
+                      <option value="">Select city</option>
+                      {INDIA_CITIES.map((entry) => (
+                        <option key={entry.city} value={entry.city}>
+                          {entry.city}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="auth-field">
+                    <span className="auth-label">State</span>
+                    <input
+                      className="auth-input auth-input--readonly"
+                      type="text"
+                      value={state}
+                      readOnly
+                      tabIndex={-1}
+                      placeholder="Auto-filled"
+                      aria-live="polite"
+                    />
+                  </label>
+                </div>
 
                 {error && (
                   <p className="auth-error" role="alert">

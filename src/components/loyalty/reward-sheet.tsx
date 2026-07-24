@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { Gift, Lock } from "lucide-react";
+import {
+  formatCooldownClock,
+  isCooldownActive,
+} from "@/lib/loyalty/rules";
 import type { BusinessInfo } from "@/lib/loyalty/types";
 import { BottomSheet } from "./bottom-sheet";
 import { ProgressBlock } from "./progress-block";
@@ -13,6 +17,10 @@ interface RewardSheetProps {
   filled: number;
   redeemCode: string;
   isRedeemed?: boolean;
+  /** ISO timestamp — when set in the future, QR stays blurred until then. */
+  cooldownUntil?: string | null;
+  /** Keep QR locked even after the countdown hits zero (waiting for cron unlock). */
+  forceLocked?: boolean;
   onClose: () => void;
   onClaim?: () => void;
 }
@@ -23,6 +31,8 @@ export function RewardSheet({
   filled,
   redeemCode,
   isRedeemed = false,
+  cooldownUntil = null,
+  forceLocked = false,
   onClose,
   onClaim,
 }: RewardSheetProps) {
@@ -30,17 +40,28 @@ export function RewardSheet({
   const isUnlocked = filled >= totalStamps;
   const left = totalStamps - filled;
   const [qrUrl, setQrUrl] = useState<string | null>(null);
+  const [clock, setClock] = useState(() => formatCooldownClock(cooldownUntil));
+  const qrLocked = forceLocked || (isCooldownActive(cooldownUntil) && Boolean(clock));
+  const lockLabel = clock ?? (forceLocked ? "Unlocking…" : null);
 
   useEffect(() => {
-    if (!open || !isUnlocked || isRedeemed) return;
+    if (!open || !isUnlocked || isRedeemed) {
+      setQrUrl(null);
+      return;
+    }
 
     let active = true;
-    const payload = `https://froq.io/redeem?code=${redeemCode}`;
+    // Locked: decoy payload so the blurred preview can't be redeemed.
+    // Unlocked: real redeem URL.
+    const payload = qrLocked
+      ? `https://froq.io/locked?t=${encodeURIComponent(cooldownUntil ?? "wait")}`
+      : `https://froq.io/redeem?code=${redeemCode}`;
 
     QRCode.toDataURL(payload, {
       margin: 1,
       width: 320,
-      color: { dark: "#000000", light: "#ffffff" },
+      color: { dark: "#111111", light: "#ffffff" },
+      errorCorrectionLevel: "M",
     })
       .then((url) => {
         if (active) setQrUrl(url);
@@ -52,41 +73,81 @@ export function RewardSheet({
     return () => {
       active = false;
     };
-  }, [open, isUnlocked, isRedeemed, redeemCode]);
+  }, [open, isUnlocked, isRedeemed, redeemCode, qrLocked, cooldownUntil]);
+
+  useEffect(() => {
+    if (!open || !cooldownUntil) {
+      setClock(null);
+      return;
+    }
+    const tick = () => setClock(formatCooldownClock(cooldownUntil));
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [open, cooldownUntil]);
 
   return (
     <BottomSheet open={open} onClose={onClose}>
       {isUnlocked ? (
         <>
           <div className="thanks-head">
-            <div className="thanks-badge thanks-badge--gold" aria-hidden="true">
-              <Gift size={26} strokeWidth={2.75} strokeLinecap="round" strokeLinejoin="round" color="#fff" />
+            <div
+              className={`thanks-badge${qrLocked ? "" : " thanks-badge--gold"}`}
+              aria-hidden="true"
+            >
+              {qrLocked ? (
+                <Lock size={24} strokeWidth={2.75} strokeLinecap="round" strokeLinejoin="round" color="#fff" />
+              ) : (
+                <Gift size={26} strokeWidth={2.75} strokeLinecap="round" strokeLinejoin="round" color="#fff" />
+              )}
             </div>
             <h3 className="thanks-title">
-              {isRedeemed ? "Already redeemed" : "Reward unlocked"}
+              {isRedeemed
+                ? "Already redeemed"
+                : qrLocked
+                  ? "Reward locked"
+                  : "Reward unlocked"}
             </h3>
             <p className="thanks-sub">
               {isRedeemed
                 ? "This reward has already been used. Enjoy your next visit!"
-                : "Show this code to staff to redeem your free reward."}
+                : qrLocked
+                  ? "Come back when the timer ends to show your QR to staff."
+                  : "Show this code to staff to redeem your free reward."}
             </p>
           </div>
 
           {!isRedeemed && (
-            <div className="reward-qr-card">
-              {qrUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  className="reward-qr-img"
-                  src={qrUrl}
-                  alt="Reward redemption QR code"
-                  width={220}
-                  height={220}
-                />
-              ) : (
-                <div className="reward-qr-skeleton" aria-hidden="true" />
-              )}
-              <div className="reward-qr-code">{redeemCode}</div>
+            <div className={`reward-qr-card${qrLocked ? " reward-qr-card--locked" : ""}`}>
+              <div className="reward-qr-frame">
+                {qrUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    className={`reward-qr-img${qrLocked ? " reward-qr-img--blurred" : ""}`}
+                    src={qrUrl}
+                    alt={qrLocked ? "Blurred reward QR" : "Reward redemption QR code"}
+                    width={220}
+                    height={220}
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="reward-qr-skeleton" aria-hidden="true" />
+                )}
+
+                {qrLocked && lockLabel ? (
+                  <div className="reward-qr-frost" role="status" aria-live="polite">
+                    <div className="reward-qr-lock-pill">
+                      <Lock size={15} strokeWidth={2.6} aria-hidden="true" />
+                      <span className="reward-qr-lock-time">{lockLabel}</span>
+                    </div>
+                    <span className="reward-qr-lock-label">until unlock</span>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className={`reward-qr-code${qrLocked ? " reward-qr-code--locked" : ""}`}>
+                {qrLocked ? "Code hidden until unlock" : redeemCode}
+              </div>
             </div>
           )}
 
@@ -94,7 +155,7 @@ export function RewardSheet({
             type="button"
             className="done-btn"
             onClick={() => {
-              if (!isRedeemed && onClaim) onClaim();
+              if (!isRedeemed && !qrLocked && onClaim) onClaim();
               else onClose();
             }}
           >

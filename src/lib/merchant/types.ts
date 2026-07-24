@@ -1,4 +1,40 @@
-export type MerchantTab = "dashboard" | "customers" | "scan" | "approvals" | "profile";
+import type { RewardCooldownUnit } from "@/lib/loyalty/rules";
+
+export type MerchantProduct = "loyalty" | "queue";
+
+export type MemberRole = "owner" | "staff";
+
+export interface Branch {
+  id: string;
+  name: string;
+  slug: string;
+  address: string;
+  isDefault: boolean;
+}
+
+export interface MerchantMember {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  role: MemberRole;
+  /** empty = access to all branches. */
+  branchIds: string[];
+  /** false = invited but hasn't logged in yet. */
+  joined: boolean;
+}
+
+/** Loyalty product-scoped tabs. */
+export type LoyaltyTab = "dashboard" | "scan" | "approvals" | "loyalty-settings";
+
+/** Queue product-scoped tabs. */
+export type QueueTab = "queue-home" | "queue-history" | "queue-settings";
+
+/** Workspace tabs shared across every product. */
+export type WorkspaceTab = "customers" | "profile";
+
+/** Every routable tab in the merchant app. */
+export type MerchantTab = LoyaltyTab | QueueTab | WorkspaceTab;
 
 export type MerchantEditSection =
   | "business"
@@ -12,6 +48,8 @@ export interface MerchantProfile {
   id?: string;
   slug?: string;
   businessName: string;
+  ownerFirstName: string;
+  ownerLastName: string;
   email: string;
   phone: string;
   address: string;
@@ -27,9 +65,17 @@ export interface MerchantProfile {
   rewardImageDataUrl?: string;
   totalStamps: number;
   avgOrderValue: number;
+  /** Default true. Not shown in onboarding. */
+  restartAfterReward: boolean;
+  rewardCooldownValue: number;
+  rewardCooldownUnit: RewardCooldownUnit;
+  /** Min purchase condition (₹). Shown in onboarding. */
+  minPurchaseAmount: number;
   stampNotifications: boolean;
   approvalNotifications: boolean;
   marketingEmails: boolean;
+  queueBanner?: string;
+  queueBannerLink?: string;
 }
 
 export interface MerchantStats {
@@ -67,6 +113,7 @@ export interface DashboardFilteredStats {
 
 export interface MerchantCustomer {
   id: string;
+  branchId?: string | null;
   name: string;
   phone: string;
   email?: string;

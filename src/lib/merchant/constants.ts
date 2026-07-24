@@ -1,5 +1,6 @@
 import type {
   MerchantCustomer,
+  MerchantProduct,
   MerchantProfile,
   MerchantStats,
   PendingApproval,
@@ -7,6 +8,8 @@ import type {
 
 export const MERCHANT_PROFILE: MerchantProfile = {
   businessName: "Bloom Coffee Co.",
+  ownerFirstName: "Alex",
+  ownerLastName: "Morgan",
   email: "hello@bloomcoffee.com",
   phone: "+91 98765 43210",
   address: "42 Market Street, San Francisco, CA 94105",
@@ -20,9 +23,13 @@ export const MERCHANT_PROFILE: MerchantProfile = {
   rewardName: "Free coffee",
   totalStamps: 5,
   avgOrderValue: 220,
+  restartAfterReward: true,
+  rewardCooldownValue: 0,
+  rewardCooldownUnit: "days",
+  minPurchaseAmount: 0,
   stampNotifications: true,
   approvalNotifications: true,
-  marketingEmails: false,
+  marketingEmails: true,
 };
 
 export const MERCHANT_STATS: MerchantStats = {
@@ -130,18 +137,47 @@ export const DEMO_APPROVALS: PendingApproval[] = [
   },
 ];
 
-export const MERCHANT_PLAN = {
-  name: "Growth",
-  price: "₹1,499",
-  cycle: "/mo",
-  status: "Active",
-  renewsOn: "Jul 19, 2026",
-  features: [
-    "Unlimited loyalty members",
-    "Real-time approvals & QR scanner",
-    "Customer lifetime-value analytics",
-  ],
-} as const;
+export interface MerchantPlan {
+  name: string;
+  price: string;
+  cycle: string;
+  status: string;
+  enabled: boolean;
+  renewsOn: string;
+  features: string[];
+}
+
+export const MERCHANT_PLANS: Record<MerchantProduct, MerchantPlan> = {
+  loyalty: {
+    name: "Growth",
+    price: "₹1,499",
+    cycle: "/mo",
+    status: "Active",
+    enabled: true,
+    renewsOn: "Jul 19, 2026",
+    features: [
+      "Unlimited loyalty members",
+      "Real-time approvals & QR scanner",
+      "Customer lifetime-value analytics",
+    ],
+  },
+  queue: {
+    name: "Queue",
+    price: "₹999",
+    cycle: "/mo",
+    status: "Not enabled",
+    enabled: false,
+    renewsOn: "",
+    features: [
+      "Live digital waitlist & tokens",
+      "SMS / WhatsApp ready-to-serve alerts",
+      "Wait-time analytics on your customers",
+    ],
+  },
+};
+
+/** Backwards-compatible alias for the loyalty plan. */
+export const MERCHANT_PLAN = MERCHANT_PLANS.loyalty;
 
 export const BRAND_COLORS: Array<{ name: string; value: string }> = [
   { name: "Teal", value: "#2b6f5c" },

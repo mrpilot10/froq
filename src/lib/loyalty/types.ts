@@ -9,6 +9,7 @@ export interface BusinessInfo {
   rewardDescription: string;
   rewardImage: string;
   totalStamps: number;
+  restartAfterReward?: boolean;
   socialLinks: {
     instagram?: string;
     whatsapp?: string;

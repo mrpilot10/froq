@@ -9,9 +9,19 @@ interface ClaimedCelebrationProps {
   open: boolean;
   business: BusinessInfo;
   onStartAgain: () => void;
+  /** When false, hide the "start again" messaging. */
+  canRestart?: boolean;
+  /** Optional cooldown message after claim. */
+  cooldownMessage?: string | null;
 }
 
-export function ClaimedCelebration({ open, business, onStartAgain }: ClaimedCelebrationProps) {
+export function ClaimedCelebration({
+  open,
+  business,
+  onStartAgain,
+  canRestart = true,
+  cooldownMessage = null,
+}: ClaimedCelebrationProps) {
   const rewardName = business.rewardName?.trim() || "reward";
 
   return (
@@ -37,12 +47,16 @@ export function ClaimedCelebration({ open, business, onStartAgain }: ClaimedCele
           Reward claimed! 🎉
         </h3>
         <p className="claimed-sub">
-          Enjoy your <strong>{rewardName}</strong> from {business.name}! Your card&apos;s been wiped
-          clean — start collecting stamps again and your next reward is already on its way.
+          Enjoy your <strong>{rewardName}</strong> from {business.name}!
+          {canRestart
+            ? cooldownMessage
+              ? ` ${cooldownMessage}.`
+              : " Your card’s been wiped clean — start collecting stamps again and your next reward is already on its way."
+            : " You’ve completed this rewards program."}
         </p>
 
         <button type="button" className="done-btn" onClick={onStartAgain}>
-          Start a new card
+          {canRestart ? "Back to card" : "Done"}
         </button>
       </div>
     </BottomSheet>

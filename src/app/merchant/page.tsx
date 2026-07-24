@@ -1,5 +1,5 @@
-import { MerchantGate } from "@/components/merchant/merchant-gate";
+import { redirect } from "next/navigation";
 
 export default function MerchantPage() {
-  return <MerchantGate />;
+  redirect("/merchant/loyalty");
 }

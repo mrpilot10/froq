@@ -10,6 +10,7 @@ interface WalletPassProps {
   customerName?: string;
   customerInitials?: string;
   onRewardClick?: () => void;
+  lockMessage?: string | null;
 }
 
 export function WalletPass({
@@ -19,6 +20,7 @@ export function WalletPass({
   customerName = "Alex Morgan",
   customerInitials = "AM",
   onRewardClick,
+  lockMessage = null,
 }: WalletPassProps) {
   return (
     <div className="pass-stack">
@@ -63,6 +65,8 @@ export function WalletPass({
             />
           </div>
         </div>
+
+        {lockMessage ? <p className="pass-lock-msg">{lockMessage}</p> : null}
 
         <StampGrid
           total={business.totalStamps}

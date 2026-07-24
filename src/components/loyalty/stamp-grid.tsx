@@ -51,17 +51,28 @@ export function StampGrid({
   pending = false,
   onRewardClick,
 }: StampGridProps) {
+  // The customer collects `total` stamps; the reward is the extra (total + 1)th
+  // slot that unlocks once every stamp is collected.
+  const cellCount = total + 1;
+  // Keep the grid balanced: fall back to 6 columns when 5 would leave a single
+  // lonely reward on its own row.
+  const columns = cellCount % 5 === 1 ? 6 : 5;
+  const rewardReady = filled >= total;
+
   return (
-    <div className="stamp-grid">
-      {Array.from({ length: total }, (_, i) => {
-        const isReward = i === total - 1;
-        const isFilled = i < filled;
-        const isPending = pending && i === filled;
-        const isNext = i === filled && !pending && !isFilled;
+    <div
+      className="stamp-grid"
+      style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}
+    >
+      {Array.from({ length: cellCount }, (_, i) => {
+        const isReward = i === total;
+        const isFilled = !isReward && i < filled;
+        const isPending = !isReward && pending && i === filled;
+        const isNext = !isReward && i === filled && !pending && !isFilled;
 
         let className = "stamp";
         if (isReward) className += " reward";
-        if (isFilled) className += " filled";
+        if (isFilled || (isReward && rewardReady)) className += " filled";
         if (isPending) className += " pending";
         if (isNext) className += " next";
 

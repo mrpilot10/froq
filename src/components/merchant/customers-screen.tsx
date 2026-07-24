@@ -19,6 +19,7 @@ interface CustomersScreenProps {
   avgOrderValue: number;
   onBanCustomer: (id: string) => void;
   onDeleteCustomer: (id: string) => void;
+  onOfferStamp: (id: string) => Promise<boolean>;
 }
 
 function statusLabel(status: MerchantCustomer["status"]) {
@@ -82,6 +83,7 @@ export function CustomersScreen({
   avgOrderValue,
   onBanCustomer,
   onDeleteCustomer,
+  onOfferStamp,
 }: CustomersScreenProps) {
   const [sortKey, setSortKey] = useState<SortKey>("ltv");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -200,6 +202,7 @@ export function CustomersScreen({
           onDeleteCustomer(id);
           setSelectedId(null);
         }}
+        onOfferStamp={onOfferStamp}
       />
     </div>
   );

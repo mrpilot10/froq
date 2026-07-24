@@ -1,43 +1,91 @@
 "use client";
 
-import { CheckSquare, LayoutGrid, ScanLine, User, Users } from "lucide-react";
-import type { MerchantTab } from "@/lib/merchant/types";
+import {
+  CheckSquare,
+  History,
+  LayoutGrid,
+  ScanLine,
+  SlidersHorizontal,
+  User,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
+import { PRODUCTS } from "@/lib/merchant/nav";
+import type { MerchantProduct, MerchantTab } from "@/lib/merchant/types";
 
 interface MerchantNavProps {
+  activeProduct: MerchantProduct;
   activeTab: MerchantTab;
   onTabChange: (tab: MerchantTab) => void;
+  onProductChange: (product: MerchantProduct) => void;
   pendingCount?: number;
 }
 
-const NAV_ITEMS: Array<{
+interface MobileNavItem {
   id: MerchantTab;
   label: string;
-  Icon: typeof LayoutGrid;
-}> = [
-  { id: "dashboard", label: "Home", Icon: LayoutGrid },
-  { id: "customers", label: "Customers", Icon: Users },
-  { id: "scan", label: "Scan", Icon: ScanLine },
-  { id: "approvals", label: "Approve", Icon: CheckSquare },
-  { id: "profile", label: "Profile", Icon: User },
-];
+  Icon: LucideIcon;
+  primary?: boolean;
+}
 
-export function MerchantNav({ activeTab, onTabChange, pendingCount = 0 }: MerchantNavProps) {
+// Bottom-nav layouts per product (workspace tabs are woven in for quick reach).
+const MOBILE_NAV: Record<MerchantProduct, MobileNavItem[]> = {
+  loyalty: [
+    { id: "dashboard", label: "Home", Icon: LayoutGrid },
+    { id: "customers", label: "Customers", Icon: Users },
+    { id: "scan", label: "Scan", Icon: ScanLine, primary: true },
+    { id: "approvals", label: "Approve", Icon: CheckSquare },
+    { id: "loyalty-settings", label: "Settings", Icon: SlidersHorizontal },
+  ],
+  queue: [
+    { id: "queue-home", label: "Home", Icon: LayoutGrid },
+    { id: "customers", label: "Customers", Icon: Users },
+    { id: "queue-history", label: "History", Icon: History },
+    { id: "queue-settings", label: "Settings", Icon: SlidersHorizontal },
+    { id: "profile", label: "Profile", Icon: User },
+  ],
+};
+
+export function MerchantNav({
+  activeProduct,
+  activeTab,
+  onTabChange,
+  onProductChange,
+  pendingCount = 0,
+}: MerchantNavProps) {
+  const items = MOBILE_NAV[activeProduct];
+
   return (
     <div className="nav-dock">
+      <div className="merchant-nav-switch" role="tablist" aria-label="Switch product">
+        {PRODUCTS.map(({ id, name, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={activeProduct === id}
+            className={`merchant-nav-switch-btn${activeProduct === id ? " active" : ""}`}
+            onClick={() => onProductChange(id)}
+          >
+            <Icon size={14} strokeWidth={2.4} />
+            <span>{name}</span>
+          </button>
+        ))}
+      </div>
+
       <nav className="nav-bar merchant-nav-bar" aria-label="Merchant navigation">
-        {NAV_ITEMS.map(({ id, label, Icon }) => {
+        {items.map(({ id, label, Icon, primary }) => {
           const isActive = activeTab === id;
-          const isScan = id === "scan";
           const showBadge = id === "approvals" && pendingCount > 0;
 
-          if (isScan) {
+          if (primary) {
             return (
               <button
                 key={id}
                 type="button"
                 className={`merchant-scan-btn${isActive ? " active" : ""}`}
                 aria-current={isActive ? "page" : undefined}
-                aria-label="Scan reward QR"
+                aria-label={label}
                 onClick={() => onTabChange(id)}
               >
                 <Icon size={22} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />

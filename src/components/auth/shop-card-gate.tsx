@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { deleteCustomerAccount, getCustomerHome, type CustomerHome } from "@/app/actions/customer";
+import { customerHubPath } from "@/lib/customer/hub";
 import { createClient } from "@/lib/supabase/client";
 import { LoyaltyExperience } from "@/components/loyalty/loyalty-experience";
 
@@ -10,6 +11,10 @@ interface ShopCardGateProps {
   slug: string;
 }
 
+/**
+ * Legacy /card/{slug} entry. Prefer /c/{publicToken}.
+ * When ready, redirects to the permanent hub URL.
+ */
 export function ShopCardGate({ slug }: ShopCardGateProps) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -27,6 +32,10 @@ export function ShopCardGate({ slug }: ShopCardGateProps) {
     if (!home) return;
     if (home.status === "unauthenticated" || home.status === "no_membership") {
       router.replace(`/join/${slug}`);
+      return;
+    }
+    if (home.status === "ready" && home.publicToken) {
+      router.replace(customerHubPath(home.publicToken));
     }
   }, [home, slug, router]);
 
@@ -45,7 +54,12 @@ export function ShopCardGate({ slug }: ShopCardGateProps) {
     return res;
   }, [home, supabase, slug, router]);
 
+  // Prefer hub redirect; briefly render loyalty only if token missing (shouldn't happen post-migration).
   if (!home || home.status !== "ready") {
+    return null;
+  }
+
+  if (home.publicToken) {
     return null;
   }
 

@@ -10,6 +10,7 @@ export interface OtpRecord {
   phone: string;
   otp_hash: string;
   request_id: string | null;
+  channel: string;
   attempts: number;
   consumed_at: string | null;
   expires_at: string;
@@ -81,20 +82,31 @@ export async function persistOtp(input: {
   }
 }
 
-/** Attach the APITxT request_id after SMS delivery succeeds. */
-export async function updateOtpRequestId(phone: string, requestId?: string): Promise<void> {
-  if (!requestId) return;
+/** Attach delivery metadata after WhatsApp/SMS succeeds. */
+export async function updateOtpDelivery(
+  phone: string,
+  input: { requestId?: string; channel?: string },
+): Promise<void> {
   try {
     const admin = createAdminClient();
+    const patch: Record<string, string> = {};
+    if (input.requestId) patch.request_id = input.requestId;
+    if (input.channel) patch.channel = input.channel;
+    if (Object.keys(patch).length === 0) return;
     await admin
       .from(TABLE)
-      .update({ request_id: requestId })
+      .update(patch)
       .eq("phone", phone)
       .is("consumed_at", null)
       .gt("expires_at", new Date().toISOString());
   } catch {
     // Non-critical — OTP is already stored and delivered.
   }
+}
+
+/** @deprecated Prefer updateOtpDelivery. */
+export async function updateOtpRequestId(phone: string, requestId?: string): Promise<void> {
+  await updateOtpDelivery(phone, { requestId });
 }
 
 /** Latest active (unconsumed, unexpired) OTP record for the phone. */

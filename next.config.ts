@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   // requested from other devices on the LAN (e.g. testing on a phone via the
   // machine's local IP). Without this, Next.js 16 blocks those cross-origin
   // requests and the page renders but never hydrates — so nothing is tappable.
-  allowedDevOrigins: ["192.168.1.19"],
+  allowedDevOrigins: ["192.168.1.21"],
   experimental: {
     // Logos are downscaled client-side before upload, but keep a comfortable
     // ceiling so a server action carrying a logo data URL never hits the

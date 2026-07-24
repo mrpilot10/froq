@@ -23,8 +23,12 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
   },
   icons: {
-    icon: "/froq-logo.png",
-    apple: "/froq-logo.png",
+    icon: [
+      { url: "/froq-logo.png", type: "image/png" },
+      { url: "/froq-logo-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/froq-logo-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/froq-logo-192.png", sizes: "192x192", type: "image/png" }],
   },
 };
 
@@ -77,7 +81,10 @@ export default function RootLayout({
       <body className="min-h-full antialiased">
         {children}
         <KeyboardAware />
-        <Toaster position="top-center" richColors />
+        <Toaster
+          position="bottom-center"
+          toastOptions={{ className: "froq-toast" }}
+        />
         <SpeedInsights />
       </body>
     </html>

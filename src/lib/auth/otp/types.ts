@@ -3,6 +3,8 @@
 export interface SendOtpResult {
   ok: boolean;
   message: string;
+  // Present on success — delivery channel used for this OTP.
+  channel?: "whatsapp" | "sms";
   // Present on success — APITxT request id, surfaced for client-side tracking/logging.
   requestId?: string;
   // Present on rate-limit/cooldown responses — seconds the caller should wait.

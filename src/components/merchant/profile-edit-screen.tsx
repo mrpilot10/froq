@@ -23,7 +23,7 @@ const SECTION_META: Record<
 > = {
   business: {
     title: "Store details",
-    subtitle: "Logo, business name, and location",
+    subtitle: "Logo, owner, business name, and location",
   },
   links: {
     title: "Links & social",
@@ -251,6 +251,20 @@ export function MerchantProfileEditScreen({
               maxLength={FIELD_LIMITS.businessName}
               onChange={(v) => updateField("businessName", v)}
             />
+            <div className="wizard-field-row">
+              <LimitedField
+                label="Owner first name"
+                value={profile.ownerFirstName}
+                maxLength={40}
+                onChange={(v) => updateField("ownerFirstName", v)}
+              />
+              <LimitedField
+                label="Owner last name"
+                value={profile.ownerLastName}
+                maxLength={40}
+                onChange={(v) => updateField("ownerLastName", v)}
+              />
+            </div>
             <LimitedField
               label="Address"
               value={profile.address}
@@ -361,12 +375,12 @@ export function MerchantProfileEditScreen({
               <input
                 className="auth-input"
                 type="number"
-                min={1}
+                min={5}
                 max={20}
                 value={profile.totalStamps}
                 onChange={(e) => updateField("totalStamps", Number(e.target.value))}
               />
-              <span className="merchant-field-hint">How many stamps a customer collects to claim the reward</span>
+              <span className="merchant-field-hint">How many stamps a customer collects to claim the reward (minimum 5)</span>
             </label>
             <label className="auth-field">
               <span className="auth-label">Order value (₹)</span>
@@ -380,6 +394,50 @@ export function MerchantProfileEditScreen({
               />
               <span className="merchant-field-hint">Used to calculate customer lifetime value</span>
             </label>
+            <ToggleRow
+              label="Start again after reward"
+              description="Let customers collect stamps on a new card after they claim a reward"
+              checked={profile.restartAfterReward}
+              onChange={(v) => updateField("restartAfterReward", v)}
+            />
+            {profile.restartAfterReward ? (
+              <div className="auth-field">
+                <span className="auth-label">Wait before next reward</span>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <input
+                    className="auth-input"
+                    style={{ flex: 1 }}
+                    type="number"
+                    min={0}
+                    value={profile.rewardCooldownValue}
+                    onChange={(e) =>
+                      updateField("rewardCooldownValue", Number(e.target.value))
+                    }
+                  />
+                  <select
+                    className="auth-input"
+                    style={{ flex: 1 }}
+                    value={profile.rewardCooldownUnit}
+                    disabled={profile.rewardCooldownValue <= 0}
+                    onChange={(e) =>
+                      updateField(
+                        "rewardCooldownUnit",
+                        e.target.value as "hours" | "days" | "weeks",
+                      )
+                    }
+                  >
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                    <option value="weeks">Weeks</option>
+                  </select>
+                </div>
+                <span className="merchant-field-hint">
+                  After a reward unlocks, keep the QR locked for this long. After redeem, the next
+                  stamp card stays locked for the same wait. 0 = no wait. Changing this only affects
+                  future rewards — customers already waiting keep their original unlock time.
+                </span>
+              </div>
+            ) : null}
           </>
         )}
 

@@ -1,16 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, Gift, Stamp, Users, Clock } from "lucide-react";
+import { ChevronDown, Clock, Gift, QrCode, ScanLine, Stamp, Users } from "lucide-react";
 import { getDashboardStats } from "@/app/merchant/actions";
-import type { DashboardDateRange, DashboardFilteredStats } from "@/lib/merchant/types";
+import type {
+  DashboardDateRange,
+  DashboardFilteredStats,
+  MerchantProfile,
+} from "@/lib/merchant/types";
 import { computeLtv, formatCompactCurrency, formatCurrency } from "@/lib/merchant/ltv";
 import { MerchantPosterCard } from "./poster-card";
 
 interface DashboardScreenProps {
-  businessName: string;
+  profile: MerchantProfile;
   avgOrderValue: number;
   initialStats: DashboardFilteredStats;
+  activeBranchId?: string | null;
+  onShowQr?: () => void;
+  onRedeemCode?: () => void;
+  onEditRewards?: () => void;
 }
 
 const DATE_RANGES: { value: DashboardDateRange; label: string }[] = [
@@ -20,17 +28,29 @@ const DATE_RANGES: { value: DashboardDateRange; label: string }[] = [
   { value: "all", label: "All time" },
 ];
 
-export function DashboardScreen({ businessName, avgOrderValue, initialStats }: DashboardScreenProps) {
+export function DashboardScreen({
+  profile,
+  avgOrderValue,
+  initialStats,
+  activeBranchId = null,
+  onShowQr,
+  onRedeemCode,
+  onEditRewards,
+}: DashboardScreenProps) {
   const [range, setRange] = useState<DashboardDateRange>(initialStats.range);
   const [stats, setStats] = useState(initialStats);
   const [loading, setLoading] = useState(false);
+  const businessName = profile.businessName;
 
-  const loadStats = useCallback(async (nextRange: DashboardDateRange) => {
-    setLoading(true);
-    const next = await getDashboardStats(nextRange);
-    if (next) setStats(next);
-    setLoading(false);
-  }, []);
+  const loadStats = useCallback(
+    async (nextRange: DashboardDateRange) => {
+      setLoading(true);
+      const next = await getDashboardStats(nextRange, activeBranchId);
+      if (next) setStats(next);
+      setLoading(false);
+    },
+    [activeBranchId],
+  );
 
   useEffect(() => {
     if (range === initialStats.range) {
@@ -99,25 +119,51 @@ export function DashboardScreen({ businessName, avgOrderValue, initialStats }: D
           <span className="merchant-ltv-eyebrow">Average customer LTV</span>
         </div>
         <div className="merchant-ltv-value">{formatCurrency(averageLtv)}</div>
-        <div className="merchant-ltv-foot merchant-ltv-foot--grid">
-          <div className="merchant-ltv-foot-item">
-            <span className="merchant-ltv-foot-label">Total lifetime value</span>
-            <span className="merchant-ltv-foot-value">{formatCompactCurrency(lifetimeTotal)}</span>
+        <div className="merchant-ltv-metrics">
+          <div className="merchant-ltv-tile">
+            <span className="merchant-ltv-tile-label">Total lifetime value</span>
+            <span className="merchant-ltv-tile-value">{formatCompactCurrency(lifetimeTotal)}</span>
           </div>
-          <div className="merchant-ltv-foot-item">
-            <span className="merchant-ltv-foot-label">Avg. order</span>
-            <span className="merchant-ltv-foot-value">{formatCurrency(avgOrderValue)}</span>
+          <div className="merchant-ltv-tile">
+            <span className="merchant-ltv-tile-label">Avg. order</span>
+            <span className="merchant-ltv-tile-value">{formatCurrency(avgOrderValue)}</span>
           </div>
-          <div className="merchant-ltv-foot-item">
-            <span className="merchant-ltv-foot-label">Total customers</span>
-            <span className="merchant-ltv-foot-value">{stats.totalCustomers}</span>
+          <div className="merchant-ltv-tile">
+            <span className="merchant-ltv-tile-label">Total customers</span>
+            <span className="merchant-ltv-tile-value">{stats.totalCustomers}</span>
           </div>
-          <div className="merchant-ltv-foot-item">
-            <span className="merchant-ltv-foot-label">Avg. visits</span>
-            <span className="merchant-ltv-foot-value">{stats.avgLifetimeVisits.toFixed(1)}</span>
+          <div className="merchant-ltv-tile">
+            <span className="merchant-ltv-tile-label">Avg. visits</span>
+            <span className="merchant-ltv-tile-value">{stats.avgLifetimeVisits.toFixed(1)}</span>
           </div>
         </div>
       </div>
+
+      <section className="merchant-section">
+        <div className="merchant-section-head">
+          <h3 className="merchant-section-label">Quick actions</h3>
+        </div>
+        <div className="merchant-quick-actions">
+          <button type="button" className="queue-action" onClick={() => onShowQr?.()}>
+            <span className="queue-action-icon queue-action-icon--accent">
+              <QrCode size={18} strokeWidth={2.2} />
+            </span>
+            Show QR
+          </button>
+          <button type="button" className="queue-action" onClick={() => onRedeemCode?.()}>
+            <span className="queue-action-icon">
+              <ScanLine size={18} strokeWidth={2.2} />
+            </span>
+            Redeem code
+          </button>
+          <button type="button" className="queue-action" onClick={() => onEditRewards?.()}>
+            <span className="queue-action-icon">
+              <Gift size={18} strokeWidth={2.2} />
+            </span>
+            Rewards &amp; stamps
+          </button>
+        </div>
+      </section>
 
       <section className="merchant-section">
         <div className="merchant-section-head">

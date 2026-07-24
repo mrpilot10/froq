@@ -1,13 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { getMerchantBundle, type MerchantBundle } from "@/app/merchant/actions";
 import { createClient } from "@/lib/supabase/client";
 import { readCheckoutAccount } from "@/lib/merchant/checkout";
 import { MerchantExperience } from "./merchant-experience";
 import { MerchantLogin } from "./merchant-login";
-import { MerchantSetupWizard } from "./merchant-setup-wizard";
+import { OnboardingWizard } from "./onboarding/onboarding-wizard";
 import { MerchantGateSplash } from "./skeletons";
+
+/** localStorage key for the merchant's currently selected branch (null = all). */
+export const ACTIVE_BRANCH_KEY = "froq.activeBranch";
 
 /**
  * Single source of truth for the merchant area, driven entirely by the Supabase
@@ -17,13 +20,15 @@ import { MerchantGateSplash } from "./skeletons";
  *   - session, checkout done  → setup wizard
  *   - session + store        → dashboard
  */
-export function MerchantGate() {
+export function MerchantGate({ children }: { children: ReactNode }) {
   const supabase = useMemo(() => createClient(), []);
   const [bundle, setBundle] = useState<MerchantBundle | null>(null);
   const [clientReady, setClientReady] = useState(false);
 
   const refresh = useCallback(async () => {
-    const next = await getMerchantBundle();
+    const branchId =
+      typeof window !== "undefined" ? window.localStorage.getItem(ACTIVE_BRANCH_KEY) : null;
+    const next = await getMerchantBundle(branchId);
     setBundle((prev) => {
       // A transient fetch error shouldn't tear down a working session. Keep the
       // last good bundle so the merchant stays on their dashboard; only surface
@@ -31,7 +36,27 @@ export function MerchantGate() {
       if (next.status === "error") return prev ?? next;
       return next;
     });
+    // Keep localStorage aligned with what the server allowed (staff can't keep
+    // a branch they aren't assigned to, or an "all branches" selection).
+    if (typeof window !== "undefined" && next.status === "ready") {
+      if (next.activeBranchId) {
+        window.localStorage.setItem(ACTIVE_BRANCH_KEY, next.activeBranchId);
+      } else if (next.canViewAllBranches) {
+        window.localStorage.removeItem(ACTIVE_BRANCH_KEY);
+      }
+    }
   }, []);
+
+  const handleSelectBranch = useCallback(
+    async (branchId: string | null) => {
+      if (typeof window !== "undefined") {
+        if (branchId) window.localStorage.setItem(ACTIVE_BRANCH_KEY, branchId);
+        else window.localStorage.removeItem(ACTIVE_BRANCH_KEY);
+      }
+      await refresh();
+    },
+    [refresh],
+  );
 
   useEffect(() => {
     setClientReady(true);
@@ -71,9 +96,16 @@ export function MerchantGate() {
     return <MerchantLogin onAuthed={refresh} />;
   }
 
-  // Paid via checkout — store builder for new merchants.
+  // Paid via checkout — global setup + first product for new merchants.
   if (bundle.status === "needs_setup") {
-    return <MerchantSetupWizard checkoutAccount={checkoutAccount} onComplete={refresh} />;
+    return (
+      <OnboardingWizard
+        mode="full"
+        product={bundle.product}
+        checkoutAccount={checkoutAccount}
+        onComplete={refresh}
+      />
+    );
   }
 
   return (
@@ -82,8 +114,18 @@ export function MerchantGate() {
       dashboardStats={bundle.dashboardStats}
       customers={bundle.customers}
       approvals={bundle.approvals}
+      entitlements={bundle.entitlements}
+      branches={bundle.branches}
+      members={bundle.members}
+      role={bundle.role}
+      activeBranchId={bundle.activeBranchId}
+      canViewAllBranches={bundle.canViewAllBranches}
+      justJoined={bundle.justJoined}
+      onSelectBranch={handleSelectBranch}
       onRefresh={refresh}
       onLogout={handleLogout}
-    />
+    >
+      {children}
+    </MerchantExperience>
   );
 }

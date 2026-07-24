@@ -1,12 +1,15 @@
-import { Bell, ChevronRight, Gift, Link2, LogOut, Settings, Store } from "lucide-react";
+import { ChevronRight, Link2, LogOut, MapPin, Settings, Store, Users } from "lucide-react";
 import Image from "next/image";
-import type { MerchantEditSection, MerchantProfile } from "@/lib/merchant/types";
-import { MerchantPlanCard } from "./plan-card";
-import { MerchantQrPanel } from "./qr-panel";
+import type { MemberRole, MerchantEditSection, MerchantProfile } from "@/lib/merchant/types";
 
 interface MerchantProfileScreenProps {
   profile: MerchantProfile;
+  role: MemberRole;
+  branchCount: number;
+  memberCount: number;
   onEditSection: (section: MerchantEditSection) => void;
+  onManageBranches: () => void;
+  onManageTeam: () => void;
   onLogout?: () => void;
   onDeleteAccount?: () => void;
 }
@@ -28,23 +31,6 @@ const SETTINGS_GROUPS: Array<{
     ],
   },
   {
-    title: "Loyalty program",
-    items: [
-      { id: "loyalty", label: "Rewards & stamps", value: "Offer, stamps & order value", Icon: Gift },
-    ],
-  },
-  {
-    title: "Notifications",
-    items: [
-      {
-        id: "notifications",
-        label: "Alerts & email",
-        value: "Stamp, approval, marketing",
-        Icon: Bell,
-      },
-    ],
-  },
-  {
     title: "Account",
     items: [
       { id: "account", label: "Account settings", value: "Email, phone, security", Icon: Settings },
@@ -54,10 +40,17 @@ const SETTINGS_GROUPS: Array<{
 
 export function MerchantProfileScreen({
   profile,
+  role,
+  branchCount,
+  memberCount,
   onEditSection,
+  onManageBranches,
+  onManageTeam,
   onLogout,
   onDeleteAccount,
 }: MerchantProfileScreenProps) {
+  const canManageBranches = role === "owner";
+  const canManageTeam = role === "owner";
   const initials = profile.businessName
     .split(/\s+/)
     .map((w) => w[0])
@@ -68,8 +61,8 @@ export function MerchantProfileScreen({
   return (
     <div className="tab-screen">
       <div className="tab-head">
-        <h2 className="tab-title">Profile</h2>
-        <p className="tab-sub">Manage your business and settings</p>
+        <h2 className="tab-title">Business settings</h2>
+        <p className="tab-sub">Manage your store identity and account</p>
       </div>
 
       <div className="panel-card profile-panel merchant-identity-card">
@@ -97,12 +90,51 @@ export function MerchantProfileScreen({
           </div>
           <div>
             <h3 className="profile-name">{profile.businessName}</h3>
-            <p className="profile-meta">{profile.rewardTitle}</p>
+            {(profile.ownerFirstName || profile.ownerLastName) && (
+              <p className="profile-meta">
+                {`${profile.ownerFirstName} ${profile.ownerLastName}`.trim()}
+              </p>
+            )}
+            <p className="profile-meta">{profile.address || "Add your store address"}</p>
           </div>
         </div>
       </div>
 
-      <MerchantQrPanel profile={profile} />
+      {(canManageBranches || canManageTeam) && (
+        <div className="merchant-settings-group">
+          <h3 className="merchant-settings-title">Workspace</h3>
+          <div className="panel-card merchant-settings-panel">
+            {canManageBranches && (
+              <button type="button" className="merchant-settings-row" onClick={onManageBranches}>
+                <div className="profile-row-icon">
+                  <MapPin size={18} strokeWidth={2.2} />
+                </div>
+                <div className="profile-row-copy">
+                  <div className="profile-row-label">Branches</div>
+                  <div className="profile-row-value profile-row-value--soft">
+                    {branchCount} {branchCount === 1 ? "location" : "locations"}
+                  </div>
+                </div>
+                <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
+              </button>
+            )}
+            {canManageTeam && (
+              <button type="button" className="merchant-settings-row" onClick={onManageTeam}>
+                <div className="profile-row-icon">
+                  <Users size={18} strokeWidth={2.2} />
+                </div>
+                <div className="profile-row-copy">
+                  <div className="profile-row-label">Team</div>
+                  <div className="profile-row-value profile-row-value--soft">
+                    {memberCount} {memberCount === 1 ? "member" : "members"}
+                  </div>
+                </div>
+                <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {SETTINGS_GROUPS.map((group) => (
         <div key={group.title} className="merchant-settings-group">
@@ -128,8 +160,6 @@ export function MerchantProfileScreen({
           </div>
         </div>
       ))}
-
-      <MerchantPlanCard />
 
       {onLogout && (
         <button type="button" className="profile-logout" onClick={onLogout}>

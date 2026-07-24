@@ -1,5 +1,10 @@
-import type { CustomerOverviewRow, MerchantRow } from "@/lib/supabase/database.types";
-import type { MerchantCustomer, MerchantProfile } from "./types";
+import type {
+  BranchRow,
+  CustomerOverviewRow,
+  MerchantMemberRow,
+  MerchantRow,
+} from "@/lib/supabase/database.types";
+import type { Branch, MerchantCustomer, MerchantMember, MerchantProfile } from "./types";
 
 export function slugify(value: string) {
   return value
@@ -14,6 +19,8 @@ export function toMerchantProfile(row: MerchantRow): MerchantProfile {
     id: row.id,
     slug: row.slug,
     businessName: row.business_name,
+    ownerFirstName: row.owner_first_name ?? "",
+    ownerLastName: row.owner_last_name ?? "",
     email: row.email ?? "",
     phone: row.phone ?? "",
     address: row.address ?? "",
@@ -29,9 +36,15 @@ export function toMerchantProfile(row: MerchantRow): MerchantProfile {
     rewardImageDataUrl: row.reward_image_url ?? undefined,
     totalStamps: row.total_stamps,
     avgOrderValue: Number(row.avg_order_value),
+    restartAfterReward: row.restart_after_reward !== false,
+    rewardCooldownValue: row.reward_cooldown_value ?? 0,
+    rewardCooldownUnit: row.reward_cooldown_unit ?? "days",
+    minPurchaseAmount: Number(row.min_purchase_amount ?? 0),
     stampNotifications: row.stamp_notifications,
     approvalNotifications: row.approval_notifications,
     marketingEmails: row.marketing_emails,
+    queueBanner: row.queue_banner ?? "",
+    queueBannerLink: row.queue_banner_link ?? "",
   };
 }
 
@@ -43,6 +56,8 @@ export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<Mer
     // short_name is a NOT NULL legacy column; keep it mirrored to business name.
     row.short_name = patch.businessName;
   }
+  if (patch.ownerFirstName !== undefined) row.owner_first_name = patch.ownerFirstName || null;
+  if (patch.ownerLastName !== undefined) row.owner_last_name = patch.ownerLastName || null;
   if (patch.email !== undefined) row.email = patch.email;
   if (patch.phone !== undefined) row.phone = patch.phone;
   if (patch.address !== undefined) row.address = patch.address;
@@ -57,12 +72,24 @@ export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<Mer
   if (patch.rewardName !== undefined) row.reward_name = patch.rewardName;
   if (patch.rewardImageDataUrl !== undefined)
     row.reward_image_url = patch.rewardImageDataUrl ?? null;
-  if (patch.totalStamps !== undefined) row.total_stamps = patch.totalStamps;
+  if (patch.totalStamps !== undefined) {
+    row.total_stamps = Math.min(20, Math.max(5, Math.floor(patch.totalStamps) || 5));
+  }
   if (patch.avgOrderValue !== undefined) row.avg_order_value = patch.avgOrderValue;
+  if (patch.restartAfterReward !== undefined)
+    row.restart_after_reward = patch.restartAfterReward;
+  if (patch.rewardCooldownValue !== undefined)
+    row.reward_cooldown_value = Math.max(0, Math.floor(patch.rewardCooldownValue));
+  if (patch.rewardCooldownUnit !== undefined) row.reward_cooldown_unit = patch.rewardCooldownUnit;
+  if (patch.minPurchaseAmount !== undefined)
+    row.min_purchase_amount = Math.max(0, Number(patch.minPurchaseAmount) || 0);
   if (patch.stampNotifications !== undefined) row.stamp_notifications = patch.stampNotifications;
   if (patch.approvalNotifications !== undefined)
     row.approval_notifications = patch.approvalNotifications;
   if (patch.marketingEmails !== undefined) row.marketing_emails = patch.marketingEmails;
+  if (patch.queueBanner !== undefined) row.queue_banner = patch.queueBanner || null;
+  if (patch.queueBannerLink !== undefined)
+    row.queue_banner_link = patch.queueBannerLink || null;
   return row;
 }
 
@@ -80,9 +107,38 @@ function relativeDay(iso: string | null) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+export function toBranch(row: BranchRow): Branch {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    address: row.address ?? "",
+    isDefault: row.is_default,
+  };
+}
+
+export function toMember(row: MerchantMemberRow): MerchantMember {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name ?? "",
+    email: row.email ?? "",
+    // Managers were removed; treat any legacy manager as staff.
+    role: row.role === "owner" ? "owner" : "staff",
+    branchIds:
+      row.branch_ids && row.branch_ids.length > 0
+        ? row.branch_ids
+        : row.branch_id
+          ? [row.branch_id]
+          : [],
+    joined: row.accepted_at !== null,
+  };
+}
+
 export function toCustomer(row: CustomerOverviewRow): MerchantCustomer {
   return {
     id: row.id,
+    branchId: row.branch_id,
     name: row.name,
     phone: row.phone,
     email: row.email ?? undefined,

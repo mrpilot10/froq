@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
-// Customers access their card per shop via QR: /join/<slug> → /card/<slug>
+// Legacy entry. Customers use their permanent hub: /c/{publicToken}
+// Shop QR still lands on /join/<slug>, then redirects to the hub after join.
 export default function CardIndexPage() {
   redirect("/");
 }

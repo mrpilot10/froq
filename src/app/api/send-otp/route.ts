@@ -1,18 +1,18 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
   MAX_REQUESTS_PER_MINUTE,
   RESEND_SECONDS,
 } from "@/lib/auth/otp/config";
 import { generateOtp, hashOtp } from "@/lib/auth/otp/hash";
-import { sendSmsOtp } from "@/lib/auth/otp/apitxt";
+import { deliverOtp } from "@/lib/auth/otp/deliver";
 import {
   countRecentRequests,
   lastRequestAt,
   persistOtp,
   purgeExpired,
   clearOtps,
-  updateOtpRequestId,
+  updateOtpDelivery,
 } from "@/lib/auth/otp/store";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { maskPhone, toCanonicalPhone } from "@/lib/auth/otp/phone";
@@ -20,8 +20,6 @@ import { otpLog } from "@/lib/auth/otp/logger";
 import type { SendOtpResult } from "@/lib/auth/otp/types";
 
 export const runtime = "nodejs";
-// APITxT can be slow (~15s); allow headroom on Vercel Pro. Background `after()` keeps
-// the client response fast even on the 10s Hobby limit.
 export const maxDuration = 30;
 
 const bodySchema = z.object({
@@ -142,25 +140,33 @@ export async function POST(request: Request) {
       );
     }
 
-    const deliverSms = async () => {
-      const delivery = await sendSmsOtp(phone, otp);
-      if (delivery.ok) {
-        await updateOtpRequestId(phone, delivery.requestId);
-        otpLog.info("otp_issued", { phone: maskPhone(phone), requestId: delivery.requestId });
-      } else {
-        await clearOtps(phone);
-        otpLog.error("apitxt_async_failed", { phone: maskPhone(phone), reason: delivery.message });
-      }
-    };
-
-    // Return immediately; send SMS in the background so Vercel's 10s limit isn't hit.
-    try {
-      after(deliverSms);
-    } catch {
-      void deliverSms();
+    // WhatsApp first, SMS fallback. Await so the client gets the real channel.
+    const delivery = await deliverOtp(phone, otp);
+    if (!delivery.ok) {
+      await clearOtps(phone);
+      return json({ ok: false, message: delivery.message }, 502);
     }
 
-    return json({ ok: true, message: "Verification code sent." }, 200);
+    await updateOtpDelivery(phone, {
+      requestId: delivery.requestId,
+      channel: delivery.channel,
+    });
+
+    otpLog.info("otp_issued", {
+      phone: maskPhone(phone),
+      channel: delivery.channel,
+      requestId: delivery.requestId,
+    });
+
+    return json(
+      {
+        ok: true,
+        message: delivery.message,
+        channel: delivery.channel,
+        requestId: delivery.requestId,
+      },
+      200,
+    );
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown";
     otpLog.error("send_otp_unhandled", { reason });

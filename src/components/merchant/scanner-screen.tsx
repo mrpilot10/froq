@@ -16,8 +16,10 @@ interface ScannerScreenProps {
   onRedeem: (code: string) => Promise<RedeemResult>;
 }
 
+const CODE_PREFIX = "FROQ-";
+
 export function ScannerScreen({ onRedeem }: ScannerScreenProps) {
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(CODE_PREFIX);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState<{ name: string; code: string } | null>(null);
@@ -43,7 +45,7 @@ export function ScannerScreen({ onRedeem }: ScannerScreenProps) {
       }
 
       setSuccess({ name: res.customerName ?? "Customer", code: value });
-      setCode("");
+      setCode(CODE_PREFIX);
       setCameraOpen(false);
       scannedRef.current = false;
     },
@@ -100,75 +102,96 @@ export function ScannerScreen({ onRedeem }: ScannerScreenProps) {
             </div>
           )}
 
-          <button
-            type="button"
-            className="merchant-scanner-frame"
-            onClick={handleOpenCamera}
-            disabled={submitting}
-            aria-label="Open camera to scan customer QR code"
-          >
-            {cameraOpen ? (
-              <>
-                <video ref={videoRef} className="merchant-scanner-video" playsInline muted />
-                <canvas ref={canvasRef} className="merchant-scanner-canvas" aria-hidden="true" />
-                <div className="merchant-scanner-overlay">
-                  <div className="merchant-scanner-corner tl" />
-                  <div className="merchant-scanner-corner tr" />
-                  <div className="merchant-scanner-corner bl" />
-                  <div className="merchant-scanner-corner br" />
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="merchant-scanner-corner tl" />
-                <div className="merchant-scanner-corner tr" />
-                <div className="merchant-scanner-corner bl" />
-                <div className="merchant-scanner-corner br" />
-                <ScanLine size={48} strokeWidth={1.8} className="merchant-scanner-icon" />
-                <p className="merchant-scanner-hint">Tap to open camera</p>
-              </>
-            )}
-          </button>
+          <div className="merchant-scanner-layout">
+            <div className="merchant-scanner-col merchant-scanner-col--camera">
+              <div className="merchant-scanner-col-head">
+                <h3 className="merchant-scanner-col-title">Scan QR</h3>
+                <p className="merchant-scanner-col-sub">Point the camera at the customer&apos;s reward QR</p>
+              </div>
 
-          {cameraError && (
-            <p className="auth-error" role="alert">
-              {cameraError}
-            </p>
-          )}
+              <button
+                type="button"
+                className="merchant-scanner-frame"
+                onClick={handleOpenCamera}
+                disabled={submitting}
+                aria-label="Open camera to scan customer QR code"
+              >
+                {cameraOpen ? (
+                  <>
+                    <video ref={videoRef} className="merchant-scanner-video" playsInline muted />
+                    <canvas ref={canvasRef} className="merchant-scanner-canvas" aria-hidden="true" />
+                    <div className="merchant-scanner-overlay">
+                      <div className="merchant-scanner-corner tl" />
+                      <div className="merchant-scanner-corner tr" />
+                      <div className="merchant-scanner-corner bl" />
+                      <div className="merchant-scanner-corner br" />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="merchant-scanner-corner tl" />
+                    <div className="merchant-scanner-corner tr" />
+                    <div className="merchant-scanner-corner bl" />
+                    <div className="merchant-scanner-corner br" />
+                    <ScanLine size={48} strokeWidth={1.8} className="merchant-scanner-icon" />
+                    <p className="merchant-scanner-hint">Tap to open camera</p>
+                  </>
+                )}
+              </button>
 
-          <div className="merchant-scanner-divider">
-            <span>or enter code manually</span>
+              {cameraError && (
+                <p className="auth-error" role="alert">
+                  {cameraError}
+                </p>
+              )}
+            </div>
+
+            <div className="merchant-scanner-divider" aria-hidden="true">
+              <span>or</span>
+            </div>
+
+            <div className="merchant-scanner-col merchant-scanner-col--manual">
+              <div className="merchant-scanner-col-head">
+                <h3 className="merchant-scanner-col-title">Enter code</h3>
+                <p className="merchant-scanner-col-sub">Type the FROQ code from their reward screen</p>
+              </div>
+
+              <label className="auth-field">
+                <span className="auth-label">Redemption code</span>
+                <input
+                  className="auth-input merchant-code-input"
+                  type="text"
+                  placeholder="FROQ-XXXXX"
+                  value={code}
+                  disabled={submitting}
+                  onChange={(event) => {
+                    // Keep the FROQ- prefix locked in so staff only type the code.
+                    const raw = event.target.value.toUpperCase();
+                    const suffix = raw.startsWith(CODE_PREFIX)
+                      ? raw.slice(CODE_PREFIX.length)
+                      : raw.replace(/^F?R?O?Q?-?/, "");
+                    setCode(CODE_PREFIX + suffix);
+                    setError("");
+                  }}
+                />
+              </label>
+
+              {error && (
+                <p className="auth-error" role="alert">
+                  {error}
+                </p>
+              )}
+
+              <button
+                type="button"
+                className="cta-btn merchant-cta-accent"
+                disabled={submitting}
+                onClick={() => void redeemCode(code)}
+              >
+                {submitting ? "Redeeming…" : "Mark as claimed"}
+              </button>
+            </div>
           </div>
-
-          <label className="auth-field">
-            <span className="auth-label">Redemption code</span>
-            <input
-              className="auth-input merchant-code-input"
-              type="text"
-              placeholder="FROQ-XXXXX"
-              value={code}
-              disabled={submitting}
-              onChange={(event) => {
-                setCode(event.target.value.toUpperCase());
-                setError("");
-              }}
-            />
-          </label>
-
-          {error && (
-            <p className="auth-error" role="alert">
-              {error}
-            </p>
-          )}
-
-          <button
-            type="button"
-            className="cta-btn merchant-cta-accent"
-            disabled={submitting}
-            onClick={() => void redeemCode(code)}
-          >
-            {submitting ? "Redeeming…" : "Mark as claimed"}
-          </button>
         </div>
 
         <p className="merchant-scanner-note">

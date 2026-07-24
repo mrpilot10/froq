@@ -7,7 +7,9 @@ import { ArrowLeft, Gift, Mail, Phone, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { formatPhoneDisplay, isValidEmail, isValidPhone } from "@/lib/auth/format";
 import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/client";
+import { useResendCooldown } from "@/lib/auth/otp/use-resend-cooldown";
 import { checkShopMembership, joinMerchant } from "@/app/actions/customer";
+import { customerHubPath } from "@/lib/customer/hub";
 import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { OtpInput } from "@/components/auth/otp-input";
 import { FroqFooter } from "@/components/shared/froq-footer";
@@ -16,22 +18,42 @@ type Step = "checking" | "phone" | "otp" | "signup" | "joining";
 
 interface JoinScreenProps {
   slug: string;
+  branchSlug?: string | null;
   businessName: string;
   rewardTitle: string;
   rewardName: string;
   totalStamps: number;
   brandColor: string;
   logoUrl: string | null;
+  /** Optional post-auth return path (e.g. /c/{publicToken}). */
+  nextPath?: string | null;
+}
+
+function goToCustomerHome(
+  router: ReturnType<typeof useRouter>,
+  opts: { publicToken?: string; slug: string; nextPath?: string | null },
+) {
+  if (opts.nextPath?.startsWith("/c/")) {
+    router.replace(opts.nextPath);
+    return;
+  }
+  if (opts.publicToken) {
+    router.replace(customerHubPath(opts.publicToken));
+    return;
+  }
+  router.replace(`/card/${opts.slug}`);
 }
 
 export function JoinScreen({
   slug,
+  branchSlug = null,
   businessName,
   rewardTitle,
   rewardName,
   totalStamps,
   brandColor,
   logoUrl,
+  nextPath = null,
 }: JoinScreenProps) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("checking");
@@ -42,7 +64,8 @@ export function JoinScreen({
   const [authedPhone, setAuthedPhone] = useState("");
   const [error, setError] = useState("");
   const [isReturningMember, setIsReturningMember] = useState(false);
-  const [resendIn, setResendIn] = useState(RESEND_SECONDS);
+  const [deliveryMessage, setDeliveryMessage] = useState("");
+  const resend = useResendCooldown();
 
   const e164 = authedPhone || `+91${phone}`;
 
@@ -57,7 +80,11 @@ export function JoinScreen({
       if (!active) return;
 
       if (membership.isMember && membership.isAuthenticated) {
-        router.replace(`/card/${slug}`);
+        goToCustomerHome(router, {
+          publicToken: membership.publicToken,
+          slug,
+          nextPath,
+        });
         return;
       }
 
@@ -81,24 +108,27 @@ export function JoinScreen({
     return () => {
       active = false;
     };
-  }, [slug, router]);
+  }, [slug, router, nextPath]);
 
   const sendCode = useCallback(async () => {
     if (!isValidPhone(phone)) {
       setError("Enter a valid 10-digit mobile number.");
       return;
     }
+    if (!resend.canResend && step === "otp") return;
     setError("");
     setStep("checking");
-    const res = await sendOtp(phone);
-    if (!res.ok) {
-      setError(res.message);
-      setStep("phone");
+    const result = await sendOtp(phone);
+    if (!result.ok) {
+      setError(result.message);
+      setStep(step === "otp" ? "otp" : "phone");
+      if (result.retryAfter) resend.start(result.retryAfter);
       return;
     }
-    setResendIn(RESEND_SECONDS);
+    setDeliveryMessage(result.message);
+    resend.start(result.retryAfter ?? RESEND_SECONDS);
     setStep("otp");
-  }, [phone]);
+  }, [phone, resend, step]);
 
   const verify = useCallback(async () => {
     if (otp.length !== OTP_LENGTH) {
@@ -107,9 +137,9 @@ export function JoinScreen({
     }
     setError("");
     setStep("checking");
-    const res = await verifyOtp(phone, otp);
-    if (!res.ok) {
-      setError(res.message);
+    const result = await verifyOtp(phone, otp);
+    if (!result.ok) {
+      setError(result.message);
       setStep("otp");
       return;
     }
@@ -118,20 +148,16 @@ export function JoinScreen({
 
     const membership = await checkShopMembership(slug);
     if (membership.isMember) {
-      router.replace(`/card/${slug}`);
+      goToCustomerHome(router, {
+        publicToken: membership.publicToken,
+        slug,
+        nextPath,
+      });
       return;
     }
 
     setStep("signup");
-  }, [otp, phone, slug, router]);
-
-  useEffect(() => {
-    if (step !== "otp" || resendIn <= 0) return;
-    const timer = window.setInterval(() => {
-      setResendIn((current) => Math.max(0, current - 1));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [step, resendIn]);
+  }, [otp, phone, slug, router, nextPath]);
 
   const join = useCallback(async () => {
     if (!name.trim()) {
@@ -144,15 +170,19 @@ export function JoinScreen({
     }
     setError("");
     setStep("joining");
-    const res = await joinMerchant(slug, name.trim(), e164, email.trim());
+    const res = await joinMerchant(slug, name.trim(), e164, email.trim(), branchSlug);
     if (!res.ok) {
       setError(res.error ?? "Could not join. Please try again.");
       setStep("signup");
       return;
     }
     toast.success(`Welcome to ${businessName}!`);
-    router.replace(`/card/${slug}`);
-  }, [name, email, slug, e164, businessName, router]);
+    goToCustomerHome(router, {
+      publicToken: res.publicToken,
+      slug,
+      nextPath,
+    });
+  }, [name, email, slug, e164, businessName, router, branchSlug, nextPath]);
 
   return (
     <div className="loyalty-page">
@@ -215,7 +245,7 @@ export function JoinScreen({
                 </p>
               )}
               <button type="button" className="cta-btn auth-submit" onClick={sendCode}>
-                Continue
+                Send Verification Code
               </button>
               <p className="merchant-auth-note">
                 Each shop has its own loyalty card. Scan this store&apos;s QR to log in here.
@@ -242,8 +272,17 @@ export function JoinScreen({
                 </div>
                 <h2 className="auth-title">Enter verification code</h2>
                 <p className="auth-sub">
-                  We sent a 6-digit code to <strong>{formatPhoneDisplay(phone)}</strong>
+                  {deliveryMessage || (
+                    <>
+                      We sent a 6-digit code to <strong>{formatPhoneDisplay(phone)}</strong>
+                    </>
+                  )}
                 </p>
+                {deliveryMessage && (
+                  <p className="auth-sub auth-sub--inline">
+                    Sent to <strong>{formatPhoneDisplay(phone)}</strong>
+                  </p>
+                )}
               </div>
               <OtpInput value={otp} length={OTP_LENGTH} onChange={setOtp} />
               {error && (
@@ -259,9 +298,11 @@ export function JoinScreen({
               >
                 Verify &amp; continue
               </button>
-              <p className="auth-resend">
-                {resendIn > 0 ? (
-                  <>Resend code in {resendIn}s</>
+              <p className="auth-resend" aria-live="polite">
+                {resend.secondsLeft > 0 ? (
+                  <>
+                    Resend code in <strong>{resend.secondsLeft}s</strong>
+                  </>
                 ) : (
                   <button type="button" className="auth-link" onClick={sendCode}>
                     Resend code

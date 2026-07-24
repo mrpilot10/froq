@@ -11,6 +11,7 @@ const bodySchema = z.object({
   planId: z.string().min(1).max(40),
   customerName: z.string().trim().min(1).max(120).optional(),
   customerEmail: z.string().trim().email().optional(),
+  customerPhone: z.string().trim().min(10).max(20).optional(),
 });
 
 function normalizePhone(phone?: string | null) {
@@ -39,9 +40,19 @@ export async function POST(request: Request) {
     // Price is derived server-side from the plan id so the amount can't be
     // tampered with from the client.
     const plan = getPlanById(parsed.planId);
-    const customerPhone = normalizePhone(user.phone);
-    if (!customerPhone) {
-      return NextResponse.json({ error: "A verified phone number is required." }, { status: 400 });
+
+    // Merchants sign up with email/password. Phone lives on the checkout form /
+    // user_metadata — not on auth.users.phone (that was the old OTP flow).
+    const metaPhone =
+      typeof user.user_metadata?.phone === "string" ? user.user_metadata.phone : "";
+    const customerPhone = normalizePhone(
+      parsed.customerPhone || metaPhone || user.phone,
+    );
+    if (!customerPhone || customerPhone.length !== 10) {
+      return NextResponse.json(
+        { error: "A valid mobile number is required for payment." },
+        { status: 400 },
+      );
     }
 
     const orderId = `froq_${user.id.slice(0, 8)}_${Date.now()}`;

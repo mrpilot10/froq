@@ -1,10 +1,17 @@
 import "server-only";
 
 import { Resend } from "resend";
+import { getAppOrigin } from "@/lib/app-url";
 
 const BRAND = "#004353";
 const ACCENT = "#00f47b";
-const LOGO_URL = "https://www.froq.io/froq-logo.png";
+function logoUrl() {
+  try {
+    return `${getAppOrigin()}/froq-logo.png?v=2026-07-24`;
+  } catch {
+    return "https://froq.io/froq-logo.png?v=2026-07-24";
+  }
+}
 const HELP_URL = "https://www.froq.io/help";
 const YEAR = new Date().getFullYear();
 
@@ -26,16 +33,24 @@ function escapeHtml(value: string) {
     .replaceAll('"', "&quot;");
 }
 
-function passwordResetHtml(input: { name?: string; resetUrl: string }) {
-  const greeting = input.name?.trim() ? `Hi ${escapeHtml(input.name.trim())},` : "Hi there,";
-  const actionUrl = escapeHtml(input.resetUrl);
+/** Shared Froq branded email shell (logo, card, footer). */
+function brandedEmailHtml(input: {
+  title: string;
+  greeting: string;
+  bodyHtml: string;
+  ctaLabel: string;
+  ctaUrl: string;
+  footnoteHtml?: string;
+}) {
+  const actionUrl = escapeHtml(input.ctaUrl);
+  const greeting = escapeHtml(input.greeting);
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Reset your Froq password</title>
+  <title>${escapeHtml(input.title)}</title>
 </head>
 <body style="margin:0;padding:0;background:#f4f5f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${BRAND};">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f6;padding:32px 16px;">
@@ -47,7 +62,7 @@ function passwordResetHtml(input: { name?: string; resetUrl: string }) {
               <table role="presentation" cellpadding="0" cellspacing="0">
                 <tr>
                   <td style="vertical-align:middle;padding-right:10px;">
-                    <img src="${LOGO_URL}" width="32" height="32" alt="Froq" style="display:block;border:0;border-radius:8px;" />
+                    <img src="${logoUrl()}" width="36" height="36" alt="Froq" style="display:block;border:0;border-radius:10px;" />
                   </td>
                   <td style="vertical-align:middle;">
                     <span style="font-size:18px;font-weight:800;letter-spacing:-0.02em;color:${BRAND};">Froq</span>
@@ -59,26 +74,25 @@ function passwordResetHtml(input: { name?: string; resetUrl: string }) {
           <tr>
             <td style="padding:0 40px 8px;">
               <p style="margin:0 0 16px;font-size:16px;line-height:1.5;font-weight:700;color:${BRAND};">${greeting}</p>
-              <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
-                You recently requested to reset your password for your Froq account.
-                Click the button below to reset it.
-                <strong style="color:${BRAND};">This password reset is only valid for the next 24 hours.</strong>
-              </p>
+              ${input.bodyHtml}
               <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
                 <tr>
                   <td style="border-radius:8px;background:${ACCENT};">
                     <a href="${actionUrl}"
                        style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:800;color:${BRAND};text-decoration:none;border-radius:8px;">
-                      Reset your password
+                      ${escapeHtml(input.ctaLabel)}
                     </a>
                   </td>
                 </tr>
               </table>
-              <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#3d5c52;">
+              ${
+                input.footnoteHtml ??
+                `<p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#3d5c52;">
                 If you have any questions about this request, simply reply to this email or reach out to our
                 <a href="${HELP_URL}" style="color:${BRAND};font-weight:700;text-decoration:underline;">support team</a>
                 for help.
-              </p>
+              </p>`
+              }
               <p style="margin:20px 0 0;font-size:15px;line-height:1.6;color:${BRAND};">
                 Cheers,<br />
                 The Froq Team
@@ -128,13 +142,26 @@ export async function sendPasswordResetEmail(input: {
     return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
   }
 
+  const greeting = input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
+  const html = brandedEmailHtml({
+    title: "Reset your Froq password",
+    greeting,
+    bodyHtml: `<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      You recently requested to reset your password for your Froq account.
+      Click the button below to reset it.
+      <strong style="color:${BRAND};">This password reset is only valid for the next 24 hours.</strong>
+    </p>`,
+    ctaLabel: "Reset your password",
+    ctaUrl: input.resetUrl,
+  });
+
   const { error } = await resend.emails.send({
     from: fromAddress(),
     to: input.to,
     subject: "Reset your Froq password",
-    html: passwordResetHtml({ name: input.name, resetUrl: input.resetUrl }),
+    html,
     text: [
-      input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,",
+      greeting,
       "",
       "You recently requested to reset your password for your Froq account.",
       "This password reset is only valid for the next 24 hours.",
@@ -142,6 +169,121 @@ export async function sendPasswordResetEmail(input: {
       `Reset your password: ${input.resetUrl}`,
       "",
       `Need help? ${HELP_URL}`,
+      "",
+      "Cheers,",
+      "The Froq Team",
+    ].join("\n"),
+  });
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true };
+}
+
+export async function sendTeamInviteEmail(input: {
+  to: string;
+  inviteUrl: string;
+  businessName: string;
+  branchLabel: string;
+  name?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const resend = getResend();
+  if (!resend) {
+    return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
+  }
+
+  const greeting = input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
+  const business = escapeHtml(input.businessName);
+  const branch = escapeHtml(input.branchLabel);
+  const subject = `You're invited to manage ${input.branchLabel} of ${input.businessName}`;
+
+  const html = brandedEmailHtml({
+    title: subject,
+    greeting,
+    bodyHtml: `<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      You are invited to manage <strong style="color:${BRAND};">${branch}</strong> of
+      <strong style="color:${BRAND};">${business}</strong>.
+      Click the button below to set up your account.
+      <strong style="color:${BRAND};">This link will expire in 7 days.</strong>
+    </p>`,
+    ctaLabel: "Accept invite",
+    ctaUrl: input.inviteUrl,
+  });
+
+  const { error } = await resend.emails.send({
+    from: fromAddress(),
+    to: input.to,
+    subject,
+    html,
+    text: [
+      greeting,
+      "",
+      `You are invited to manage ${input.branchLabel} of ${input.businessName}.`,
+      "This link will expire in 7 days.",
+      "",
+      `Accept invite: ${input.inviteUrl}`,
+      "",
+      `Need help? ${HELP_URL}`,
+      "",
+      "Cheers,",
+      "The Froq Team",
+    ].join("\n"),
+  });
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true };
+}
+
+export async function sendEmailVerificationCode(input: {
+  to: string;
+  code: string;
+  name?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const resend = getResend();
+  if (!resend) {
+    return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
+  }
+
+  const greeting = input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
+  const code = escapeHtml(input.code);
+  const html = brandedEmailHtml({
+    title: "Verify your email — Froq",
+    greeting,
+    bodyHtml: `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      Use this code to verify your email for your Froq merchant account.
+      <strong style="color:${BRAND};">It expires in 5 minutes.</strong>
+    </p>
+    <p style="margin:0 0 24px;font-size:32px;font-weight:800;letter-spacing:0.18em;color:${BRAND};">${code}</p>`,
+    ctaLabel: "Open Froq",
+    ctaUrl: (() => {
+      try {
+        return getAppOrigin();
+      } catch {
+        return "https://froq.io";
+      }
+    })(),
+    footnoteHtml: `<p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      If you didn&apos;t request this code, you can safely ignore this email.
+    </p>`,
+  });
+
+  const { error } = await resend.emails.send({
+    from: fromAddress(),
+    to: input.to,
+    subject: "Your Froq verification code",
+    html,
+    text: [
+      greeting,
+      "",
+      `Your Froq verification code is ${input.code}.`,
+      "It expires in 5 minutes.",
+      "",
+      "If you didn't request this code, you can ignore this email.",
       "",
       "Cheers,",
       "The Froq Team",

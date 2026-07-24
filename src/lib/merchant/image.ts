@@ -55,3 +55,39 @@ export async function fileToLogoDataUrl(file: File): Promise<string> {
     return originalDataUrl;
   }
 }
+
+const MAX_BANNER_DIMENSION = 1080;
+const BANNER_WEBP_QUALITY = 0.82;
+
+/**
+ * Reads a banner file and returns a downscaled data URL (max 1080px on the
+ * longest edge, WebP when supported) so the wide image stays under the
+ * server-action body limit while looking crisp on the guest join screen.
+ */
+export async function fileToBannerDataUrl(file: File): Promise<string> {
+  const originalDataUrl = await readAsDataUrl(file);
+
+  try {
+    const img = await loadImage(originalDataUrl);
+    const { naturalWidth: width, naturalHeight: height } = img;
+    if (!width || !height) return originalDataUrl;
+
+    const scale = Math.min(1, MAX_BANNER_DIMENSION / Math.max(width, height));
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return originalDataUrl;
+
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+    const webp = canvas.toDataURL("image/webp", BANNER_WEBP_QUALITY);
+    if (webp.startsWith("data:image/webp")) return webp;
+    return canvas.toDataURL("image/jpeg", 0.85);
+  } catch {
+    return originalDataUrl;
+  }
+}

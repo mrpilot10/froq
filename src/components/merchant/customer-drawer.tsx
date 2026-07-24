@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Ban, Calendar, Mail, Phone, ShieldCheck, Trash2 } from "lucide-react";
+import { Ban, Calendar, Mail, Phone, ShieldCheck, Stamp, Trash2 } from "lucide-react";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { formatPhoneDisplay } from "@/lib/auth/format";
 import { customerLtv, formatCurrency } from "@/lib/merchant/ltv";
@@ -13,6 +13,7 @@ interface CustomerDrawerProps {
   onClose: () => void;
   onBan: (id: string) => void;
   onDelete: (id: string) => void;
+  onOfferStamp: (id: string) => Promise<boolean>;
 }
 
 type ConfirmAction = "ban" | "delete" | null;
@@ -36,11 +37,14 @@ export function CustomerDrawer({
   onClose,
   onBan,
   onDelete,
+  onOfferStamp,
 }: CustomerDrawerProps) {
   const [confirm, setConfirm] = useState<ConfirmAction>(null);
+  const [offering, setOffering] = useState(false);
 
   useEffect(() => {
     setConfirm(null);
+    setOffering(false);
   }, [customer?.id]);
 
   const badge = customer?.banned
@@ -49,6 +53,12 @@ export function CustomerDrawer({
         label: customer ? statusLabel(customer.status) : "",
         className: `merchant-badge--${customer?.status}`,
       };
+
+  const canOfferStamp =
+    !!customer &&
+    !customer.banned &&
+    customer.status !== "reward_ready" &&
+    customer.status !== "claimed";
 
   return (
     <BottomSheet
@@ -156,6 +166,28 @@ export function CustomerDrawer({
             </div>
           ) : (
             <div className="merchant-drawer-actions">
+              <button
+                type="button"
+                className="merchant-action-btn merchant-action-btn--approve"
+                disabled={!canOfferStamp || offering}
+                title={
+                  customer.status === "reward_ready"
+                    ? "Redeem their reward before offering another stamp"
+                    : customer.status === "claimed"
+                      ? "This rewards program is complete"
+                      : customer.banned
+                        ? "Unban this customer first"
+                        : undefined
+                }
+                onClick={async () => {
+                  setOffering(true);
+                  await onOfferStamp(customer.id);
+                  setOffering(false);
+                }}
+              >
+                <Stamp size={16} strokeWidth={2.3} />
+                {offering ? "Offering…" : "Offer stamp"}
+              </button>
               {customer.banned ? (
                 <button
                   type="button"

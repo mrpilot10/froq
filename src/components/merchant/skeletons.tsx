@@ -23,18 +23,15 @@ export function DashboardSkeleton() {
         </div>
         <div
           className="sk sk-on-dark"
-          style={{ width: 150, height: 36, borderRadius: 10, margin: "14px 0 18px" }}
+          style={{ width: 150, height: 36, borderRadius: 10, margin: "14px 0 20px" }}
         />
-        <div className="merchant-ltv-foot">
-          <div className="merchant-ltv-foot-item">
-            <div className="sk sk-on-dark sk-line" style={{ width: 96 }} />
-            <div className="sk sk-on-dark sk-line" style={{ width: 60, marginTop: 8 }} />
-          </div>
-          <div className="merchant-ltv-foot-divider" />
-          <div className="merchant-ltv-foot-item">
-            <div className="sk sk-on-dark sk-line" style={{ width: 70 }} />
-            <div className="sk sk-on-dark sk-line" style={{ width: 50, marginTop: 8 }} />
-          </div>
+        <div className="merchant-ltv-metrics">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="merchant-ltv-tile">
+              <div className="sk sk-on-dark sk-line" style={{ width: 72 }} />
+              <div className="sk sk-on-dark sk-line" style={{ width: 48, marginTop: 6 }} />
+            </div>
+          ))}
         </div>
       </div>
 
@@ -263,6 +260,8 @@ export function MerchantTabSkeleton({ tab }: { tab: MerchantTab }) {
     case "scan":
       return <ScannerSkeleton />;
     case "profile":
+    case "loyalty-settings":
+    case "queue-settings":
       return <ProfileSkeleton />;
     default:
       return <DashboardSkeleton />;

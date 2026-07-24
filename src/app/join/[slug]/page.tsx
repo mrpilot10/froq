@@ -2,8 +2,17 @@ import { createClient } from "@/lib/supabase/server";
 import { JoinScreen } from "@/components/loyalty/join-screen";
 import { FroqFooter } from "@/components/shared/froq-footer";
 
-export default async function JoinPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function JoinPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ b?: string; next?: string }>;
+}) {
   const { slug } = await params;
+  const { b: branchSlug, next } = await searchParams;
+  const nextPath =
+    typeof next === "string" && next.startsWith("/c/") ? next : null;
 
   const merchant = await (async () => {
     try {
@@ -40,12 +49,14 @@ export default async function JoinPage({ params }: { params: Promise<{ slug: str
   return (
     <JoinScreen
       slug={merchant.slug}
+      branchSlug={branchSlug ?? null}
       businessName={merchant.business_name}
       rewardTitle={merchant.reward_title}
       rewardName={merchant.reward_name}
       totalStamps={merchant.total_stamps}
       brandColor={merchant.brand_color}
       logoUrl={merchant.logo_url}
+      nextPath={nextPath}
     />
   );
 }

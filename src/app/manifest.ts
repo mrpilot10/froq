@@ -10,8 +10,9 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: "#ffffff",
     theme_color: "#004353",
     icons: [
-      { src: "/froq-logo.png", sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: "/froq-logo.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      { src: "/froq-logo-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/froq-logo-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/froq-logo-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
 }

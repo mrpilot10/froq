@@ -23,8 +23,8 @@ self.addEventListener("push", (event) => {
   const title = data.title || "New stamp request";
   const options = {
     body: data.body || "A customer is waiting for approval.",
-    icon: "/froq-logo.png",
-    badge: "/froq-logo.png",
+    icon: "/froq-logo-192.png",
+    badge: "/froq-logo-192.png",
     tag: data.tag || "froq-approval",
     renotify: true,
     data: { url: data.url || "/merchant?tab=approvals" },

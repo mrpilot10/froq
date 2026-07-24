@@ -188,22 +188,22 @@ export function MerchantDashboardMockup() {
       <div className="merchant-ltv-card lpm-ltv">
         <span className="merchant-ltv-eyebrow">Average customer LTV</span>
         <div className="merchant-ltv-value">₹4,200</div>
-        <div className="merchant-ltv-foot merchant-ltv-foot--grid">
-          <div className="merchant-ltv-foot-item">
-            <span className="merchant-ltv-foot-label">Total lifetime value</span>
-            <span className="merchant-ltv-foot-value">₹2.7L</span>
+        <div className="merchant-ltv-metrics">
+          <div className="merchant-ltv-tile">
+            <span className="merchant-ltv-tile-label">Total lifetime value</span>
+            <span className="merchant-ltv-tile-value">₹2.7L</span>
           </div>
-          <div className="merchant-ltv-foot-item">
-            <span className="merchant-ltv-foot-label">Avg. order</span>
-            <span className="merchant-ltv-foot-value">₹500</span>
+          <div className="merchant-ltv-tile">
+            <span className="merchant-ltv-tile-label">Avg. order</span>
+            <span className="merchant-ltv-tile-value">₹500</span>
           </div>
-          <div className="merchant-ltv-foot-item">
-            <span className="merchant-ltv-foot-label">Total customers</span>
-            <span className="merchant-ltv-foot-value">642</span>
+          <div className="merchant-ltv-tile">
+            <span className="merchant-ltv-tile-label">Total customers</span>
+            <span className="merchant-ltv-tile-value">642</span>
           </div>
-          <div className="merchant-ltv-foot-item">
-            <span className="merchant-ltv-foot-label">Avg. visits</span>
-            <span className="merchant-ltv-foot-value">8.4</span>
+          <div className="merchant-ltv-tile">
+            <span className="merchant-ltv-tile-label">Avg. visits</span>
+            <span className="merchant-ltv-tile-value">8.4</span>
           </div>
         </div>
       </div>
