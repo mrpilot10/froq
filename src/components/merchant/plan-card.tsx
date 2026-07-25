@@ -22,9 +22,15 @@ interface MerchantPlanCardProps {
   /** Live entitlement state; falls back to the static catalog when omitted. */
   enabled?: boolean;
   onGetStarted?: () => void;
+  onManagePlan?: () => void;
 }
 
-export function MerchantPlanCard({ product = "loyalty", enabled, onGetStarted }: MerchantPlanCardProps) {
+export function MerchantPlanCard({
+  product = "loyalty",
+  enabled,
+  onGetStarted,
+  onManagePlan,
+}: MerchantPlanCardProps) {
   const catalog = MERCHANT_PLANS[product];
   const plan = { ...catalog, enabled: enabled ?? catalog.enabled };
   const [notifState, setNotifState] = useState<NotificationPermission | "unsupported">("default");
@@ -157,9 +163,11 @@ export function MerchantPlanCard({ product = "loyalty", enabled, onGetStarted }:
 
         <div className="merchant-plan-foot">
           <span className="merchant-plan-renew">Renews {plan.renewsOn}</span>
-          <button type="button" className="merchant-plan-manage">
-            Manage plan
-          </button>
+          {onManagePlan ? (
+            <button type="button" className="merchant-plan-manage" onClick={onManagePlan}>
+              Manage plan
+            </button>
+          ) : null}
         </div>
       </div>
 

@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { FROQ_LOGO_192_SRC, FROQ_LOGO_512_SRC } from "@/lib/brand";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -10,9 +11,9 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: "#ffffff",
     theme_color: "#004353",
     icons: [
-      { src: "/froq-logo-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: "/froq-logo-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: "/froq-logo-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+      { src: FROQ_LOGO_192_SRC, sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: FROQ_LOGO_512_SRC, sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: FROQ_LOGO_512_SRC, sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
 }

@@ -4,7 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   Branch,
-  DashboardChartBucket,
   DashboardDateRange,
   DashboardFilteredStats,
   MemberRole,
@@ -21,11 +20,18 @@ import {
   toMerchantProfile,
   toMerchantRowPatch,
 } from "@/lib/merchant/mappers";
+import { computeLoyaltyAnalytics } from "@/lib/merchant/analytics";
+import type { AnalyticsCustomerRow } from "@/lib/merchant/analytics";
 import {
   EMPTY_ENTITLEMENTS,
   entitlementsFromRows,
   type Entitlements,
 } from "@/lib/merchant/entitlements";
+import {
+  classifyPlanChange,
+  defaultPeriodEnd,
+} from "@/lib/merchant/billing";
+import { FREE_PLAN } from "@/lib/merchant/pricing";
 import type { MerchantProduct } from "@/lib/merchant/types";
 import { parseRedeemCode } from "@/lib/merchant/parse-redeem-code";
 import { toCanonicalPhone } from "@/lib/auth/otp/phone";
@@ -37,6 +43,11 @@ import {
 } from "@/lib/auth/format";
 import { sendPasswordResetEmail, sendTeamInviteEmail } from "@/lib/email/resend";
 import { getAppOrigin } from "@/lib/app-url";
+import {
+  ASSIGNABLE_ROLES,
+  canViewCustomerData,
+  normalizeMemberRole,
+} from "@/lib/merchant/roles";
 
 export interface MerchantStatsData {
   totalCustomers: number;
@@ -50,50 +61,18 @@ export interface MerchantStatsData {
 
 function buildDashboardStats(
   range: DashboardDateRange,
-  statsRow: {
-    total_customers?: number | null;
-    active_cards?: number | null;
-    pending_approvals?: number | null;
-    rewards_redeemed?: number | null;
-    avg_lifetime_visits?: number | null;
-  } | null,
-  visits: { created_at: string }[],
+  customers: AnalyticsCustomerRow[],
+  visits: { created_at: string; customer_id: string | null }[],
   redemptions: { customer_id: string | null; redeemed_at: string }[],
-  allTimeRedeemers: { customer_id: string | null }[],
+  pendingApprovals: number,
 ): DashboardFilteredStats {
-  const rangeStart = dashboardRangeStart(range);
-  const filteredVisits = rangeStart
-    ? visits.filter((row) => new Date(row.created_at) >= rangeStart)
-    : visits;
-  const filteredRedemptions = rangeStart
-    ? redemptions.filter((row) => new Date(row.redeemed_at) >= rangeStart)
-    : redemptions;
-  const chart = chartBucketsForRange(range, filteredVisits);
-
-  const totalCustomers = statsRow?.total_customers ?? 0;
-  const allTimeRedeemingCustomers = new Set(
-    allTimeRedeemers.map((row) => row.customer_id).filter(Boolean) as string[],
-  );
-  const conversionRate =
-    totalCustomers > 0
-      ? Math.round((allTimeRedeemingCustomers.size / totalCustomers) * 100)
-      : 0;
-
-  return {
+  return computeLoyaltyAnalytics({
     range,
-    rangeLabel: DASHBOARD_RANGE_LABELS[range],
-    totalCustomers,
-    activeCards: statsRow?.active_cards ?? 0,
-    stampsInRange: filteredVisits.length,
-    pendingApprovals: statsRow?.pending_approvals ?? 0,
-    rewardsInRange: filteredRedemptions.length,
-    rewardsRedeemedAllTime: statsRow?.rewards_redeemed ?? 0,
-    avgLifetimeVisits: Number(statsRow?.avg_lifetime_visits ?? 0),
-    conversionRate,
-    chartBuckets: chart.buckets,
-    chartTitle: chart.title,
-    chartSub: chart.sub,
-  };
+    customers,
+    visits,
+    redemptions,
+    pendingApprovals,
+  });
 }
 
 export type MerchantBundle =
@@ -138,155 +117,6 @@ function weeklyBuckets(rows: { created_at: string }[]): number[] {
     buckets[monIndex] += 1;
   }
   return buckets;
-}
-
-const DASHBOARD_RANGE_LABELS: Record<DashboardDateRange, string> = {
-  today: "Today",
-  "7d": "Last 7 days",
-  "30d": "Last 30 days",
-  all: "All time",
-};
-
-function dashboardRangeStart(range: DashboardDateRange): Date | null {
-  const now = new Date();
-  if (range === "today") {
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    return start;
-  }
-  if (range === "7d") {
-    const start = new Date(now);
-    start.setDate(start.getDate() - 6);
-    start.setHours(0, 0, 0, 0);
-    return start;
-  }
-  if (range === "30d") {
-    const start = new Date(now);
-    start.setDate(start.getDate() - 29);
-    start.setHours(0, 0, 0, 0);
-    return start;
-  }
-  return null;
-}
-
-function chartBucketsForRange(
-  range: DashboardDateRange,
-  visits: { created_at: string }[],
-): { title: string; sub: string; buckets: DashboardChartBucket[] } {
-  if (range === "today") {
-    const labels = ["12–6a", "6–12p", "12–6p", "6–12a"];
-    const values = [0, 0, 0, 0];
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
-    for (const row of visits) {
-      const date = new Date(row.created_at);
-      if (date < startOfDay) continue;
-      const hour = date.getHours();
-      const idx = hour < 6 ? 0 : hour < 12 ? 1 : hour < 18 ? 2 : 3;
-      values[idx] += 1;
-    }
-    return {
-      title: "Today's visits",
-      sub: "Stamps approved by time of day",
-      buckets: labels.map((label, index) => ({ label, value: values[index] })),
-    };
-  }
-
-  if (range === "7d") {
-    const days: { label: string; value: number; start: Date; end: Date }[] = [];
-    const now = new Date();
-    for (let offset = 6; offset >= 0; offset -= 1) {
-      const start = new Date(now);
-      start.setDate(start.getDate() - offset);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 1);
-      days.push({
-        label: start.toLocaleDateString("en-US", { weekday: "narrow" }),
-        value: 0,
-        start,
-        end,
-      });
-    }
-    for (const row of visits) {
-      const date = new Date(row.created_at);
-      for (const day of days) {
-        if (date >= day.start && date < day.end) {
-          day.value += 1;
-          break;
-        }
-      }
-    }
-    return {
-      title: "Daily visits",
-      sub: "Stamps approved per day",
-      buckets: days.map(({ label, value }) => ({ label, value })),
-    };
-  }
-
-  if (range === "30d") {
-    const weeks: { label: string; value: number; start: Date; end: Date }[] = [];
-    const now = new Date();
-    now.setHours(23, 59, 59, 999);
-    for (let week = 3; week >= 0; week -= 1) {
-      const end = new Date(now);
-      end.setDate(end.getDate() - week * 7);
-      end.setHours(23, 59, 59, 999);
-      const start = new Date(end);
-      start.setDate(start.getDate() - 6);
-      start.setHours(0, 0, 0, 0);
-      weeks.push({
-        label: week === 0 ? "Now" : `-${week * 7}d`,
-        value: 0,
-        start,
-        end,
-      });
-    }
-    for (const row of visits) {
-      const date = new Date(row.created_at);
-      for (const week of weeks) {
-        if (date >= week.start && date <= week.end) {
-          week.value += 1;
-          break;
-        }
-      }
-    }
-    return {
-      title: "Weekly visits",
-      sub: "Stamps approved per week",
-      buckets: weeks.map(({ label, value }) => ({ label, value })),
-    };
-  }
-
-  const months: { label: string; value: number; start: Date; end: Date }[] = [];
-  for (let offset = 5; offset >= 0; offset -= 1) {
-    const start = new Date();
-    start.setDate(1);
-    start.setHours(0, 0, 0, 0);
-    start.setMonth(start.getMonth() - offset);
-    const end = new Date(start);
-    end.setMonth(end.getMonth() + 1);
-    months.push({
-      label: start.toLocaleDateString("en-US", { month: "short" }),
-      value: 0,
-      start,
-      end,
-    });
-  }
-  for (const row of visits) {
-    const date = new Date(row.created_at);
-    for (const month of months) {
-      if (date >= month.start && date < month.end) {
-        month.value += 1;
-        break;
-      }
-    }
-  }
-  return {
-    title: "Monthly visits",
-    sub: "Stamps approved per month",
-    buckets: months.map(({ label, value }) => ({ label, value })),
-  };
 }
 
 export async function getDashboardStats(
@@ -345,25 +175,24 @@ export async function getDashboardStats(
       branchFilter = branch?.id ?? null;
     }
 
-    const rangeStart = dashboardRangeStart(range);
-
     let customersQuery = supabase
       .from("customer_overview")
-      .select("banned, status")
+      .select(
+        "id, name, banned, status, stamps, total_stamps, lifetime_visits, rewards_claimed, created_at, last_visit",
+      )
       .eq("merchant_id", merchantId);
     let approvalsQuery = supabase
       .from("approvals")
       .select("id")
       .eq("merchant_id", merchantId)
       .eq("status", "pending");
-    let visitsQuery = supabase.from("visits").select("created_at").eq("merchant_id", merchantId);
+    let visitsQuery = supabase
+      .from("visits")
+      .select("created_at, customer_id")
+      .eq("merchant_id", merchantId);
     let redemptionsQuery = supabase
       .from("redemptions")
       .select("customer_id, redeemed_at")
-      .eq("merchant_id", merchantId);
-    let allRedemptionsQuery = supabase
-      .from("redemptions")
-      .select("customer_id")
       .eq("merchant_id", merchantId);
 
     if (branchFilter) {
@@ -371,41 +200,21 @@ export async function getDashboardStats(
       approvalsQuery = approvalsQuery.eq("branch_id", branchFilter);
       visitsQuery = visitsQuery.eq("branch_id", branchFilter);
       redemptionsQuery = redemptionsQuery.eq("branch_id", branchFilter);
-      allRedemptionsQuery = allRedemptionsQuery.eq("branch_id", branchFilter);
     }
 
-    if (rangeStart) {
-      const iso = rangeStart.toISOString();
-      visitsQuery = visitsQuery.gte("created_at", iso);
-      redemptionsQuery = redemptionsQuery.gte("redeemed_at", iso);
-    }
-
-    const [customersRes, approvalsRes, visitsRes, redemptionsRes, allRedemptionsRes] =
-      await Promise.all([
-        customersQuery,
-        approvalsQuery,
-        visitsQuery,
-        redemptionsQuery,
-        allRedemptionsQuery,
-      ]);
-
-    const customers = customersRes.data ?? [];
-    const visits = visitsRes.data ?? [];
-    const redemptions = redemptionsRes.data ?? [];
-    const statsRow = {
-      total_customers: customers.filter((c) => !c.banned).length,
-      active_cards: customers.filter((c) => c.status === "active").length,
-      pending_approvals: (approvalsRes.data ?? []).length,
-      rewards_redeemed: (allRedemptionsRes.data ?? []).length,
-      avg_lifetime_visits: 0,
-    };
+    const [customersRes, approvalsRes, visitsRes, redemptionsRes] = await Promise.all([
+      customersQuery,
+      approvalsQuery,
+      visitsQuery,
+      redemptionsQuery,
+    ]);
 
     return buildDashboardStats(
       range,
-      statsRow,
-      visits,
-      redemptions,
-      allRedemptionsRes.data ?? [],
+      (customersRes.data ?? []) as AnalyticsCustomerRow[],
+      visitsRes.data ?? [],
+      redemptionsRes.data ?? [],
+      (approvalsRes.data ?? []).length,
     );
   } catch {
     return null;
@@ -482,20 +291,32 @@ async function loadMerchantBundle(activeBranchId: string | null): Promise<Mercha
       .order("created_at", { ascending: true }),
     supabase
       .from("merchant_products")
-      .select("product, plan_id, status, onboarded_at")
+      .select(
+        "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at",
+      )
       .eq("merchant_id", merchantId),
   ]);
 
   const allBranches = (branchesRes.data ?? []).map(toBranch);
-  const members = (membersRes.data ?? []).map(toMember);
+  const members = (membersRes.data ?? []).map((row) => ({
+    ...toMember(row),
+    isPrimaryOwner: row.user_id === merchantRow.owner_user_id,
+  }));
   const isOwner = merchantRow.owner_user_id === user.id;
   const me = members.find((m) => m.userId === user.id);
-  const role: MemberRole = isOwner ? "owner" : me?.role ?? "staff";
+  const role: MemberRole = isOwner ? "owner" : normalizeMemberRole(me?.role);
 
-  // Staff with explicit branch_ids may only see those branches. Empty array =
-  // all-branch access (owners, or staff granted full access).
+  // Apply due downgrades / cancellations → Free before building entitlements.
+  const productRows = await applyDueBillingChanges(
+    merchantId,
+    productsRes.data ?? [],
+  );
+
+  // Members with explicit branch_ids may only see those branches. Empty array =
+  // all-branch access (account owners, co-owners, or teammates granted full access).
+  const hasOwnerPowers = isOwner || role === "owner";
   const allowedBranchIds =
-    !isOwner && me && me.branchIds.length > 0 ? new Set(me.branchIds) : null;
+    !hasOwnerPowers && me && me.branchIds.length > 0 ? new Set(me.branchIds) : null;
   const branches = allowedBranchIds
     ? allBranches.filter((b) => allowedBranchIds.has(b.id))
     : allBranches;
@@ -565,7 +386,8 @@ async function loadMerchantBundle(activeBranchId: string | null): Promise<Mercha
 
   const visits = visitsRes.data ?? [];
   const redemptions = redemptionsRes.data ?? [];
-  const customers = (customersRes.data ?? []).map(toCustomer);
+  const overviewRows = customersRes.data ?? [];
+  const customers = overviewRows.map(toCustomer);
   const customerById = new Map(customers.map((c) => [c.id, c]));
 
   // Branch-scoped counts computed from the filtered rows (the merchant_stats
@@ -583,29 +405,22 @@ async function loadMerchantBundle(activeBranchId: string | null): Promise<Mercha
       ? [...visitsByCustomer.values()].reduce((a, b) => a + b, 0) / visitsByCustomer.size
       : 0;
 
-  const computedStatsRow = {
-    total_customers: customers.filter((c) => !c.banned).length,
-    active_cards: customers.filter((c) => c.status === "active").length,
-    pending_approvals: (approvalsRes.data ?? []).length,
-    rewards_redeemed: redemptions.length,
-    avg_lifetime_visits: avgLifetimeVisits,
-  };
-
+  const pendingApprovals = (approvalsRes.data ?? []).length;
   const stats: MerchantStatsData = {
-    totalCustomers: computedStatsRow.total_customers,
-    activeCards: computedStatsRow.active_cards,
+    totalCustomers: customers.filter((c) => !c.banned).length,
+    activeCards: customers.filter((c) => c.status === "active").length,
     stampsToday,
-    pendingApprovals: computedStatsRow.pending_approvals,
-    rewardsRedeemed: computedStatsRow.rewards_redeemed,
+    pendingApprovals,
+    rewardsRedeemed: redemptions.length,
     avgLifetimeVisits,
     weeklyVisits: weeklyBuckets(visits),
   };
   const dashboardStats = buildDashboardStats(
-    "today",
-    computedStatsRow,
+    "7d",
+    overviewRows as AnalyticsCustomerRow[],
     visits,
     redemptions,
-    redemptions,
+    pendingApprovals,
   );
 
   const approvals: PendingApproval[] = (approvalsRes.data ?? []).map((row) => {
@@ -614,7 +429,7 @@ async function loadMerchantBundle(activeBranchId: string | null): Promise<Mercha
       id: row.id,
       customerId: row.customer_id,
       customerName: customer?.name ?? "Customer",
-      phone: customer?.phone ?? "",
+      phone: canViewCustomerData(role) ? (customer?.phone ?? "") : "",
       requestedAt: new Date(row.requested_at).toLocaleString("en-US", {
         hour: "numeric",
         minute: "2-digit",
@@ -624,16 +439,19 @@ async function loadMerchantBundle(activeBranchId: string | null): Promise<Mercha
     };
   });
 
-  const entitlements = productsRes.data
-    ? entitlementsFromRows(productsRes.data)
-    : EMPTY_ENTITLEMENTS;
+  // Staff only get enough to offer stamps via OTP — contact PII is stripped.
+  const customersForRole = canViewCustomerData(role)
+    ? customers
+    : customers.map((c) => ({ ...c, phone: "", email: undefined }));
+
+  const entitlements = entitlementsFromRows(productRows);
 
   return {
     status: "ready",
     profile,
     stats,
     dashboardStats,
-    customers,
+    customers: customersForRole,
     approvals,
     entitlements,
     branches,
@@ -856,6 +674,51 @@ function merchantContactPhone(user: {
   const meta =
     typeof user.user_metadata?.phone === "string" ? user.user_metadata.phone : "";
   return toCanonicalPhone(meta || user.phone || "");
+}
+
+/**
+ * True if this mobile is already used by another merchant owner or team member.
+ * Checks auth.users.phone, merchants.phone, and merchant_members.phone.
+ */
+async function isPhoneUsedByAnotherMerchantOrStaff(
+  canonical: string,
+  excludeUserId: string,
+): Promise<boolean> {
+  const admin = createAdminClient();
+  const phoneE164 = `+${canonical.replace(/\D/g, "")}`;
+  const national = canonical.slice(-10);
+
+  for (const candidate of [canonical, phoneE164]) {
+    const { data: authUserId } = await admin.rpc("auth_user_id_by_phone", {
+      p_phone: candidate,
+    });
+    if (authUserId && authUserId !== excludeUserId) return true;
+  }
+
+  // Match any stored format that ends with the same 10-digit national number.
+  const { data: merchantRows } = await admin
+    .from("merchants")
+    .select("owner_user_id, phone")
+    .like("phone", `%${national}`)
+    .limit(50);
+
+  for (const row of merchantRows ?? []) {
+    if (!row.owner_user_id || row.owner_user_id === excludeUserId) continue;
+    if (toCanonicalPhone(row.phone ?? "") === canonical) return true;
+  }
+
+  const { data: memberRows } = await admin
+    .from("merchant_members")
+    .select("user_id, phone")
+    .like("phone", `%${national}`)
+    .limit(50);
+
+  for (const row of memberRows ?? []) {
+    if (!row.user_id || row.user_id === excludeUserId) continue;
+    if (toCanonicalPhone(row.phone ?? "") === canonical) return true;
+  }
+
+  return false;
 }
 
 /**
@@ -1213,6 +1076,237 @@ export async function updateMerchantPassword(
   }
 }
 
+/** Change password while signed in — verifies the current password first. */
+export async function changeMerchantPassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    if (!currentPassword) return { ok: false, error: "Enter your current password." };
+    if (!isValidPassword(newPassword)) {
+      return { ok: false, error: "New password must be at least 8 characters." };
+    }
+    if (currentPassword === newPassword) {
+      return { ok: false, error: "New password must be different from the current one." };
+    }
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user?.email) return { ok: false, error: "Not authenticated." };
+
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: currentPassword,
+    });
+    if (signInError) {
+      return { ok: false, error: "Current password is incorrect." };
+    }
+
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update password.",
+    };
+  }
+}
+
+/**
+ * Sends an OTP to a new mobile number so the signed-in merchant can change
+ * their account phone. Does not alter the session.
+ */
+export async function sendMerchantPhoneChangeOtp(newPhone: string): Promise<{
+  ok: boolean;
+  message: string;
+  channel?: "whatsapp" | "sms";
+  retryAfter?: number;
+}> {
+  try {
+    const { generateOtp, hashOtp } = await import("@/lib/auth/otp/hash");
+    const { deliverOtp } = await import("@/lib/auth/otp/deliver");
+    const {
+      countRecentRequests,
+      lastRequestAt,
+      persistOtp,
+      purgeExpired,
+      clearOtps,
+      updateOtpDelivery,
+    } = await import("@/lib/auth/otp/store");
+    const { RESEND_SECONDS, MAX_REQUESTS_PER_MINUTE } = await import("@/lib/auth/otp/config");
+
+    const phoneDigits = newPhone.replace(/\D/g, "").slice(-10);
+    if (!isValidPhone(phoneDigits)) {
+      return { ok: false, message: "Enter a valid 10-digit mobile number." };
+    }
+
+    const canonical = toCanonicalPhone(phoneDigits);
+    if (!canonical) return { ok: false, message: "Enter a valid 10-digit mobile number." };
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, message: "Not authenticated." };
+
+    const current = merchantContactPhone(user);
+    if (current && current === canonical) {
+      return { ok: false, message: "That’s already your mobile number." };
+    }
+
+    if (await isPhoneUsedByAnotherMerchantOrStaff(canonical, user.id)) {
+      return {
+        ok: false,
+        message: "This mobile number is already used by another merchant or staff account.",
+      };
+    }
+
+    await purgeExpired();
+
+    const last = await lastRequestAt(canonical);
+    if (last) {
+      const waitMs = RESEND_SECONDS * 1000 - (Date.now() - last);
+      if (waitMs > 0) {
+        return {
+          ok: false,
+          message: `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another code.`,
+          retryAfter: Math.ceil(waitMs / 1000),
+        };
+      }
+    }
+
+    const recent = await countRecentRequests(canonical);
+    if (recent >= MAX_REQUESTS_PER_MINUTE) {
+      return { ok: false, message: "Too many attempts. Please try again in a minute.", retryAfter: 60 };
+    }
+
+    const otp = generateOtp();
+    const stored = await persistOtp({ phone: canonical, otpHash: hashOtp(otp, canonical) });
+    if (!stored.ok) return { ok: false, message: "Could not start verification." };
+
+    // SMS-first: WhatsApp (#100) failures still burn APITxT's per-number
+    // cooldown and would block an immediate SMS fallback.
+    const delivery = await deliverOtp(canonical, otp, "sms-first");
+    if (!delivery.ok) {
+      await clearOtps(canonical);
+      return {
+        ok: false,
+        message: delivery.message,
+        retryAfter: delivery.retryAfter,
+      };
+    }
+
+    await updateOtpDelivery(canonical, {
+      requestId: delivery.requestId,
+      channel: delivery.channel,
+    });
+
+    return {
+      ok: true,
+      message: delivery.message,
+      channel: delivery.channel,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Could not send verification code.",
+    };
+  }
+}
+
+/** Verifies OTP for a new phone and updates auth + merchant profile. */
+export async function verifyAndUpdateMerchantPhone(
+  newPhone: string,
+  code: string,
+): Promise<{ ok: boolean; message: string; phone?: string }> {
+  try {
+    const { verifyOtpHash } = await import("@/lib/auth/otp/hash");
+    const { MAX_VERIFY_ATTEMPTS, OTP_LENGTH } = await import("@/lib/auth/otp/config");
+    const { clearOtps, findActiveOtp, incrementAttempts } = await import("@/lib/auth/otp/store");
+    const { toSupabaseAuthPhone } = await import("@/lib/auth/otp/phone");
+
+    const phoneDigits = newPhone.replace(/\D/g, "").slice(-10);
+    if (!isValidPhone(phoneDigits)) {
+      return { ok: false, message: "Enter a valid 10-digit mobile number." };
+    }
+    const canonical = toCanonicalPhone(phoneDigits);
+    if (!canonical) return { ok: false, message: "Enter a valid 10-digit mobile number." };
+
+    const digits = code.replace(/\D/g, "");
+    if (digits.length !== OTP_LENGTH) {
+      return { ok: false, message: `Enter the ${OTP_LENGTH}-digit code we sent you.` };
+    }
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, message: "Not authenticated." };
+
+    const record = await findActiveOtp(canonical);
+    if (!record) {
+      return { ok: false, message: "This code has expired. Please request a new one." };
+    }
+    if (record.attempts >= MAX_VERIFY_ATTEMPTS) {
+      await clearOtps(canonical);
+      return { ok: false, message: "Too many incorrect attempts. Please request a new code." };
+    }
+    if (!verifyOtpHash(digits, canonical, record.otp_hash)) {
+      await incrementAttempts(record.id, record.attempts);
+      return { ok: false, message: "That code is incorrect. Please try again." };
+    }
+
+    await clearOtps(canonical);
+
+    if (await isPhoneUsedByAnotherMerchantOrStaff(canonical, user.id)) {
+      return {
+        ok: false,
+        message: "This mobile number is already used by another merchant or staff account.",
+      };
+    }
+
+    const phoneE164 = toSupabaseAuthPhone(canonical);
+    const admin = createAdminClient();
+
+    const { error: authError } = await admin.auth.admin.updateUserById(user.id, {
+      phone: phoneE164,
+      phone_confirm: true,
+      user_metadata: {
+        ...user.user_metadata,
+        phone: phoneE164,
+        phone_verified_at: new Date().toISOString(),
+      },
+    });
+    if (authError) {
+      return { ok: false, message: authError.message };
+    }
+
+    const ctx = await currentMerchant(supabase, user.id);
+    // Store contact phone belongs to the business — only the owner updates it.
+    if (ctx?.role === "owner") {
+      await admin.from("merchants").update({ phone: phoneE164 }).eq("id", ctx.id);
+    }
+    // Keep the member row in sync for owners and staff.
+    if (ctx) {
+      await admin
+        .from("merchant_members")
+        .update({ phone: canonical })
+        .eq("merchant_id", ctx.id)
+        .eq("user_id", user.id);
+    }
+
+    return { ok: true, message: "Mobile number updated.", phone: phoneE164 };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "Could not update mobile number.",
+    };
+  }
+}
+
 /** Called after checkout payment — allows this user to access the store setup wizard. */
 export async function markMerchantOnboarding(
   product: MerchantProduct = "loyalty",
@@ -1279,6 +1373,251 @@ export async function purchaseProduct(
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Could not add the product.",
+    };
+  }
+}
+
+type ProductBillingRow = {
+  id: string;
+  product: MerchantProduct;
+  plan_id: string | null;
+  status: "active" | "past_due" | "canceled";
+  onboarded_at: string | null;
+  pending_plan_id: string | null;
+  cancel_at_period_end: boolean;
+  current_period_end: string | null;
+  purchased_at: string;
+};
+
+/** Applies due downgrades / cancellations when the paid period has ended. */
+async function applyDueBillingChanges(
+  merchantId: string,
+  rows: ProductBillingRow[],
+): Promise<ProductBillingRow[]> {
+  const now = Date.now();
+  const admin = createAdminClient();
+  const next: ProductBillingRow[] = [];
+
+  for (const row of rows) {
+    let current = { ...row };
+    const periodEnd = current.current_period_end
+      ? new Date(current.current_period_end).getTime()
+      : null;
+    const due = periodEnd != null && periodEnd <= now;
+
+    if (due && current.cancel_at_period_end) {
+      const { data } = await admin
+        .from("merchant_products")
+        .update({
+          plan_id: FREE_PLAN.id,
+          status: "active",
+          pending_plan_id: null,
+          cancel_at_period_end: false,
+          current_period_end: null,
+        })
+        .eq("id", current.id)
+        .eq("merchant_id", merchantId)
+        .select(
+          "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at",
+        )
+        .maybeSingle();
+      if (data) current = data as ProductBillingRow;
+    } else if (due && current.pending_plan_id) {
+      const nextPeriodEnd = defaultPeriodEnd(current.pending_plan_id).toISOString();
+      const { data } = await admin
+        .from("merchant_products")
+        .update({
+          plan_id: current.pending_plan_id,
+          status: "active",
+          pending_plan_id: null,
+          cancel_at_period_end: false,
+          current_period_end: nextPeriodEnd,
+        })
+        .eq("id", current.id)
+        .eq("merchant_id", merchantId)
+        .select(
+          "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at",
+        )
+        .maybeSingle();
+      if (data) current = data as ProductBillingRow;
+    }
+
+    next.push(current);
+  }
+
+  return next;
+}
+
+async function requireOwnedProduct(product: MerchantProduct) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false as const, error: "Not authenticated" };
+
+  const { data: merchant } = await supabase
+    .from("merchants")
+    .select("id")
+    .eq("owner_user_id", user.id)
+    .maybeSingle();
+  if (!merchant) return { ok: false as const, error: "Merchant account not found." };
+
+  const { data: existing } = await supabase
+    .from("merchant_products")
+    .select(
+      "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at",
+    )
+    .eq("merchant_id", merchant.id)
+    .eq("product", product)
+    .maybeSingle();
+  if (!existing) {
+    return { ok: false as const, error: "This product is not active on your account." };
+  }
+
+  return {
+    ok: true as const,
+    supabase,
+    merchantId: merchant.id as string,
+    existing: existing as ProductBillingRow,
+  };
+}
+
+/**
+ * Applies a plan immediately (first-time paid subscription / renewal apply).
+ * Clears any scheduled change or cancellation.
+ */
+export async function updateProductPlan(
+  product: MerchantProduct,
+  planId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const ctx = await requireOwnedProduct(product);
+    if (!ctx.ok) return { ok: false, error: ctx.error };
+
+    const periodEnd = defaultPeriodEnd(planId).toISOString();
+    const { error } = await ctx.supabase
+      .from("merchant_products")
+      .update({
+        plan_id: planId,
+        status: "active",
+        pending_plan_id: null,
+        cancel_at_period_end: false,
+        current_period_end: periodEnd,
+      })
+      .eq("id", ctx.existing.id);
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update the plan.",
+    };
+  }
+}
+
+/**
+ * Schedules a plan change for the next renewal. Current plan stays active until then.
+ * @deprecated Prefer schedulePlanChange — kept as an alias for older imports.
+ */
+export async function scheduleDowngrade(
+  product: MerchantProduct,
+  planId: string,
+): Promise<{ ok: boolean; error?: string; effectiveOn?: string }> {
+  return schedulePlanChange(product, planId);
+}
+
+/** Schedules any plan change (upgrade or downgrade) for the next renewal. */
+export async function schedulePlanChange(
+  product: MerchantProduct,
+  planId: string,
+): Promise<{ ok: boolean; error?: string; effectiveOn?: string }> {
+  try {
+    const ctx = await requireOwnedProduct(product);
+    if (!ctx.ok) return { ok: false, error: ctx.error };
+
+    const kind = classifyPlanChange(ctx.existing.plan_id, planId);
+    if (kind === "same") {
+      return { ok: false, error: "You're already on that plan." };
+    }
+
+    const periodEnd =
+      ctx.existing.current_period_end ??
+      defaultPeriodEnd(ctx.existing.plan_id, new Date(ctx.existing.purchased_at)).toISOString();
+
+    const { error } = await ctx.supabase
+      .from("merchant_products")
+      .update({
+        pending_plan_id: planId,
+        cancel_at_period_end: false,
+        current_period_end: periodEnd,
+      })
+      .eq("id", ctx.existing.id);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, effectiveOn: periodEnd };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not schedule the plan change.",
+    };
+  }
+}
+
+/** Cancels at period end to prevent future renewals; then moves to Free. */
+export async function cancelProductPlan(
+  product: MerchantProduct,
+): Promise<{ ok: boolean; error?: string; effectiveOn?: string }> {
+  try {
+    const ctx = await requireOwnedProduct(product);
+    if (!ctx.ok) return { ok: false, error: ctx.error };
+
+    if (ctx.existing.plan_id === FREE_PLAN.id) {
+      return { ok: false, error: "You're already on the Free plan." };
+    }
+    if (ctx.existing.cancel_at_period_end) {
+      return { ok: false, error: "Cancellation is already scheduled." };
+    }
+
+    const periodEnd =
+      ctx.existing.current_period_end ??
+      defaultPeriodEnd(ctx.existing.plan_id, new Date(ctx.existing.purchased_at)).toISOString();
+
+    const { error } = await ctx.supabase
+      .from("merchant_products")
+      .update({
+        cancel_at_period_end: true,
+        pending_plan_id: null,
+        current_period_end: periodEnd,
+      })
+      .eq("id", ctx.existing.id);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, effectiveOn: periodEnd };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not cancel the plan.",
+    };
+  }
+}
+
+/** Clears a scheduled downgrade or cancellation. */
+export async function resumeProductPlan(
+  product: MerchantProduct,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const ctx = await requireOwnedProduct(product);
+    if (!ctx.ok) return { ok: false, error: ctx.error };
+
+    const { error } = await ctx.supabase
+      .from("merchant_products")
+      .update({
+        pending_plan_id: null,
+        cancel_at_period_end: false,
+      })
+      .eq("id", ctx.existing.id);
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not resume the plan.",
     };
   }
 }
@@ -1453,12 +1792,16 @@ export async function createMerchant(input: {
           address: input.address?.trim() || null,
           is_default: true,
         });
+        const ownerMemberName =
+          [input.ownerFirstName?.trim(), input.ownerLastName?.trim()]
+            .filter(Boolean)
+            .join(" ") || null;
         await supabase.from("merchant_members").upsert(
           {
             merchant_id: inserted.id,
             user_id: user.id,
             role: "owner",
-            name: businessName,
+            name: ownerMemberName,
             email: user.email ?? null,
           },
           { onConflict: "merchant_id,user_id" },
@@ -1528,6 +1871,42 @@ type StampNotifMerchant = {
   reward_cooldown_unit?: string | null;
 };
 
+/** Fire-and-forget after a reward is scanned/claimed (not when it becomes available). */
+function notifyRewardClaimed(input: {
+  customer: StampNotifCustomer;
+  businessName: string;
+  rewardTitle: string;
+}) {
+  const { customer, businessName, rewardTitle } = input;
+  if (!customer.phone?.trim() || !customer.public_token) return;
+
+  const notifiable = {
+    phone: customer.phone,
+    name: (customer.name ?? "").trim() || "there",
+    publicToken: customer.public_token,
+    whatsappAvailable: customer.whatsapp_available === true,
+    preferredNotificationChannel:
+      customer.preferred_notification_channel === "whatsapp"
+        ? ("whatsapp" as const)
+        : ("sms" as const),
+  };
+
+  void import("@/lib/notifications").then(async ({ sendCustomerNotification }) => {
+    try {
+      await sendCustomerNotification({
+        customer: notifiable,
+        template: "reward_redeemed",
+        data: {
+          businessName: (businessName || "the store").trim() || "the store",
+          rewardTitle: rewardTitle.trim() || "Reward",
+        },
+      });
+    } catch (err) {
+      console.error("Failed to send loyaltycard_reward_claimed", err);
+    }
+  });
+}
+
 /** Fire-and-forget loyalty alerts after a stamp is committed (never blocks approval). */
 function notifyAfterStampVerified(input: {
   customer: StampNotifCustomer;
@@ -1540,12 +1919,15 @@ function notifyAfterStampVerified(input: {
 
   const notifiable = {
     phone: customer.phone,
-    name: customer.name,
+    name: (customer.name ?? "").trim() || "there",
     publicToken: customer.public_token,
     whatsappAvailable: customer.whatsapp_available === true,
     preferredNotificationChannel:
       customer.preferred_notification_channel === "whatsapp" ? "whatsapp" as const : "sms" as const,
   };
+
+  const rewardTitle =
+    (merchant.reward_title || merchant.reward_name || "Reward").trim() || "Reward";
 
   void import("@/lib/notifications").then(async ({ sendCustomerNotification }) => {
     try {
@@ -1558,6 +1940,7 @@ function notifyAfterStampVerified(input: {
             businessName: merchant.business_name,
             currentStamps,
             requiredStamps: merchant.total_stamps,
+            rewardTitle,
           },
         });
         return;
@@ -1566,8 +1949,6 @@ function notifyAfterStampVerified(input: {
       // Final stamp: do NOT send stamp_verified — final-stamp templates replace it.
       const waitValue = Math.max(0, Number(merchant.reward_cooldown_value ?? 0));
       if (waitValue <= 0) {
-        const rewardTitle =
-          (merchant.reward_title || merchant.reward_name || "Reward").trim() || "Reward";
         await sendCustomerNotification({
           customer: notifiable,
           template: "reward_unlocked",
@@ -1596,6 +1977,7 @@ function notifyAfterStampVerified(input: {
           currentStamps,
           requiredStamps: merchant.total_stamps,
           waitLabel: formatRewardCooldown(waitValue, waitUnit),
+          rewardTitle,
         },
       });
     } catch (err) {
@@ -1670,12 +2052,182 @@ export async function rejectStamp(approvalId: string) {
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 
+function stampOfferOtpKey(customerId: string) {
+  return `stamp-offer:${customerId}`;
+}
+
 /**
- * Merchant awards a stamp directly from the customers admin (no pending request).
- * Sends stamp_verified for non-final stamps; final stamp uses
- * loyaltycard_reward_unlocked_no_wait_time or loyaltycard_stamp_collected_last_wait_time.
+ * Sends a one-time code to the customer so staff/owner can confirm offering a stamp.
+ * Does not award the stamp — call confirmOfferStamp after the customer shares the code.
  */
-export async function offerStamp(
+export async function requestOfferStampOtp(customerId: string): Promise<{
+  ok: boolean;
+  error?: string;
+  message?: string;
+  channel?: "whatsapp" | "sms";
+  retryAfter?: number;
+}> {
+  try {
+    const { generateOtp, hashOtp } = await import("@/lib/auth/otp/hash");
+    const { deliverOtp } = await import("@/lib/auth/otp/deliver");
+    const {
+      countRecentRequests,
+      lastRequestAt,
+      persistOtp,
+      purgeExpired,
+      clearOtps,
+      updateOtpDelivery,
+    } = await import("@/lib/auth/otp/store");
+    const { RESEND_SECONDS, MAX_REQUESTS_PER_MINUTE } = await import("@/lib/auth/otp/config");
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    const { data: customer } = await supabase
+      .from("customers")
+      .select("id, phone, banned, merchant_id")
+      .eq("id", customerId)
+      .maybeSingle();
+
+    if (!customer) return { ok: false, error: "Customer not found." };
+    if (customer.banned) return { ok: false, error: "This customer is banned." };
+
+    const phone = toCanonicalPhone(customer.phone);
+    if (!phone) return { ok: false, error: "Customer has no valid phone number." };
+
+    const { data: card } = await supabase
+      .from("loyalty_cards")
+      .select("status, cooldown_until")
+      .eq("customer_id", customerId)
+      .maybeSingle();
+
+    if (!card) return { ok: false, error: "Loyalty card not found." };
+    if (card.status === "reward_ready") {
+      return { ok: false, error: "Redeem their current reward before offering another stamp." };
+    }
+
+    if (card.cooldown_until && new Date(card.cooldown_until).getTime() > Date.now()) {
+      return { ok: false, error: "This customer's next stamp card is still locked." };
+    }
+
+    const { count: pendingCount } = await supabase
+      .from("approvals")
+      .select("id", { count: "exact", head: true })
+      .eq("customer_id", customerId)
+      .eq("status", "pending");
+
+    if ((pendingCount ?? 0) > 0) {
+      return { ok: false, error: "A stamp request is already pending for this customer." };
+    }
+
+    const key = stampOfferOtpKey(customerId);
+    await purgeExpired();
+
+    const last = await lastRequestAt(key);
+    if (last) {
+      const waitMs = RESEND_SECONDS * 1000 - (Date.now() - last);
+      if (waitMs > 0) {
+        return {
+          ok: false,
+          error: `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another code.`,
+          retryAfter: Math.ceil(waitMs / 1000),
+        };
+      }
+    }
+
+    const recent = await countRecentRequests(key);
+    if (recent >= MAX_REQUESTS_PER_MINUTE) {
+      return {
+        ok: false,
+        error: "Too many attempts. Please try again in a minute.",
+        retryAfter: 60,
+      };
+    }
+
+    const otp = generateOtp();
+    const stored = await persistOtp({ phone: key, otpHash: hashOtp(otp, key) });
+    if (!stored.ok) return { ok: false, error: "Could not start verification." };
+
+    const delivery = await deliverOtp(phone, otp);
+    if (!delivery.ok) {
+      await clearOtps(key);
+      return { ok: false, error: delivery.message };
+    }
+
+    await updateOtpDelivery(key, {
+      requestId: delivery.requestId,
+      channel: delivery.channel,
+    });
+
+    const via = delivery.channel === "whatsapp" ? "WhatsApp" : "SMS";
+    return {
+      ok: true,
+      channel: delivery.channel,
+      message: `Code sent to the customer via ${via}. Ask them for it to confirm the stamp.`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not send verification code.",
+    };
+  }
+}
+
+/**
+ * Verifies the customer OTP, then awards a stamp (same as the old direct offer flow).
+ */
+export async function confirmOfferStamp(
+  customerId: string,
+  code: string,
+): Promise<{ ok: boolean; error?: string; stamps?: number }> {
+  try {
+    const { verifyOtpHash } = await import("@/lib/auth/otp/hash");
+    const { MAX_VERIFY_ATTEMPTS, OTP_LENGTH } = await import("@/lib/auth/otp/config");
+    const { clearOtps, findActiveOtp, incrementAttempts } = await import("@/lib/auth/otp/store");
+
+    const digits = code.replace(/\D/g, "");
+    if (digits.length !== OTP_LENGTH) {
+      return { ok: false, error: `Enter the ${OTP_LENGTH}-digit code sent to the customer.` };
+    }
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    const key = stampOfferOtpKey(customerId);
+    const record = await findActiveOtp(key);
+    if (!record) {
+      return { ok: false, error: "This code has expired. Please request a new one." };
+    }
+    if (record.attempts >= MAX_VERIFY_ATTEMPTS) {
+      await clearOtps(key);
+      return { ok: false, error: "Too many incorrect attempts. Please request a new code." };
+    }
+    if (!verifyOtpHash(digits, key, record.otp_hash)) {
+      await incrementAttempts(record.id, record.attempts);
+      return { ok: false, error: "That code is incorrect. Please try again." };
+    }
+
+    await clearOtps(key);
+    return executeOfferStamp(customerId);
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not confirm the stamp.",
+    };
+  }
+}
+
+/**
+ * Awards a stamp after OTP confirmation. Not a client-facing server action —
+ * only confirmOfferStamp should call this.
+ */
+async function executeOfferStamp(
   customerId: string,
 ): Promise<{ ok: boolean; error?: string; stamps?: number }> {
   try {
@@ -1727,11 +2279,42 @@ export async function offerStamp(
 
 export async function redeemReward(customerId: string, code: string) {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not authenticated." };
+
+  const [{ data: customer }, { data: merchant }] = await Promise.all([
+    supabase
+      .from("customers")
+      .select(
+        "name, phone, public_token, whatsapp_available, preferred_notification_channel, merchant_id",
+      )
+      .eq("id", customerId)
+      .maybeSingle(),
+    supabase
+      .from("merchants")
+      .select("id, business_name, reward_title, reward_name")
+      .eq("owner_user_id", user.id)
+      .maybeSingle(),
+  ]);
+
   const { error } = await supabase.rpc("redeem_reward", {
     p_customer_id: customerId,
     p_code: code,
   });
-  return error ? { ok: false, error: error.message } : { ok: true };
+  if (error) return { ok: false, error: error.message };
+
+  if (customer?.phone && customer.public_token && merchant) {
+    notifyRewardClaimed({
+      customer,
+      businessName: merchant.business_name,
+      rewardTitle:
+        (merchant.reward_title || merchant.reward_name || "Reward").trim() || "Reward",
+    });
+  }
+
+  return { ok: true };
 }
 
 /**
@@ -1751,7 +2334,7 @@ export async function redeemRewardByCode(
 
     const { data: merchant } = await supabase
       .from("merchants")
-      .select("id")
+      .select("id, business_name, reward_title, reward_name")
       .eq("owner_user_id", user.id)
       .maybeSingle();
     if (!merchant) return { ok: false, error: "Merchant account not found." };
@@ -1780,7 +2363,9 @@ export async function redeemRewardByCode(
 
     const { data: customer } = await supabase
       .from("customers")
-      .select("name")
+      .select(
+        "name, phone, public_token, whatsapp_available, preferred_notification_channel",
+      )
       .eq("id", target.customer_id)
       .maybeSingle();
 
@@ -1793,6 +2378,16 @@ export async function redeemRewardByCode(
     });
     if (error) return { ok: false, error: error.message };
 
+    if (customer?.phone && customer.public_token) {
+      notifyRewardClaimed({
+        customer,
+        businessName: merchant.business_name,
+        rewardTitle:
+          (merchant.reward_title || merchant.reward_name || "Reward").trim() ||
+          "Reward",
+      });
+    }
+
     return { ok: true, customerName: customer?.name ?? "Customer" };
   } catch (error) {
     return {
@@ -1804,12 +2399,28 @@ export async function redeemRewardByCode(
 
 export async function setCustomerBanned(customerId: string, banned: boolean) {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not authenticated." };
+  const ctx = await currentMerchant(supabase, user.id);
+  if (!ctx) return { ok: false, error: "Merchant account not found." };
+  if (ctx.role !== "owner") return { ok: false, error: "Only the owner can ban customers." };
+
   const { error } = await supabase.from("customers").update({ banned }).eq("id", customerId);
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 
 export async function deleteCustomer(customerId: string) {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not authenticated." };
+  const ctx = await currentMerchant(supabase, user.id);
+  if (!ctx) return { ok: false, error: "Merchant account not found." };
+  if (ctx.role !== "owner") return { ok: false, error: "Only the owner can delete customers." };
+
   const { error } = await supabase.from("customers").delete().eq("id", customerId);
   return error ? { ok: false, error: error.message } : { ok: true };
 }
@@ -1873,7 +2484,7 @@ async function currentMerchant(
       .eq("merchant_id", id)
       .eq("user_id", userId)
       .maybeSingle();
-    role = mem?.role === "owner" ? "owner" : "staff";
+    role = normalizeMemberRole(mem?.role);
   }
   return { id, slug: m.slug, role };
 }
@@ -1897,6 +2508,26 @@ export async function createBranch(input: {
 
     const name = input.name.trim();
     if (!name) return { ok: false, error: "Branch name is required." };
+
+    const { data: loyaltyProduct } = await supabase
+      .from("merchant_products")
+      .select("plan_id")
+      .eq("merchant_id", ctx.id)
+      .eq("product", "loyalty")
+      .maybeSingle();
+
+    const { loyaltyPlanLimits, branchLimitError } = await import(
+      "@/lib/merchant/plan-limits"
+    );
+    const limits = loyaltyPlanLimits(loyaltyProduct?.plan_id);
+    const { count: branchCount, error: countError } = await supabase
+      .from("branches")
+      .select("id", { count: "exact", head: true })
+      .eq("merchant_id", ctx.id);
+    if (countError) return { ok: false, error: countError.message };
+    if ((branchCount ?? 0) >= limits.maxBranches) {
+      return { ok: false, error: branchLimitError(limits.maxBranches) };
+    }
 
     const base = `${ctx.slug}-${slugify(name) || "branch"}`;
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -2007,9 +2638,12 @@ export async function inviteMember(input: {
 
     const email = normalizeEmail(input.email);
     if (!isValidEmail(email)) return { ok: false, error: "Enter a valid email address." };
-    if (input.role !== "staff") {
-      return { ok: false, error: "Team members can only be invited as staff." };
+    if (!ASSIGNABLE_ROLES.includes(input.role)) {
+      return { ok: false, error: "Choose owner, manager, or staff." };
     }
+    const inviteRole = input.role;
+    // Owners always get all-branch access.
+    const branchIds = inviteRole === "owner" ? [] : (input.branchIds ?? []);
 
     const { data: merchantMeta } = await supabase
       .from("merchants")
@@ -2018,7 +2652,6 @@ export async function inviteMember(input: {
       .maybeSingle();
     const businessName = merchantMeta?.business_name?.trim() || "your store";
 
-    const branchIds = input.branchIds ?? [];
     let branchLabel = "all branches";
     if (branchIds.length > 0) {
       const { data: branchRows } = await supabase
@@ -2066,7 +2699,7 @@ export async function inviteMember(input: {
       {
         merchant_id: ctx.id,
         user_id: invitedUserId,
-        role: "staff",
+        role: inviteRole,
         branch_id: branchIds[0] ?? null,
         branch_ids: branchIds,
         name: input.name?.trim() || null,
@@ -2260,15 +2893,34 @@ export async function updateMemberRole(
     const ctx = await currentMerchant(supabase, user.id);
     if (!ctx) return { ok: false, error: "Merchant account not found." };
     if (ctx.role !== "owner") return { ok: false, error: "Only the owner can manage the team." };
-    if (role !== "staff") return { ok: false, error: "Team members can only be staff." };
+    if (!ASSIGNABLE_ROLES.includes(role)) {
+      return { ok: false, error: "Choose owner, manager, or staff." };
+    }
 
-    const ids = branchIds ?? [];
-    const { error } = await supabase
+    const { data: merchant } = await supabase
+      .from("merchants")
+      .select("owner_user_id")
+      .eq("id", ctx.id)
+      .maybeSingle();
+
+    const { data: target } = await supabase
       .from("merchant_members")
-      .update({ role: "staff", branch_id: ids[0] ?? null, branch_ids: ids })
+      .select("id, user_id, role")
       .eq("id", memberId)
       .eq("merchant_id", ctx.id)
-      .neq("role", "owner");
+      .maybeSingle();
+    if (!target) return { ok: false, error: "Member not found." };
+    if (merchant?.owner_user_id && target.user_id === merchant.owner_user_id) {
+      return { ok: false, error: "You can't change the primary account owner's role." };
+    }
+
+    // Owners always get all-branch access.
+    const ids = role === "owner" ? [] : (branchIds ?? []);
+    const { error } = await supabase
+      .from("merchant_members")
+      .update({ role, branch_id: ids[0] ?? null, branch_ids: ids })
+      .eq("id", memberId)
+      .eq("merchant_id", ctx.id);
     return error ? { ok: false, error: error.message } : { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Could not update member." };
@@ -2289,12 +2941,28 @@ export async function removeMember(
     if (!ctx) return { ok: false, error: "Merchant account not found." };
     if (ctx.role !== "owner") return { ok: false, error: "Only the owner can manage the team." };
 
+    const { data: merchant } = await supabase
+      .from("merchants")
+      .select("owner_user_id")
+      .eq("id", ctx.id)
+      .maybeSingle();
+
+    const { data: target } = await supabase
+      .from("merchant_members")
+      .select("id, user_id")
+      .eq("id", memberId)
+      .eq("merchant_id", ctx.id)
+      .maybeSingle();
+    if (!target) return { ok: false, error: "Member not found." };
+    if (merchant?.owner_user_id && target.user_id === merchant.owner_user_id) {
+      return { ok: false, error: "You can't remove the primary account owner." };
+    }
+
     const { error } = await supabase
       .from("merchant_members")
       .delete()
       .eq("id", memberId)
-      .eq("merchant_id", ctx.id)
-      .neq("role", "owner");
+      .eq("merchant_id", ctx.id);
     return error ? { ok: false, error: error.message } : { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Could not remove member." };

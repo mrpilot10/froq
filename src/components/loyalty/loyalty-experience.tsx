@@ -161,10 +161,10 @@ export function LoyaltyExperience({
 
   return (
     <>
-      <div className="loyalty-page">
-        <div className="loyalty-screen">
+      <div className={`loyalty-page${activeTab === "collect" ? " loyalty-page--collect" : ""}`}>
+        <div className={`loyalty-screen${activeTab === "collect" ? " loyalty-screen--collect" : ""}`}>
           {activeTab === "collect" && (
-            <>
+            <div className="loyalty-collect">
               <div className="hero-section">
                 <BusinessHeader business={business} />
 
@@ -205,7 +205,7 @@ export function LoyaltyExperience({
               </div>
 
               <SocialRow links={business.socialLinks} />
-            </>
+            </div>
           )}
 
           {activeTab === "history" && (

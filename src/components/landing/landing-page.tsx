@@ -1,5 +1,7 @@
 "use client";
 
+import { FROQ_LOGO_SRC } from "@/lib/brand";
+
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -62,7 +64,7 @@ export function LandingPage() {
       <header className="lp-nav">
         <div className="lp-nav-inner">
           <div className="lp-nav-brand">
-            <Image src="/froq-logo.png" alt="Froq" width={32} height={32} priority />
+            <Image src={FROQ_LOGO_SRC} alt="Froq" width={32} height={32} priority />
             <span>Froq</span>
           </div>
           <nav className="lp-nav-links">

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import QRCode from "qrcode";
 import {
   BarChart3,
-  Bell,
   CalendarPlus,
   Check,
   Copy,
@@ -23,14 +22,22 @@ import {
 import { toast } from "sonner";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import {
-  acceptWindowMs,
-  getAcceptWindowMinutes,
+  CALL_ACCEPT_MINUTES,
   getWaitEstimateMeta,
   recordActualWaitMinutes,
-  reminderOffsetsMs,
-  REMINDER_COUNT,
 } from "@/lib/merchant/queue-settings";
 import type { MerchantProfile } from "@/lib/merchant/types";
+import {
+  addLiveQueueEntry,
+  fetchLiveQueueBoard,
+  setLiveQueueSessionStatus,
+  startLiveQueueSession,
+  updateLiveQueueEntryStatus,
+} from "@/app/merchant/queue-actions";
+import {
+  archiveQueueSession,
+  ensureQueueDataEpoch,
+} from "@/lib/merchant/queue-session-storage";
 import { joinUrlFor } from "../use-merchant-qr";
 import { useMerchantWorkspace } from "../merchant-workspace-context";
 
@@ -48,7 +55,6 @@ interface QueueEntry {
   joinedAtMs: number;
   calledAtMs?: number;
   acceptByMs?: number;
-  remindersSent?: number;
   seatedAtMs?: number;
   leftAtMs?: number;
   status: "called" | "waiting" | "seated" | "left";
@@ -80,6 +86,56 @@ interface PersistedQueue {
   session: QueueSession | null;
   endedSummary: EndedSummary | null;
   entries: QueueEntry[];
+  /** Highest session number ever used — survives end so the next start increments. */
+  lastSessionNumber: number;
+}
+
+const EMPTY_QUEUE: PersistedQueue = {
+  queueState: "not_started",
+  session: null,
+  endedSummary: null,
+  entries: [],
+  lastSessionNumber: 0,
+};
+
+function isQueueState(value: unknown): value is QueueState {
+  return (
+    value === "not_started" ||
+    value === "live" ||
+    value === "paused" ||
+    value === "ended"
+  );
+}
+
+/** Old builds shipped a hardcoded live session #128 + demo guests. Ignore those. */
+function isLegacyDemoSnapshot(saved: PersistedQueue): boolean {
+  if (saved.session?.number !== 128) return false;
+  const ids = new Set(saved.entries.map((e) => e.id));
+  return ids.has("q1") && ids.has("q2") && ids.has("q3");
+}
+
+function parsePersistedQueue(raw: string): PersistedQueue | null {
+  try {
+    const saved = JSON.parse(raw) as Partial<PersistedQueue>;
+    if (!saved || !isQueueState(saved.queueState)) return null;
+    const lastSessionNumber = Math.max(
+      0,
+      Math.round(Number(saved.lastSessionNumber) || 0),
+      Math.round(Number(saved.session?.number) || 0),
+      Math.round(Number(saved.endedSummary?.number) || 0),
+    );
+    const snapshot: PersistedQueue = {
+      queueState: saved.queueState,
+      session: saved.session ?? null,
+      endedSummary: saved.endedSummary ?? null,
+      entries: Array.isArray(saved.entries) ? (saved.entries as QueueEntry[]) : [],
+      lastSessionNumber,
+    };
+    if (isLegacyDemoSnapshot(snapshot)) return EMPTY_QUEUE;
+    return snapshot;
+  } catch {
+    return null;
+  }
 }
 
 const STATE_META: Record<QueueState, { label: string; cls: string }> = {
@@ -89,12 +145,6 @@ const STATE_META: Record<QueueState, { label: string; cls: string }> = {
   ended: { label: "Queue closed", cls: "ended" },
 };
 
-function todayAt(hours: number, minutes: number) {
-  const d = new Date();
-  d.setHours(hours, minutes, 0, 0);
-  return d.getTime();
-}
-
 function formatClock(ms: number) {
   return new Date(ms).toLocaleTimeString([], {
     hour: "numeric",
@@ -102,46 +152,6 @@ function formatClock(ms: number) {
     hour12: true,
   });
 }
-
-function makeCalledDemo(): QueueEntry {
-  const calledAtMs = Date.now() - 2 * 60_000;
-  const windowMs = acceptWindowMs();
-  return {
-    id: "q1",
-    name: "Tanmay Kapse",
-    phone: "9004857320",
-    partySize: 2,
-    joinedAtMs: Date.now() - 16 * 60_000,
-    calledAtMs,
-    acceptByMs: calledAtMs + windowMs,
-    remindersSent: 0,
-    status: "called",
-    kind: "walkin",
-  };
-}
-
-const INITIAL_ENTRIES: QueueEntry[] = [
-  makeCalledDemo(),
-  {
-    id: "q2",
-    name: "Mansi Mistry",
-    phone: "7400240079",
-    partySize: 4,
-    joinedAtMs: Date.now() - 9 * 60_000,
-    status: "waiting",
-    kind: "walkin",
-  },
-  {
-    id: "q3",
-    name: "Rahul Verma",
-    phone: "9820011234",
-    partySize: 2,
-    joinedAtMs: Date.now() - 4 * 60_000,
-    status: "waiting",
-    kind: "reservation",
-    reservationTime: "8:00 PM",
-  },
-];
 
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -171,23 +181,23 @@ function formatCountdown(msLeft: number) {
 }
 
 export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps) {
-  const [entries, setEntries] = useState<QueueEntry[]>(INITIAL_ENTRIES);
-  const [queueState, setQueueState] = useState<QueueState>("live");
-  const [session, setSession] = useState<QueueSession | null>({
-    number: 128,
-    startedAtMs: todayAt(9, 2),
-  });
+  const [entries, setEntries] = useState<QueueEntry[]>([]);
+  const [queueState, setQueueState] = useState<QueueState>("not_started");
+  const [session, setSession] = useState<QueueSession | null>(null);
   const [endedSummary, setEndedSummary] = useState<EndedSummary | null>(null);
+  const [lastSessionNumber, setLastSessionNumber] = useState(0);
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [listFilter, setListFilter] = useState<QueueListFilter>("waiting");
   const [now, setNow] = useState(() => Date.now());
-  const [acceptMinutes, setAcceptMinutes] = useState(15);
+  const acceptMinutes = CALL_ACCEPT_MINUTES;
   const [minsPerParty, setMinsPerParty] = useState(10);
   const [waitSource, setWaitSource] = useState<"initial" | "learned">("initial");
   const [waitSamples, setWaitSamples] = useState(0);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
-  const remindedToastRef = useRef<Set<string>>(new Set());
+  const resolvedCallRef = useRef<Set<string>>(new Set());
+  /** Only persist after hydrate for this exact sessionKey (avoids clobber races). */
+  const hydratedKeyRef = useRef<string | null>(null);
 
   const isLive = queueState === "live";
   const isPaused = queueState === "paused";
@@ -205,66 +215,6 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
   const [resParty, setResParty] = useState(2);
   const [resTime, setResTime] = useState("");
 
-  const startQueue = () => {
-    const number = endedSummary
-      ? endedSummary.number + 1
-      : session
-        ? session.number
-        : 128;
-    setSession({ number, startedAtMs: Date.now() });
-    setEndedSummary(null);
-    // Fresh session: keep pending reservations, drop everyone else. Numbers reset.
-    setEntries((prev) =>
-      prev.filter((e) => e.kind === "reservation" && e.status === "waiting"),
-    );
-    remindedToastRef.current.clear();
-    setListFilter("waiting");
-    setQueueState("live");
-    toast.success(`Queue session #${number} started`);
-  };
-
-  const pauseQueue = () => {
-    setQueueState("paused");
-    toast("Queue paused — new guests can't join");
-  };
-
-  const resumeQueue = () => {
-    setQueueState("live");
-    toast.success("Queue resumed — accepting guests");
-  };
-
-  const confirmEndQueue = () => {
-    const endedAtMs = Date.now();
-    const updated = entries.map((e) =>
-      e.status === "waiting" || e.status === "called"
-        ? { ...e, status: "left" as const, leftAtMs: endedAtMs }
-        : e,
-    );
-    const seatedNow = updated.filter((e) => e.status === "seated");
-    const leftNow = updated.filter((e) => e.status === "left");
-    const waits = seatedNow.map((e) =>
-      Math.max(0, Math.round(((e.seatedAtMs ?? endedAtMs) - e.joinedAtMs) / 60_000)),
-    );
-    const avgWait = waits.length
-      ? Math.round(waits.reduce((a, b) => a + b, 0) / waits.length)
-      : 0;
-    const longestWait = waits.length ? Math.max(...waits) : 0;
-
-    setEntries(updated);
-    setEndedSummary({
-      number: session?.number ?? 128,
-      startedAtMs: session?.startedAtMs ?? todayAt(9, 2),
-      endedAtMs,
-      served: seatedNow.length,
-      left: leftNow.length,
-      avgWait,
-      longestWait,
-    });
-    setQueueState("ended");
-    setSheet(null);
-    toast.success("Queue ended — session archived");
-  };
-
   const { activeBranchId } = useMerchantWorkspace();
   const queueUrl = useMemo(() => joinUrlFor(profile, "queue"), [profile]);
   // Each branch keeps its own live session (queues run independently).
@@ -273,36 +223,176 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     [queueUrl, activeBranchId],
   );
 
+  const applyQueueSnapshot = useCallback((snapshot: PersistedQueue) => {
+    setQueueState(snapshot.queueState);
+    setSession(snapshot.session);
+    setEndedSummary(snapshot.endedSummary);
+    setEntries(snapshot.entries);
+    setLastSessionNumber(snapshot.lastSessionNumber);
+  }, []);
+
+  const syncLiveBoard = useCallback(async () => {
+    const board = await fetchLiveQueueBoard({ branchId: activeBranchId });
+    if (!board.ok) return;
+    if (board.session) {
+      setQueueState(board.session.status);
+      setSession({
+        number: board.session.number,
+        startedAtMs: board.session.startedAtMs,
+      });
+      setLastSessionNumber((n) => Math.max(n, board.session!.number));
+      setEntries(board.entries);
+      if (board.session.status !== "ended") setEndedSummary(null);
+    } else if (queueState === "live" || queueState === "paused") {
+      // Server has no open session — keep local ended/not_started if already there.
+    }
+  }, [activeBranchId, queueState]);
+
+  const startQueue = () => {
+    void startLiveQueueSession({ branchId: activeBranchId }).then((result) => {
+      if (!result.ok || !result.session) {
+        toast.error(result.error ?? "Couldn't start the queue");
+        return;
+      }
+      setSession({
+        number: result.session.number,
+        startedAtMs: result.session.startedAtMs,
+      });
+      setLastSessionNumber(result.session.number);
+      setEndedSummary(null);
+      setEntries([]);
+      resolvedCallRef.current.clear();
+      setListFilter("waiting");
+      setQueueState("live");
+      toast.success(`Queue session #${result.session.number} started`);
+    });
+  };
+
+  const pauseQueue = () => {
+    void setLiveQueueSessionStatus({
+      status: "paused",
+      branchId: activeBranchId,
+    }).then((result) => {
+      if (!result.ok) {
+        toast.error(result.error ?? "Couldn't pause the queue");
+        return;
+      }
+      setQueueState("paused");
+      toast("Queue paused — new guests can't join");
+    });
+  };
+
+  const resumeQueue = () => {
+    void setLiveQueueSessionStatus({
+      status: "live",
+      branchId: activeBranchId,
+    }).then((result) => {
+      if (!result.ok) {
+        toast.error(result.error ?? "Couldn't resume the queue");
+        return;
+      }
+      setQueueState("live");
+      toast.success("Queue resumed — accepting guests");
+    });
+  };
+
+  const confirmEndQueue = () => {
+    void setLiveQueueSessionStatus({
+      status: "ended",
+      branchId: activeBranchId,
+    }).then((result) => {
+      if (!result.ok) {
+        toast.error(result.error ?? "Couldn't end the queue");
+        return;
+      }
+      const endedAtMs = Date.now();
+      const summary = result.summary ?? {
+        number: session?.number ?? lastSessionNumber ?? 1,
+        startedAtMs: session?.startedAtMs ?? endedAtMs,
+        endedAtMs,
+        served: entries.filter((e) => e.status === "seated").length,
+        left: entries.filter((e) => e.status !== "seated").length,
+        avgWait: 0,
+        longestWait: 0,
+      };
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.status === "waiting" || e.status === "called"
+            ? { ...e, status: "left" as const, leftAtMs: endedAtMs }
+            : e,
+        ),
+      );
+      setLastSessionNumber(Math.max(lastSessionNumber, summary.number));
+      setEndedSummary(summary);
+      setQueueState("ended");
+      setSheet(null);
+      archiveQueueSession(queueUrl, activeBranchId, summary);
+      toast.success("Queue ended — session archived");
+    });
+  };
+
   // Hydrate the persisted session so ending / pausing survives navigation & reloads.
   useEffect(() => {
+    hydratedKeyRef.current = null;
     setHydrated(false);
-    try {
-      const raw = window.localStorage.getItem(sessionKey);
-      if (raw) {
-        const saved = JSON.parse(raw) as Partial<PersistedQueue>;
-        if (saved && saved.queueState) {
-          setQueueState(saved.queueState);
-          setSession(saved.session ?? null);
-          setEndedSummary(saved.endedSummary ?? null);
-          if (Array.isArray(saved.entries)) setEntries(saved.entries);
-        }
-      }
-    } catch {
-      /* ignore malformed storage */
-    }
-    setHydrated(true);
-  }, [sessionKey]);
+    ensureQueueDataEpoch();
 
-  // Persist the session whenever it changes (after hydration to avoid clobbering it).
+    const raw = window.localStorage.getItem(sessionKey);
+    const saved = raw ? parsePersistedQueue(raw) : null;
+    applyQueueSnapshot(saved ?? EMPTY_QUEUE);
+    setListFilter("waiting");
+    resolvedCallRef.current.clear();
+
+    hydratedKeyRef.current = sessionKey;
+    setHydrated(true);
+    void fetchLiveQueueBoard({ branchId: activeBranchId }).then((board) => {
+      if (!board.ok || !board.session) return;
+      setQueueState(board.session.status);
+      setSession({
+        number: board.session.number,
+        startedAtMs: board.session.startedAtMs,
+      });
+      setLastSessionNumber((n) => Math.max(n, board.session!.number));
+      setEntries(board.entries);
+      setEndedSummary(null);
+    });
+  }, [sessionKey, applyQueueSnapshot, activeBranchId]);
+
+  // Pull QR joins + board changes while the queue is open.
   useEffect(() => {
     if (!hydrated) return;
+    if (queueState !== "live" && queueState !== "paused") return;
+    const id = window.setInterval(() => {
+      void syncLiveBoard();
+    }, 3000);
+    void syncLiveBoard();
+    return () => window.clearInterval(id);
+  }, [hydrated, queueState, syncLiveBoard]);
+
+  // Persist only after hydrate for this key — never write defaults over a real session.
+  useEffect(() => {
+    if (!hydrated || hydratedKeyRef.current !== sessionKey) return;
     try {
-      const payload: PersistedQueue = { queueState, session, endedSummary, entries };
+      const payload: PersistedQueue = {
+        queueState,
+        session,
+        endedSummary,
+        entries,
+        lastSessionNumber,
+      };
       window.localStorage.setItem(sessionKey, JSON.stringify(payload));
     } catch {
       /* ignore quota / serialization errors */
     }
-  }, [hydrated, sessionKey, queueState, session, endedSummary, entries]);
+  }, [
+    hydrated,
+    sessionKey,
+    queueState,
+    session,
+    endedSummary,
+    entries,
+    lastSessionNumber,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -323,7 +413,6 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
   }, [queueUrl]);
 
   useEffect(() => {
-    setAcceptMinutes(getAcceptWindowMinutes());
     const meta = getWaitEstimateMeta();
     setMinsPerParty(meta.minutes);
     setWaitSource(meta.source);
@@ -331,14 +420,11 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     const onSettings = (event: Event) => {
       const detail = (
         event as CustomEvent<{
-          acceptMinutes?: number;
           estimatedWaitMinutes?: number;
           waitSource?: "initial" | "learned";
           waitSamples?: number;
         }>
       ).detail;
-      if (detail?.acceptMinutes) setAcceptMinutes(detail.acceptMinutes);
-      else setAcceptMinutes(getAcceptWindowMinutes());
       if (detail?.estimatedWaitMinutes != null) {
         setMinsPerParty(detail.estimatedWaitMinutes);
         if (detail.waitSource) setWaitSource(detail.waitSource);
@@ -354,7 +440,7 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     return () => window.removeEventListener("froq:queue-settings", onSettings);
   }, []);
 
-  // Tick every second while guests are called (countdown + auto-reminders).
+  // Tick every second while guests are called (accept-window countdown).
   useEffect(() => {
     const hasCalled = entries.some((e) => e.status === "called");
     const id = window.setInterval(
@@ -364,44 +450,8 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     return () => window.clearInterval(id);
   }, [entries]);
 
-  // Fire evenly spaced reminders (3) and mark as left when the accept window ends.
-  useEffect(() => {
-    const windowMs = acceptWindowMs(acceptMinutes);
-    const offsets = reminderOffsetsMs(windowMs);
-
-    setEntries((prev) => {
-      let changed = false;
-      const next = prev.flatMap((entry) => {
-        if (entry.status !== "called" || !entry.calledAtMs || !entry.acceptByMs) return [entry];
-
-        const elapsed = now - entry.calledAtMs;
-        let remindersSent = entry.remindersSent ?? 0;
-
-        while (remindersSent < REMINDER_COUNT && elapsed >= offsets[remindersSent]) {
-          remindersSent += 1;
-          changed = true;
-          const toastKey = `${entry.id}:${remindersSent}`;
-          if (!remindedToastRef.current.has(toastKey)) {
-            remindedToastRef.current.add(toastKey);
-            toast(`Reminder ${remindersSent}/${REMINDER_COUNT} sent to ${entry.name}`);
-          }
-        }
-
-        if (now >= entry.acceptByMs) {
-          changed = true;
-          toast.error(`${entry.name} didn't arrive — marked as left`);
-          return [{ ...entry, status: "left" as const, leftAtMs: now, remindersSent }];
-        }
-
-        if (remindersSent !== (entry.remindersSent ?? 0)) {
-          return [{ ...entry, remindersSent }];
-        }
-        return [entry];
-      });
-
-      return changed ? next : prev;
-    });
-  }, [now, acceptMinutes]);
+  // After reminder 3, keep status "called" until the merchant marks
+  // Seated / Left / Skipped — never auto-resolve from the accept window.
 
   const called = entries.filter((e) => e.status === "called");
   const waiting = entries.filter((e) => e.status === "waiting");
@@ -450,22 +500,33 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
       toast.error("Enter the guest's phone number");
       return;
     }
-    setEntries((prev) => [
-      ...prev,
-      {
-        id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
-        name: trimmed,
-        phone,
-        email: email || undefined,
-        partySize: guestParty,
-        joinedAtMs: Date.now(),
-        status: "waiting",
-        kind: "walkin",
-      },
-    ]);
-    toast.success(`${trimmed} added to the queue`);
-    resetGuestForm();
-    closeSheet();
+    const estimatedWaitMinutes = (waiting.length + 1) * minsPerParty;
+    void addLiveQueueEntry({
+      name: trimmed,
+      phone,
+      email: email || undefined,
+      partySize: guestParty,
+      kind: "walkin",
+      branchId: activeBranchId,
+      estimatedWaitMinutes,
+    }).then((result) => {
+      if (!result.ok || !result.entry) {
+        toast.error(result.error ?? "Couldn't add guest");
+        return;
+      }
+      setEntries((prev) => {
+        if (prev.some((e) => e.id === result.entry!.id)) return prev;
+        return [...prev, result.entry!];
+      });
+      if (result.error) {
+        toast.warning(`${trimmed} added · WhatsApp failed: ${result.error}`);
+      } else {
+        toast.success(`${trimmed} added to the queue`);
+      }
+      resetGuestForm();
+      closeSheet();
+      void syncLiveBoard();
+    });
   };
 
   const addReservation = (event: FormEvent) => {
@@ -479,58 +540,93 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
       toast.error("Pick a reservation time");
       return;
     }
-    setEntries((prev) => [
-      ...prev,
-      {
-        id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`,
-        name: trimmed,
-        phone: resPhone.trim(),
-        partySize: resParty,
-        joinedAtMs: Date.now(),
-        status: "waiting",
-        kind: "reservation",
-        reservationTime: resTime,
-      },
-    ]);
-    toast.success(`Reservation for ${trimmed} added`);
-    resetResForm();
-    closeSheet();
+    if (!resPhone.trim()) {
+      toast.error("Enter the guest's phone number");
+      return;
+    }
+    void addLiveQueueEntry({
+      name: trimmed,
+      phone: resPhone.trim(),
+      partySize: resParty,
+      kind: "reservation",
+      reservationTime: resTime,
+      branchId: activeBranchId,
+      estimatedWaitMinutes: minsPerParty,
+    }).then((result) => {
+      if (!result.ok || !result.entry) {
+        toast.error(result.error ?? "Couldn't add reservation");
+        return;
+      }
+      setEntries((prev) => {
+        if (prev.some((e) => e.id === result.entry!.id)) return prev;
+        return [...prev, result.entry!];
+      });
+      if (result.error) {
+        toast.warning(
+          `Reservation for ${trimmed} added · WhatsApp failed: ${result.error}`,
+        );
+      } else {
+        toast.success(`Reservation for ${trimmed} added`);
+      }
+      resetResForm();
+      closeSheet();
+      void syncLiveBoard();
+    });
   };
 
-  const markAsCalled = useCallback(
-    (entry: QueueEntry): QueueEntry => {
-      const calledAtMs = Date.now();
-      const windowMs = acceptWindowMs(acceptMinutes);
-      return {
-        ...entry,
-        status: "called",
-        calledAtMs,
-        acceptByMs: calledAtMs + windowMs,
-        remindersSent: 0,
-      };
-    },
-    [acceptMinutes],
-  );
-
   const callNext = useCallback(() => {
-    setEntries((prev) => {
-      const idx = prev.findIndex((e) => e.status === "waiting");
-      if (idx === -1) {
-        toast("No one is waiting in the queue");
-        return prev;
+    const nextWaiting = entries.find((e) => e.status === "waiting");
+    if (!nextWaiting) {
+      toast("No one is waiting in the queue");
+      return;
+    }
+    void updateLiveQueueEntryStatus({
+      entryId: nextWaiting.id,
+      status: "called",
+      branchId: activeBranchId,
+    }).then((result) => {
+      if (!result.ok || !result.entry) {
+        toast.error(result.error ?? "Couldn't call guest");
+        return;
       }
-      const next = [...prev];
-      next[idx] = markAsCalled(next[idx]);
-      toast.success(
-        `${next[idx].name} has been called · ${acceptMinutes} min to arrive`,
+      setEntries((prev) =>
+        prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
       );
-      return next;
+      if (result.error) {
+        toast.warning(
+          `${result.entry.name} called · WhatsApp failed: ${result.error}`,
+        );
+      } else {
+        toast.success(
+          `${result.entry.name} has been called · ${acceptMinutes} min to arrive`,
+        );
+      }
+      void syncLiveBoard();
     });
-  }, [markAsCalled, acceptMinutes]);
+  }, [entries, activeBranchId, syncLiveBoard]);
 
   const callEntry = (entry: QueueEntry) => {
-    setEntries((prev) => prev.map((e) => (e.id === entry.id ? markAsCalled(e) : e)));
-    toast.success(`${entry.name} has been called · ${acceptMinutes} min to arrive`);
+    void updateLiveQueueEntryStatus({
+      entryId: entry.id,
+      status: "called",
+      branchId: activeBranchId,
+    }).then((result) => {
+      if (!result.ok || !result.entry) {
+        toast.error(result.error ?? "Couldn't call guest");
+        return;
+      }
+      setEntries((prev) =>
+        prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
+      );
+      if (result.error) {
+        toast.warning(`${entry.name} called · WhatsApp failed: ${result.error}`);
+      } else {
+        toast.success(
+          `${entry.name} has been called · ${acceptMinutes} min to arrive`,
+        );
+      }
+      void syncLiveBoard();
+    });
   };
 
   const markServed = (entry: QueueEntry) => {
@@ -541,35 +637,52 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     setMinsPerParty(learned);
     setWaitSource(meta.source);
     setWaitSamples(meta.samples);
-    setEntries((prev) =>
-      prev.map((e) =>
-        e.id === entry.id ? { ...e, status: "seated", seatedAtMs } : e,
-      ),
-    );
-    setListFilter("seated");
-    toast.success(`${entry.name} marked as seated · wait was ${actualWait} min`);
+    void updateLiveQueueEntryStatus({
+      entryId: entry.id,
+      status: "seated",
+      branchId: activeBranchId,
+    }).then((result) => {
+      if (!result.ok || !result.entry) {
+        toast.error(result.error ?? "Couldn't mark seated");
+        return;
+      }
+      setEntries((prev) =>
+        prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
+      );
+      setListFilter("seated");
+      if (result.error) {
+        toast.warning(
+          `${entry.name} seated · WhatsApp failed: ${result.error}`,
+        );
+      } else {
+        toast.success(
+          `${entry.name} marked as seated · wait was ${actualWait} min`,
+        );
+      }
+      void syncLiveBoard();
+    });
   };
 
   const markLeft = (entry: QueueEntry) => {
-    setEntries((prev) =>
-      prev.map((e) =>
-        e.id === entry.id ? { ...e, status: "left", leftAtMs: Date.now() } : e,
-      ),
-    );
-    setListFilter("left");
-    toast(`${entry.name} marked as left`);
-  };
-
-  const remind = (entry: QueueEntry) => {
-    const sent = (entry.remindersSent ?? 0) + 1;
-    if (sent > REMINDER_COUNT) {
-      toast("All reminders already sent");
-      return;
-    }
-    setEntries((prev) =>
-      prev.map((e) => (e.id === entry.id ? { ...e, remindersSent: sent } : e)),
-    );
-    toast.success(`Reminder ${sent}/${REMINDER_COUNT} sent to ${entry.name}`);
+    void updateLiveQueueEntryStatus({
+      entryId: entry.id,
+      status: "left",
+      branchId: activeBranchId,
+    }).then((result) => {
+      if (!result.ok || !result.entry) {
+        toast.error(result.error ?? "Couldn't mark left");
+        return;
+      }
+      setEntries((prev) =>
+        prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
+      );
+      if (result.error) {
+        toast.warning(`${entry.name} left · WhatsApp failed: ${result.error}`);
+      } else {
+        toast(`${entry.name} marked as left`);
+      }
+      void syncLiveBoard();
+    });
   };
 
   const avgPerTable = minsPerParty;
@@ -598,7 +711,6 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     const isLeft = entry.status === "left";
     const calledCard = entry.status === "called";
     const msLeft = calledCard && entry.acceptByMs ? entry.acceptByMs - now : 0;
-    const remindersSent = entry.remindersSent ?? 0;
     const timeLabel = (ms?: number) =>
       ms
         ? new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
@@ -652,15 +764,6 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
               <div className="queue-entry-actions">
                 {calledCard ? (
                   <>
-                    <button
-                      type="button"
-                      className="queue-act queue-act--remind"
-                      onClick={() => remind(entry)}
-                      disabled={remindersSent >= REMINDER_COUNT}
-                    >
-                      <Bell size={14} strokeWidth={2.3} />
-                      Remind
-                    </button>
                     <button type="button" className="queue-act queue-act--served" onClick={() => markServed(entry)}>
                       <Check size={14} strokeWidth={2.3} />
                       Seated

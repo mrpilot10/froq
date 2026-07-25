@@ -1,5 +1,7 @@
 "use client";
 
+import { FROQ_LOGO_SRC } from "@/lib/brand";
+
 import Image from "next/image";
 import { BarChart3, LifeBuoy, LogOut, Settings, Users, type LucideIcon } from "lucide-react";
 import { PRODUCTS } from "@/lib/merchant/nav";
@@ -8,30 +10,33 @@ import type { MerchantProduct, MerchantTab } from "@/lib/merchant/types";
 interface ProductRailProps {
   activeProduct: MerchantProduct;
   activeTab: MerchantTab;
+  isOwner?: boolean;
   onProductChange: (product: MerchantProduct) => void;
   onTabChange: (tab: MerchantTab) => void;
   pendingCount?: number;
   onLogout?: () => void;
 }
 
-// Shared "unified" sections that live across every product.
-const SHARED_ITEMS: Array<{ id: MerchantTab; label: string; Icon: LucideIcon }> = [
-  { id: "customers", label: "Customers", Icon: Users },
-  { id: "dashboard", label: "Analytics", Icon: BarChart3 },
+const OWNER_SHARED_ITEMS: Array<{ id: MerchantTab; label: string; Icon: LucideIcon }> = [
+  { id: "customers", label: "All customers", Icon: Users },
+  { id: "analytics", label: "All analytics", Icon: BarChart3 },
 ];
 
 export function ProductRail({
   activeProduct,
   activeTab,
+  isOwner = false,
   onProductChange,
   onTabChange,
   pendingCount = 0,
   onLogout,
 }: ProductRailProps) {
+  const sharedItems = isOwner ? OWNER_SHARED_ITEMS : [];
+
   return (
     <aside className="merchant-rail" aria-label="Products">
       <div className="merchant-rail-logo">
-        <Image src="/froq-logo.png" alt="Froq" width={36} height={36} priority />
+        <Image src={FROQ_LOGO_SRC} alt="Froq" width={36} height={36} priority />
       </div>
 
       <span className="merchant-rail-divider" aria-hidden="true" />
@@ -63,28 +68,31 @@ export function ProductRail({
         })}
       </nav>
 
-      <span className="merchant-rail-divider" aria-hidden="true" />
-
-      <nav className="merchant-rail-nav" aria-label="Workspace">
-        {SHARED_ITEMS.map(({ id, label, Icon }) => {
-          const isActive = activeTab === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              className={`merchant-rail-item${isActive ? " active" : ""}`}
-              aria-current={isActive ? "true" : undefined}
-              aria-label={label}
-              data-tip={label}
-              onClick={() => onTabChange(id)}
-            >
-              <span className="merchant-rail-icon">
-                <Icon size={20} strokeWidth={isActive ? 2.4 : 2} />
-              </span>
-            </button>
-          );
-        })}
-      </nav>
+      {sharedItems.length > 0 ? (
+        <>
+          <span className="merchant-rail-divider" aria-hidden="true" />
+          <nav className="merchant-rail-nav" aria-label="Workspace">
+            {sharedItems.map(({ id, label, Icon }) => {
+              const isActive = activeTab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`merchant-rail-item${isActive ? " active" : ""}`}
+                  aria-current={isActive ? "true" : undefined}
+                  aria-label={label}
+                  data-tip={label}
+                  onClick={() => onTabChange(id)}
+                >
+                  <span className="merchant-rail-icon">
+                    <Icon size={20} strokeWidth={isActive ? 2.4 : 2} />
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </>
+      ) : null}
 
       <div className="merchant-rail-foot">
         <button

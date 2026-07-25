@@ -1,5 +1,4 @@
 import Image from "next/image";
-import { MapPin } from "lucide-react";
 import type { BusinessInfo } from "@/lib/loyalty/types";
 import { CoffeeIcon } from "./icons";
 
@@ -26,12 +25,6 @@ export function BusinessHeader({ business }: BusinessHeaderProps) {
       </div>
       <div className="biz-details">
         <h1 className="biz-name">{business.name}</h1>
-        {business.address && (
-          <p className="biz-address">
-            <MapPin size={13} strokeWidth={2.2} className="biz-address-icon" />
-            {business.address}
-          </p>
-        )}
       </div>
     </div>
   );

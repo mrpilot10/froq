@@ -2,7 +2,7 @@ import type { RewardCooldownUnit } from "@/lib/loyalty/rules";
 
 export type MerchantProduct = "loyalty" | "queue";
 
-export type MemberRole = "owner" | "staff";
+export type MemberRole = "owner" | "manager" | "staff";
 
 export interface Branch {
   id: string;
@@ -22,16 +22,24 @@ export interface MerchantMember {
   branchIds: string[];
   /** false = invited but hasn't logged in yet. */
   joined: boolean;
+  /** True for the account owner on merchants.owner_user_id (can't demote/remove). */
+  isPrimaryOwner?: boolean;
 }
 
 /** Loyalty product-scoped tabs. */
-export type LoyaltyTab = "dashboard" | "scan" | "approvals" | "loyalty-settings";
+export type LoyaltyTab =
+  | "dashboard"
+  | "loyalty-analytics"
+  | "scan"
+  | "approvals"
+  | "loyalty-customers"
+  | "loyalty-settings";
 
 /** Queue product-scoped tabs. */
 export type QueueTab = "queue-home" | "queue-history" | "queue-settings";
 
 /** Workspace tabs shared across every product. */
-export type WorkspaceTab = "customers" | "profile";
+export type WorkspaceTab = "customers" | "analytics" | "profile";
 
 /** Every routable tab in the merchant app. */
 export type MerchantTab = LoyaltyTab | QueueTab | WorkspaceTab;
@@ -88,27 +96,65 @@ export interface MerchantStats {
   weeklyVisits: number[];
 }
 
-export type DashboardDateRange = "today" | "7d" | "30d" | "all";
+export type DashboardDateRange = "today" | "7d" | "30d" | "12m" | "all";
 
 export interface DashboardChartBucket {
   label: string;
   value: number;
 }
 
+export interface AnalyticsTopCustomer {
+  id: string;
+  name: string;
+  stamps: number;
+  totalStamps: number;
+  lifetimeVisits: number;
+  rewardsClaimed: number;
+}
+
+export interface AnalyticsFunnelStage {
+  id: string;
+  label: string;
+  count: number;
+  conversionFromPrevious: number | null;
+}
+
+export interface AnalyticsInsight {
+  id: string;
+  text: string;
+}
+
 export interface DashboardFilteredStats {
   range: DashboardDateRange;
   rangeLabel: string;
   totalCustomers: number;
+  activeCustomers: number;
   activeCards: number;
+  totalStampsAllTime: number;
   stampsInRange: number;
+  stampsToday: number;
+  stampsThisMonth: number;
   pendingApprovals: number;
   rewardsInRange: number;
   rewardsRedeemedAllTime: number;
-  avgLifetimeVisits: number;
-  conversionRate: number;
+  avgVisitsPerCustomer: number;
+  avgStampsPerCustomer: number;
+  customersNearReward: number;
+  redemptionRate: number;
+  avgDaysBetweenVisits: number | null;
+  newCustomersInRange: number;
+  returningCustomers: number;
+  inactiveCustomers: number;
+  repeatVisitRate: number;
+  mostActiveDay: string | null;
+  mostActiveHour: string | null;
   chartBuckets: DashboardChartBucket[];
   chartTitle: string;
   chartSub: string;
+  topCustomers: AnalyticsTopCustomer[];
+  funnel: AnalyticsFunnelStage[];
+  insights: AnalyticsInsight[];
+  hasActivity: boolean;
 }
 
 export interface MerchantCustomer {

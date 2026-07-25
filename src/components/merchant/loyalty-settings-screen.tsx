@@ -12,6 +12,7 @@ interface LoyaltySettingsScreenProps {
   onEditSection: (section: MerchantEditSection) => void;
   productEnabled?: boolean;
   onGetStarted?: () => void;
+  onManagePlan?: () => void;
 }
 
 const LOYALTY_SETTINGS: Array<{
@@ -41,6 +42,7 @@ export function LoyaltySettingsScreen({
   onEditSection,
   productEnabled,
   onGetStarted,
+  onManagePlan,
 }: LoyaltySettingsScreenProps) {
   return (
     <div className="tab-screen">
@@ -89,6 +91,7 @@ export function LoyaltySettingsScreen({
         product="loyalty"
         enabled={productEnabled}
         onGetStarted={canPurchase ? onGetStarted : undefined}
+        onManagePlan={canPurchase ? onManagePlan : undefined}
       />
     </div>
   );

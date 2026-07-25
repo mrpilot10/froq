@@ -1,15 +1,14 @@
 "use client";
 
-import { ApprovalsScreen } from "@/components/merchant/approvals-screen";
-import { useMerchantWorkspace } from "@/components/merchant/merchant-workspace-context";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { TAB_HREF } from "@/lib/merchant/nav";
 
-export default function LoyaltyApprovalsPage() {
-  const { approvals, onApprove, onDisapprove } = useMerchantWorkspace();
-  return (
-    <ApprovalsScreen
-      approvals={approvals}
-      onApprove={onApprove}
-      onDisapprove={onDisapprove}
-    />
-  );
+/** Approvals now live on Home — keep this route as a redirect for old links. */
+export default function LoyaltyApprovalsRedirectPage() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace(TAB_HREF.dashboard);
+  }, [router]);
+  return null;
 }

@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getPlanById } from "@/lib/merchant/pricing";
+import {
+  classifyPlanChange,
+  defaultPeriodEnd,
+  proratedUpgradeAmount,
+} from "@/lib/merchant/billing";
 import { createCashfreeOrder } from "@/lib/payments/cashfree";
 
 export const runtime = "nodejs";
@@ -9,6 +14,8 @@ export const maxDuration = 30;
 
 const bodySchema = z.object({
   planId: z.string().min(1).max(40),
+  /** When set, charge the prorated upgrade difference instead of full price. */
+  fromPlanId: z.string().min(1).max(40).optional(),
   customerName: z.string().trim().min(1).max(120).optional(),
   customerEmail: z.string().trim().email().optional(),
   customerPhone: z.string().trim().min(10).max(20).optional(),
@@ -37,12 +44,53 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid checkout request." }, { status: 400 });
     }
 
-    // Price is derived server-side from the plan id so the amount can't be
-    // tampered with from the client.
     const plan = getPlanById(parsed.planId);
+    let amount = plan.price;
+    let chargedAs: "full" | "prorated_upgrade" = "full";
 
-    // Merchants sign up with email/password. Phone lives on the checkout form /
-    // user_metadata — not on auth.users.phone (that was the old OTP flow).
+    if (parsed.fromPlanId) {
+      const kind = classifyPlanChange(parsed.fromPlanId, parsed.planId);
+      if (kind !== "upgrade") {
+        return NextResponse.json(
+          { error: "Only upgrades can be charged immediately." },
+          { status: 400 },
+        );
+      }
+
+      const { data: merchant } = await supabase
+        .from("merchants")
+        .select("id")
+        .eq("owner_user_id", user.id)
+        .maybeSingle();
+
+      let periodEnd: string | null = null;
+      if (merchant) {
+        const { data: entitlement } = await supabase
+          .from("merchant_products")
+          .select("current_period_end, purchased_at, plan_id")
+          .eq("merchant_id", merchant.id)
+          .eq("product", plan.product)
+          .maybeSingle();
+        periodEnd =
+          entitlement?.current_period_end ??
+          (entitlement?.purchased_at
+            ? defaultPeriodEnd(
+                entitlement.plan_id ?? parsed.fromPlanId,
+                new Date(entitlement.purchased_at),
+              ).toISOString()
+            : null);
+      }
+
+      amount = proratedUpgradeAmount(parsed.fromPlanId, parsed.planId, periodEnd);
+      chargedAs = "prorated_upgrade";
+      if (amount <= 0) {
+        return NextResponse.json(
+          { error: "Nothing to charge for this upgrade." },
+          { status: 400 },
+        );
+      }
+    }
+
     const metaPhone =
       typeof user.user_metadata?.phone === "string" ? user.user_metadata.phone : "";
     const customerPhone = normalizePhone(
@@ -58,7 +106,7 @@ export async function POST(request: Request) {
     const orderId = `froq_${user.id.slice(0, 8)}_${Date.now()}`;
     const order = await createCashfreeOrder({
       orderId,
-      amount: plan.price,
+      amount,
       customerId: user.id,
       customerName: parsed.customerName?.trim() || "Froq Merchant",
       customerEmail: parsed.customerEmail?.trim() || user.email || "merchant@froq.io",
@@ -69,6 +117,8 @@ export async function POST(request: Request) {
       {
         orderId: order.orderId,
         paymentSessionId: order.paymentSessionId,
+        amount,
+        chargedAs,
       },
       { status: 200, headers: { "Cache-Control": "no-store" } },
     );

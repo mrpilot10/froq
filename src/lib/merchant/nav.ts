@@ -1,9 +1,8 @@
 import {
-  CheckSquare,
+  BarChart3,
   Clock3,
   History,
   LayoutGrid,
-  ScanLine,
   SlidersHorizontal,
   Stamp,
   Store,
@@ -31,12 +30,12 @@ export const PRODUCTS: ProductMeta[] = [
   { id: "queue", name: "Queue Management", tagline: "Live waitlists", Icon: Clock3 },
 ];
 
-/** Product-scoped nav (top group of the contextual sidebar). */
+/** Product-scoped nav (contextual sidebar). */
 export const PRODUCT_NAV: Record<MerchantProduct, NavItem[]> = {
   loyalty: [
-    { id: "dashboard", label: "Overview", Icon: LayoutGrid },
-    { id: "scan", label: "Scan", Icon: ScanLine },
-    { id: "approvals", label: "Approvals", Icon: CheckSquare },
+    { id: "dashboard", label: "Home", Icon: LayoutGrid },
+    { id: "loyalty-customers", label: "Customers", Icon: Users },
+    { id: "loyalty-analytics", label: "Analytics", Icon: BarChart3 },
     { id: "loyalty-settings", label: "Settings", Icon: SlidersHorizontal },
   ],
   queue: [
@@ -48,9 +47,19 @@ export const PRODUCT_NAV: Record<MerchantProduct, NavItem[]> = {
 
 /** Shared workspace nav (identical for every product). */
 export const WORKSPACE_NAV: NavItem[] = [
-  { id: "customers", label: "Customers", Icon: Users },
+  { id: "customers", label: "All customers", Icon: Users },
+  { id: "analytics", label: "All analytics", Icon: BarChart3 },
   { id: "profile", label: "Business settings", Icon: Store },
 ];
+
+/** Owner-only workspace hubs (All customers / All analytics). */
+export const OWNER_WORKSPACE_TABS: MerchantTab[] = ["customers", "analytics"];
+
+/** Workspace nav visible for the given role. */
+export function workspaceNavForRole(isOwner: boolean): NavItem[] {
+  if (isOwner) return WORKSPACE_NAV;
+  return WORKSPACE_NAV.filter((item) => !OWNER_WORKSPACE_TABS.includes(item.id));
+}
 
 /** First tab shown when a product is selected. */
 export const PRODUCT_DEFAULT_TAB: Record<MerchantProduct, MerchantTab> = {
@@ -60,10 +69,13 @@ export const PRODUCT_DEFAULT_TAB: Record<MerchantProduct, MerchantTab> = {
 
 /** Human labels for every tab (used by the header + deep links). */
 export const TAB_LABELS: Record<MerchantTab, string> = {
-  dashboard: "Overview",
+  dashboard: "Home",
+  "loyalty-analytics": "Loyalty analytics",
+  analytics: "All analytics",
   scan: "Scan reward",
-  approvals: "Approvals",
-  customers: "Customers",
+  approvals: "Home",
+  "loyalty-customers": "Loyalty customers",
+  customers: "All customers",
   profile: "Business settings",
   "loyalty-settings": "Loyalty settings",
   "queue-home": "Home",
@@ -83,13 +95,16 @@ export function productForTab(tab: MerchantTab): MerchantProduct | null {
 /** Canonical URL for every tab. Each dashboard page gets its own route. */
 export const TAB_HREF: Record<MerchantTab, string> = {
   dashboard: "/merchant/loyalty",
+  "loyalty-analytics": "/merchant/loyalty/analytics",
   scan: "/merchant/loyalty/scan",
-  approvals: "/merchant/loyalty/approvals",
+  approvals: "/merchant/loyalty",
+  "loyalty-customers": "/merchant/loyalty/customers",
   "loyalty-settings": "/merchant/loyalty/settings",
   "queue-home": "/merchant/queue",
   "queue-history": "/merchant/queue/history",
   "queue-settings": "/merchant/queue/settings",
   customers: "/merchant/customers",
+  analytics: "/merchant/analytics",
   profile: "/merchant/settings",
 };
 
@@ -100,6 +115,8 @@ const PATH_TO_TAB: Record<string, MerchantTab> = Object.fromEntries(
 /** Resolve the active tab from a pathname (defaults to the loyalty overview). */
 export function tabForPathname(pathname: string): MerchantTab {
   const clean = pathname.replace(/\/+$/, "") || "/merchant";
+  if (clean === "/merchant/loyalty/plan") return "loyalty-settings";
+  if (clean === "/merchant/queue/plan") return "queue-settings";
   return PATH_TO_TAB[clean] ?? "dashboard";
 }
 

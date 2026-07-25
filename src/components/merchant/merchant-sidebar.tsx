@@ -1,20 +1,30 @@
 "use client";
 
-import { ArrowUpRight, LogOut } from "lucide-react";
+import { ArrowUpRight, ChevronRight } from "lucide-react";
 import { MERCHANT_PLANS } from "@/lib/merchant/constants";
 import { PRODUCT_NAV, PRODUCTS, type NavItem } from "@/lib/merchant/nav";
-import type { MerchantProduct, MerchantTab } from "@/lib/merchant/types";
+import { ROLE_LABELS } from "@/lib/merchant/roles";
+import type { MemberRole, MerchantProduct, MerchantTab } from "@/lib/merchant/types";
 import { isProductEnabled, type Entitlements } from "@/lib/merchant/entitlements";
+
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
 
 interface MerchantSidebarProps {
   activeProduct: MerchantProduct;
   activeTab: MerchantTab;
   entitlements: Entitlements;
   canPurchase?: boolean;
+  userName?: string;
+  userRole?: MemberRole;
   onTabChange: (tab: MerchantTab) => void;
   onGetStarted?: (product: MerchantProduct) => void;
+  onOpenAccount?: () => void;
   pendingCount?: number;
-  onLogout?: () => void;
 }
 
 export function MerchantSidebar({
@@ -22,20 +32,24 @@ export function MerchantSidebar({
   activeTab,
   entitlements,
   canPurchase = true,
+  userName = "",
+  userRole = "staff",
   onTabChange,
   onGetStarted,
+  onOpenAccount,
   pendingCount = 0,
-  onLogout,
 }: MerchantSidebarProps) {
   const product = PRODUCTS.find((p) => p.id === activeProduct) ?? PRODUCTS[0];
   const catalog = MERCHANT_PLANS[activeProduct];
   const enabled = isProductEnabled(entitlements, activeProduct);
   const plan = { ...catalog, enabled };
   const ProductIcon = product.Icon;
+  const displayName = userName.trim() || "Team member";
+  const initials = getInitials(displayName);
 
   const renderItem = ({ id, label, Icon }: NavItem) => {
     const isActive = activeTab === id;
-    const showBadge = id === "approvals" && pendingCount > 0;
+    const showBadge = id === "dashboard" && pendingCount > 0;
     return (
       <button
         key={id}
@@ -47,11 +61,11 @@ export function MerchantSidebar({
       >
         <span className="merchant-side-icon">
           <Icon size={19} strokeWidth={isActive ? 2.4 : 2} />
-          {showBadge && (
+          {showBadge ? (
             <span className="merchant-side-badge" aria-label={`${pendingCount} pending`}>
               {pendingCount}
             </span>
-          )}
+          ) : null}
         </span>
         <span className="merchant-side-label">{label}</span>
       </button>
@@ -91,28 +105,45 @@ export function MerchantSidebar({
             {plan.price}
             <span>{plan.cycle}</span>
           </div>
-          {(plan.enabled || canPurchase) && (
+          {canPurchase ? (
             <button
               type="button"
               className="merchant-side-plan-cta"
-              onClick={() => {
-                if (!plan.enabled) onGetStarted?.(activeProduct);
-              }}
+              onClick={() => onGetStarted?.(activeProduct)}
             >
-              {plan.enabled ? "Manage plan" : "Get Started"}
+              Upgrade
               <ArrowUpRight size={14} strokeWidth={2.4} />
             </button>
-          )}
+          ) : null}
         </div>
 
-        {onLogout && (
-          <button type="button" className="merchant-side-item" title="Log out" onClick={onLogout}>
-            <span className="merchant-side-icon">
-              <LogOut size={19} strokeWidth={2} />
-            </span>
-            <span className="merchant-side-label">Log out</span>
-          </button>
-        )}
+        <button
+          type="button"
+          className="merchant-side-user"
+          onClick={onOpenAccount}
+          aria-label="Account settings"
+        >
+          <span className="merchant-avatar merchant-side-user-avatar" aria-hidden="true">
+            {initials}
+          </span>
+          <span className="merchant-side-user-copy">
+            <span className="merchant-side-user-name">{displayName}</span>
+            <span className="merchant-side-user-role">{ROLE_LABELS[userRole]}</span>
+          </span>
+          <ChevronRight
+            size={15}
+            strokeWidth={2.4}
+            className="merchant-side-user-chevron"
+            aria-hidden="true"
+          />
+        </button>
+
+        <p className="merchant-sidebar-copy">
+          © 2026{" "}
+          <a href="https://froq.io" target="_blank" rel="noreferrer">
+            froq.io
+          </a>
+        </p>
       </div>
     </aside>
   );

@@ -1,5 +1,7 @@
 "use client";
 
+import { FROQ_LOGO_SRC } from "@/lib/brand";
+
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
@@ -12,19 +14,21 @@ import {
   TAB_HREF,
   TAB_LABELS,
   productForPathname,
+  productForTab,
   tabForPathname,
 } from "@/lib/merchant/nav";
 import {
   approveStamp,
+  confirmOfferStamp,
   createBranch,
   deleteBranch,
   deleteCustomer,
   deleteMerchantAccount,
   inviteMember,
-  offerStamp,
   redeemRewardByCode,
   rejectStamp,
   removeMember,
+  requestOfferStampOtp,
   setCustomerBanned,
   updateBranch,
   updateMemberRole,
@@ -41,6 +45,7 @@ import { OnboardingPrompt } from "./onboarding-prompt";
 import { ProductRail } from "./product-rail";
 import { MerchantProfileEditScreen } from "./profile-edit-screen";
 import { MerchantQrDrawer } from "./qr-drawer";
+import { RedeemDrawer } from "./redeem-drawer";
 import { MerchantWorkspaceProvider, type MerchantWorkspaceValue } from "./merchant-workspace-context";
 import { BranchSwitcher } from "./branch-switcher";
 import { BranchesTeamDrawer } from "./branches-team-drawer";
@@ -51,6 +56,7 @@ import {
   productNeedsOnboarding,
   type Entitlements,
 } from "@/lib/merchant/entitlements";
+import { loyaltyPlanLimits } from "@/lib/merchant/plan-limits";
 
 interface MerchantWorkspaceProps {
   profile: MerchantProfile;
@@ -103,8 +109,18 @@ export function MerchantExperience({
     }
   }, [productFromPath, activeProduct]);
 
+  // Non-owners can't stay on workspace hubs (All customers / All analytics).
+  useEffect(() => {
+    if (role === "owner") return;
+    if (activeTab === "customers" || activeTab === "analytics") {
+      router.replace(TAB_HREF[PRODUCT_DEFAULT_TAB[activeProduct]]);
+    }
+  }, [role, activeTab, activeProduct, router]);
+
   const [profile, setProfile] = useState<MerchantProfile>(initialProfile);
   const [qrOpen, setQrOpen] = useState(false);
+  const [qrProduct, setQrProduct] = useState<MerchantProduct>("loyalty");
+  const [redeemOpen, setRedeemOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -117,9 +133,32 @@ export function MerchantExperience({
   // Navigate to a tab by pushing its route (URL is the source of truth).
   const goToTab = useCallback(
     (tab: MerchantTab) => {
+      if (tab === "scan") {
+        setRedeemOpen(true);
+        return;
+      }
+      if (
+        (tab === "customers" || tab === "analytics") &&
+        role !== "owner"
+      ) {
+        toast.error("Only the owner can open this page.");
+        return;
+      }
+      const product = productForTab(tab);
+      if (product) setActiveProduct(product);
       router.push(TAB_HREF[tab]);
     },
-    [router],
+    [router, role],
+  );
+
+  const openQr = useCallback(
+    (product?: MerchantProduct) => {
+      const resolved =
+        product ?? productForPathname(pathname) ?? activeProduct;
+      setQrProduct(resolved);
+      setQrOpen(true);
+    },
+    [pathname, activeProduct],
   );
 
   // Switch product from the rail and land on that product's default tab.
@@ -151,8 +190,9 @@ export function MerchantExperience({
         : window.location.search;
       const params = new URLSearchParams(search);
       const tab = params.get("tab");
-      if (tab && ALL_TABS.includes(tab as MerchantTab)) {
-        router.push(TAB_HREF[tab as MerchantTab]);
+      const resolved = tab === "approvals" ? "dashboard" : tab;
+      if (resolved && ALL_TABS.includes(resolved as MerchantTab)) {
+        router.push(TAB_HREF[resolved as MerchantTab]);
       }
     };
 
@@ -265,9 +305,22 @@ export function MerchantExperience({
     [run],
   );
 
-  const handleOfferStamp = useCallback(
-    (id: string) => run(() => offerStamp(id), "Stamp offered"),
-    [run],
+  const handleRequestOfferStampOtp = useCallback(
+    (id: string) => requestOfferStampOtp(id),
+    [],
+  );
+
+  const handleConfirmOfferStamp = useCallback(
+    async (id: string, code: string) => {
+      const res = await confirmOfferStamp(id, code);
+      if (!res.ok) {
+        return { ok: false, error: res.error ?? "Could not offer a stamp." };
+      }
+      toast.success("Stamp offered");
+      await onRefresh();
+      return { ok: true };
+    },
+    [onRefresh],
   );
 
   const handleSaveProfile = useCallback(async () => {
@@ -347,6 +400,20 @@ export function MerchantExperience({
   const notifCount = activeProduct === "loyalty" ? approvals.length : 0;
   const activeBranch = branches.find((b) => b.id === activeBranchId) ?? null;
 
+  const ownerName = `${profile.ownerFirstName} ${profile.ownerLastName}`.trim();
+  const memberName =
+    members
+      .find((m) => m.email.trim().toLowerCase() === profile.email.trim().toLowerCase())
+      ?.name.trim() || "";
+  // Owner membership was historically seeded with the business name — skip that.
+  const memberLooksLikePerson =
+    memberName.length > 0 &&
+    memberName.toLowerCase() !== profile.businessName.trim().toLowerCase();
+  const sidebarUserName =
+    role === "owner"
+      ? ownerName || (memberLooksLikePerson ? memberName : "") || profile.email
+      : (memberLooksLikePerson ? memberName : "") || ownerName || profile.email;
+
   const workspaceValue = useMemo<MerchantWorkspaceValue>(
     () => ({
       profile,
@@ -361,7 +428,8 @@ export function MerchantExperience({
       canViewAllBranches,
       avgOrderValue: profile.avgOrderValue,
       goToTab,
-      onShowQr: () => setQrOpen(true),
+      onShowQr: openQr,
+      onRedeemCode: () => setRedeemOpen(true),
       onSelectBranch,
       onManageBranches: () => setManageView("branches"),
       onManageTeam: () => setManageView("team"),
@@ -372,6 +440,7 @@ export function MerchantExperience({
         }
         setPurchaseProductTarget(product);
       },
+      onRefresh,
       onCreateBranch,
       onUpdateBranch,
       onDeleteBranch,
@@ -383,7 +452,8 @@ export function MerchantExperience({
       onRedeem: handleRedeem,
       onBanCustomer: handleBanCustomer,
       onDeleteCustomer: handleDeleteCustomer,
-      onOfferStamp: handleOfferStamp,
+      onRequestOfferStampOtp: handleRequestOfferStampOtp,
+      onConfirmOfferStamp: handleConfirmOfferStamp,
       onEditSection: setEditSection,
       onSaveQueueBanner: handleSaveQueueBanner,
       onDeleteAccount: () => setDeleteOpen(true),
@@ -402,6 +472,7 @@ export function MerchantExperience({
       canViewAllBranches,
       onSelectBranch,
       goToTab,
+      openQr,
       onCreateBranch,
       onUpdateBranch,
       onDeleteBranch,
@@ -413,8 +484,10 @@ export function MerchantExperience({
       handleRedeem,
       handleBanCustomer,
       handleDeleteCustomer,
-      handleOfferStamp,
+      handleRequestOfferStampOtp,
+      handleConfirmOfferStamp,
       handleSaveQueueBanner,
+      onRefresh,
       onLogout,
     ],
   );
@@ -436,6 +509,7 @@ export function MerchantExperience({
       <ProductRail
         activeProduct={activeProduct}
         activeTab={activeTab}
+        isOwner={role === "owner"}
         onProductChange={goToProduct}
         onTabChange={goToTab}
         pendingCount={approvals.length}
@@ -447,6 +521,8 @@ export function MerchantExperience({
         activeTab={activeTab}
         entitlements={entitlements}
         canPurchase={role === "owner"}
+        userName={sidebarUserName}
+        userRole={role}
         onTabChange={goToTab}
         onGetStarted={(product) => {
           if (role !== "owner") {
@@ -455,8 +531,8 @@ export function MerchantExperience({
           }
           setPurchaseProductTarget(product);
         }}
+        onOpenAccount={() => setEditSection("account")}
         pendingCount={approvals.length}
-        onLogout={onLogout}
       />
 
       <div className="merchant-main">
@@ -464,11 +540,13 @@ export function MerchantExperience({
         <header className="merchant-header">
           <div className="merchant-header-brand">
             <div className="merchant-header-logo">
-              <Image src="/froq-logo.png" alt="Froq" width={34} height={34} priority />
+              <Image src={FROQ_LOGO_SRC} alt="Froq" width={34} height={34} priority />
             </div>
           </div>
           <div className="merchant-header-title">
-            <h1 className="merchant-header-title-name">{TAB_LABELS[activeTab]}</h1>
+            <h1 className="merchant-header-title-name">
+              {pathname.endsWith("/plan") ? "Manage plan" : TAB_LABELS[activeTab]}
+            </h1>
             <BranchSwitcher
               branches={branches}
               activeBranch={activeBranch}
@@ -516,6 +594,7 @@ export function MerchantExperience({
         activeTab={activeTab}
         onTabChange={goToTab}
         onProductChange={goToProduct}
+        onScan={() => setRedeemOpen(true)}
         pendingCount={approvals.length}
       />
 
@@ -530,7 +609,19 @@ export function MerchantExperience({
       <MerchantMobileMenu
         open={menuOpen}
         activeTab={activeTab}
+        activeProduct={activeProduct}
+        role={role}
+        entitlements={entitlements}
+        canPurchase={role === "owner"}
         onTabChange={goToTab}
+        onProductChange={goToProduct}
+        onUpgrade={(product) => {
+          if (role !== "owner") {
+            toast.error("Only the owner can upgrade plans.");
+            return;
+          }
+          setPurchaseProductTarget(product);
+        }}
         onLogout={onLogout}
         onClose={() => setMenuOpen(false)}
       />
@@ -538,11 +629,17 @@ export function MerchantExperience({
       <MerchantQrDrawer
         open={qrOpen}
         profile={profile}
-        product={activeProduct}
-        enabled={isProductEnabled(entitlements, activeProduct)}
+        product={qrProduct}
+        enabled={isProductEnabled(entitlements, qrProduct)}
         branchSlug={activeBranch && !activeBranch.isDefault ? activeBranch.slug : null}
         branchName={activeBranch && !activeBranch.isDefault ? activeBranch.name : null}
         onClose={() => setQrOpen(false)}
+      />
+
+      <RedeemDrawer
+        open={redeemOpen}
+        onClose={() => setRedeemOpen(false)}
+        onRedeem={handleRedeem}
       />
 
       <ProductPurchaseDrawer
@@ -556,6 +653,7 @@ export function MerchantExperience({
         branches={branches}
         members={members}
         role={role}
+        maxBranches={loyaltyPlanLimits(entitlements.loyalty?.planId).maxBranches}
         onCreateBranch={onCreateBranch}
         onUpdateBranch={onUpdateBranch}
         onDeleteBranch={onDeleteBranch}
@@ -569,7 +667,7 @@ export function MerchantExperience({
         open={notifOpen}
         product={activeProduct}
         approvals={approvals}
-        onViewApprovals={() => goToTab("approvals")}
+        onViewApprovals={() => goToTab("dashboard")}
         onClose={() => setNotifOpen(false)}
       />
 

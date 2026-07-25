@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { formatPhoneDisplay, isValidEmail, isValidPhone } from "@/lib/auth/format";
 import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { FroqFooter } from "@/components/shared/froq-footer";
+import { joinLiveQueue } from "@/app/queue/actions";
 
 interface QueueJoinScreenProps {
   slug: string;
@@ -18,20 +19,19 @@ interface QueueJoinScreenProps {
 }
 
 interface Ticket {
+  entryId?: string;
+  /** Queue position number only (e.g. "1") — UI prefixes with #. */
   token: string;
   name: string;
   phone: string;
   party: number;
-  ahead: number;
   waitMinutes: number;
   joinedAt: number;
 }
 
-const MINUTES_PER_PARTY = 8;
-
-function makeToken() {
-  const n = Math.floor(Math.random() * 60) + 12;
-  return `A${n}`;
+function queueNumberLabel(token: string | number | undefined, fallback = 1): string {
+  const digits = String(token ?? fallback).replace(/\D/g, "");
+  return digits || String(fallback);
 }
 
 export function QueueJoinScreen({
@@ -67,7 +67,7 @@ export function QueueJoinScreen({
     setReady(true);
   }, [storageKey]);
 
-  const join = useCallback(() => {
+  const join = useCallback(async () => {
     if (!name.trim()) {
       setError("Please enter your name.");
       return;
@@ -83,28 +83,45 @@ export function QueueJoinScreen({
     setError("");
     setJoining(true);
 
-    const ahead = Math.floor(Math.random() * 5) + 1;
-    const next: Ticket = {
-      token: makeToken(),
-      name: name.trim(),
-      phone: `+91${phone}`,
-      party,
-      ahead,
-      waitMinutes: ahead * MINUTES_PER_PARTY,
-      joinedAt: Date.now(),
-    };
+    try {
+      const result = await joinLiveQueue({
+        slug,
+        name: name.trim(),
+        phone,
+        partySize: party,
+        email: email.trim() || undefined,
+      });
 
-    window.setTimeout(() => {
+      if (!result.ok || !result.entryId) {
+        setError(result.error ?? "Couldn't join the queue.");
+        return;
+      }
+
+      const position = result.queuePosition ?? 1;
+      const next: Ticket = {
+        entryId: result.entryId,
+        token: queueNumberLabel(result.tokenLabel ?? position, position),
+        name: name.trim(),
+        phone: `+91${phone}`,
+        party,
+        waitMinutes: result.estimatedWaitMinutes ?? position * 8,
+        joinedAt: Date.now(),
+      };
+
       try {
         window.localStorage.setItem(storageKey, JSON.stringify(next));
       } catch {
         /* ignore */
       }
       setTicket(next);
-      setJoining(false);
       toast.success(`You're in line at ${businessName}!`);
-    }, 500);
-  }, [name, phone, email, party, storageKey, businessName]);
+      if (result.error) toast.error(result.error);
+    } catch {
+      setError("Couldn't join the queue. Try again.");
+    } finally {
+      setJoining(false);
+    }
+  }, [name, phone, email, party, storageKey, businessName, slug]);
 
   const leaveQueue = useCallback(() => {
     try {
@@ -251,7 +268,7 @@ export function QueueJoinScreen({
                 type="button"
                 className="cta-btn auth-submit"
                 disabled={joining}
-                onClick={join}
+                onClick={() => void join()}
               >
                 {joining ? "Joining…" : "Join waitlist"}
               </button>
@@ -277,7 +294,12 @@ export function QueueJoinScreen({
 
                 <div className="qpass-token">
                   <span className="qpass-token-label">Your number</span>
-                  <span className="qpass-token-value">{ticket.token}</span>
+                  <span className="qpass-token-value">
+                    <span className="qpass-token-hash" aria-hidden="true">
+                      #
+                    </span>
+                    <span>{queueNumberLabel(ticket.token)}</span>
+                  </span>
                   <span className="qpass-token-name">
                     <UserRound size={13} strokeWidth={2.3} />
                     {ticket.name}
@@ -287,11 +309,7 @@ export function QueueJoinScreen({
 
                 <div className="pass-divider" />
 
-                <div className="qpass-stats">
-                  <div className="qpass-stat">
-                    <span className="qpass-stat-value">{ticket.ahead}</span>
-                    <span className="qpass-stat-label">Ahead of you</span>
-                  </div>
+                <div className="qpass-stats qpass-stats-2">
                   <div className="qpass-stat">
                     <span className="qpass-stat-value">
                       ~{ticket.waitMinutes}
@@ -308,6 +326,9 @@ export function QueueJoinScreen({
             </div>
 
             <div className="qjoin-under">
+              <p className="qjoin-arrive-note">
+                Ensure you reach within 10 minutes once called.
+              </p>
               <p className="qjoin-hint">
                 <Phone size={15} strokeWidth={2.2} />
                 We&apos;ll text {formatPhoneDisplay(ticket.phone.replace("+91", ""))} when your

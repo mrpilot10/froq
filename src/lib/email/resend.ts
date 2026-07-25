@@ -7,9 +7,9 @@ const BRAND = "#004353";
 const ACCENT = "#00f47b";
 function logoUrl() {
   try {
-    return `${getAppOrigin()}/froq-logo.png?v=2026-07-24`;
+    return `${getAppOrigin()}/froq-mark.png`;
   } catch {
-    return "https://froq.io/froq-logo.png?v=2026-07-24";
+    return "https://froq.io/froq-mark.png";
   }
 }
 const HELP_URL = "https://www.froq.io/help";

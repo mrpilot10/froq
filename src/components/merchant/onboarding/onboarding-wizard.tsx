@@ -1,5 +1,7 @@
 "use client";
 
+import { FROQ_LOGO_SRC } from "@/lib/brand";
+
 import { useRef, useState, type ChangeEvent } from "react";
 import Image from "next/image";
 import {
@@ -23,7 +25,6 @@ import {
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
 import { fileToLogoDataUrl } from "@/lib/merchant/image";
 import {
-  CALL_OPTIONS,
   COOLDOWN_VALUE_OPTIONS,
   STAMP_OPTIONS,
   WAIT_OPTIONS,
@@ -34,10 +35,7 @@ import {
   type OnboardingMode,
   type OnboardingStep,
 } from "@/lib/merchant/onboarding";
-import {
-  setAcceptWindowMinutes,
-  setInitialEstimatedWaitMinutes,
-} from "@/lib/merchant/queue-settings";
+import { setInitialEstimatedWaitMinutes } from "@/lib/merchant/queue-settings";
 import {
   completeProductOnboarding,
   createMerchant,
@@ -152,7 +150,6 @@ export function OnboardingWizard({
       if (!res.ok) return res;
       if (product === "queue") {
         setInitialEstimatedWaitMinutes(draft.estimatedWaitMinutes);
-        setAcceptWindowMinutes(draft.acceptMinutes);
       }
       return res;
     }
@@ -160,7 +157,6 @@ export function OnboardingWizard({
     // Product-only onboarding for an existing store.
     if (product === "queue") {
       setInitialEstimatedWaitMinutes(draft.estimatedWaitMinutes);
-      setAcceptWindowMinutes(draft.acceptMinutes);
     } else {
       const saved = await updateMerchantProfile({
         rewardTitle: draft.rewardTitle.trim() || "Free reward",
@@ -236,7 +232,7 @@ export function OnboardingWizard({
           <div className={`wizard-body${current === "intro" ? " wizard-body--intro" : ""}`}>
             {current === "intro" ? (
               <div className="wizard-logo-badge" key={current}>
-                <Image src="/froq-logo.png" alt="Froq" width={72} height={72} priority />
+                <Image src={FROQ_LOGO_SRC} alt="Froq" width={72} height={72} priority />
               </div>
             ) : (
               <div className="wizard-icon-badge" key={current}>
@@ -612,25 +608,6 @@ export function OnboardingWizard({
                   </select>
                   <span className="merchant-field-hint">
                     We&apos;ll refine this automatically from real seating times.
-                  </span>
-                </label>
-                <label className="auth-field">
-                  <span className="auth-label">
-                    <Clock3 size={14} strokeWidth={2.2} /> Call window
-                  </span>
-                  <select
-                    className="auth-input"
-                    value={draft.acceptMinutes}
-                    onChange={(e) => update("acceptMinutes", Number(e.target.value))}
-                  >
-                    {CALL_OPTIONS.map((n) => (
-                      <option key={n} value={n}>
-                        {n} minutes
-                      </option>
-                    ))}
-                  </select>
-                  <span className="merchant-field-hint">
-                    How long a called guest has to arrive before they&apos;re marked left.
                   </span>
                 </label>
               </div>

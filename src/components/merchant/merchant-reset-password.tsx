@@ -1,5 +1,7 @@
 "use client";
 
+import { FROQ_LOGO_SRC } from "@/lib/brand";
+
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -82,7 +84,7 @@ export function MerchantResetPassword() {
       <div className="merchant-screen auth-screen">
         <header className="merchant-auth-head">
           <div className="merchant-auth-logo">
-            <Image src="/froq-logo.png" alt="Froq" width={64} height={64} priority />
+            <Image src={FROQ_LOGO_SRC} alt="Froq" width={64} height={64} priority />
           </div>
           <h1 className="merchant-auth-brand">Froq for Business</h1>
           <p className="merchant-auth-tag">Reset password</p>

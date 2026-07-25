@@ -1,9 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { ScannerScreen } from "@/components/merchant/scanner-screen";
-import { useMerchantWorkspace } from "@/components/merchant/merchant-workspace-context";
-
+/** Scan moved to a Home quick-action bottom sheet. */
 export default function LoyaltyScanPage() {
-  const { onRedeem } = useMerchantWorkspace();
-  return <ScannerScreen onRedeem={onRedeem} />;
+  redirect("/merchant/loyalty");
 }

@@ -387,7 +387,17 @@ export async function joinMerchant(
     p_email: email?.trim() || null,
     p_branch: branchSlug?.trim() || null,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    const msg = error.message ?? "";
+    if (/loyalty program is full|customer limit/i.test(msg)) {
+      return {
+        ok: false,
+        error:
+          "This loyalty program is full right now. Please ask the store to upgrade their plan.",
+      };
+    }
+    return { ok: false, error: msg };
+  }
 
   // Copy WhatsApp prefs from auth metadata (set when OTP was verified via WA).
   if (user?.id && customerId) {

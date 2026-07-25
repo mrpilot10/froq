@@ -1,6 +1,13 @@
 import "server-only";
 
 import {
+  sendQueueCustomerCalled,
+  sendQueueCustomerCalledReminder1,
+  sendQueueCustomerCalledReminder2,
+  sendQueueCustomerCalledReminder3,
+  sendQueueCustomerSeated,
+  sendQueueCustomerSkipped,
+  sendQueueJoined,
   sendRewardReadyWaitTime,
   sendRewardRedeemed,
   sendRewardUnlocked,
@@ -8,9 +15,13 @@ import {
   sendStampVerified,
   sendWhatsAppTemplate,
 } from "@/lib/whatsapp/notifications";
-import { sendTransactionalSms } from "@/lib/notifications/sms";
+import {
+  isTransactionalSmsConfigured,
+  sendTransactionalSms,
+} from "@/lib/notifications/sms";
 import {
   buildSmsBody,
+  isQueueNotificationTemplate,
   shouldSendWhatsApp,
   smsTemplateIdFor,
   type CustomerNotificationDataMap,
@@ -57,6 +68,7 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
         businessName: d.businessName,
         currentStamps: d.currentStamps,
         requiredStamps: d.requiredStamps,
+        rewardTitle: d.rewardTitle,
         publicToken: customer.publicToken,
       });
       return;
@@ -83,6 +95,7 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
         currentStamps: d.currentStamps,
         requiredStamps: d.requiredStamps,
         waitLabel: d.waitLabel,
+        rewardTitle: d.rewardTitle,
         publicToken: customer.publicToken,
       });
       return;
@@ -107,7 +120,6 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
         customerName: customer.name,
         businessName: d.businessName,
         rewardTitle: d.rewardTitle,
-        publicToken: customer.publicToken,
       });
       return;
     }
@@ -141,6 +153,85 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
       });
       return;
     }
+    case "queue_first_notify": {
+      const d = data as CustomerNotificationDataMap["queue_first_notify"];
+      await sendQueueJoined({
+        mobile: customer.phone,
+        customerName: customer.name,
+        businessName: d.businessName,
+        bookingSize: d.bookingSize,
+        queuePosition: d.queuePosition,
+        estimatedWaitMinutes: d.estimatedWaitMinutes,
+        publicToken: customer.publicToken,
+      });
+      return;
+    }
+    case "queue_call_now": {
+      const d = data as CustomerNotificationDataMap["queue_call_now"];
+      await sendQueueCustomerCalled({
+        mobile: customer.phone,
+        customerName: customer.name,
+        businessName: d.businessName,
+        bookingSize: d.bookingSize,
+        publicToken: customer.publicToken,
+      });
+      return;
+    }
+    case "queue_reminders_1": {
+      const d = data as CustomerNotificationDataMap["queue_reminders_1"];
+      await sendQueueCustomerCalledReminder1({
+        mobile: customer.phone,
+        customerName: customer.name,
+        businessName: d.businessName,
+        bookingSize: d.bookingSize,
+        publicToken: customer.publicToken,
+      });
+      return;
+    }
+    case "queue_reminder_2": {
+      const d = data as CustomerNotificationDataMap["queue_reminder_2"];
+      await sendQueueCustomerCalledReminder2({
+        mobile: customer.phone,
+        customerName: customer.name,
+        businessName: d.businessName,
+        bookingSize: d.bookingSize,
+        publicToken: customer.publicToken,
+      });
+      return;
+    }
+    case "queue_reminder_3": {
+      const d = data as CustomerNotificationDataMap["queue_reminder_3"];
+      await sendQueueCustomerCalledReminder3({
+        mobile: customer.phone,
+        customerName: customer.name,
+        businessName: d.businessName,
+        bookingSize: d.bookingSize,
+        publicToken: customer.publicToken,
+      });
+      return;
+    }
+    case "queue_customer_skipped": {
+      const d = data as CustomerNotificationDataMap["queue_customer_skipped"];
+      await sendQueueCustomerSkipped({
+        mobile: customer.phone,
+        customerName: customer.name,
+        businessName: d.businessName,
+        bookingSize: d.bookingSize,
+        publicToken: customer.publicToken,
+      });
+      return;
+    }
+    case "queue_seated": {
+      const d = data as CustomerNotificationDataMap["queue_seated"];
+      await sendQueueCustomerSeated({
+        mobile: customer.phone,
+        customerName: customer.name,
+        businessName: d.businessName,
+        bookingSize: d.bookingSize,
+        publicToken: customer.publicToken,
+      });
+      return;
+    }
     default: {
       const _exhaustive: never = template;
       throw new Error(`Unsupported WhatsApp template: ${_exhaustive}`);
@@ -150,8 +241,10 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
 
 /**
  * Single entry point for all customer notifications.
- * Routes to WhatsApp only when the customer is known to have WhatsApp and prefers it;
- * otherwise sends SMS. Never attempts WhatsApp when whatsappAvailable is false.
+ *
+ * - Loyalty / general: WhatsApp only when whatsappAvailable + preferred WhatsApp.
+ * - Queue templates: always try WhatsApp first (Meta templates; no prior OTP required).
+ * - SMS fallback only when transactional SMS env is configured.
  */
 export async function sendCustomerNotification<T extends CustomerNotificationTemplate>(input: {
   customer: NotifiableCustomer;
@@ -159,12 +252,14 @@ export async function sendCustomerNotification<T extends CustomerNotificationTem
   data: CustomerNotificationDataMap[T];
 }): Promise<SendCustomerNotificationResult> {
   const { customer, template, data } = input;
-  const useWhatsApp = shouldSendWhatsApp(customer);
+  const queueTemplate = isQueueNotificationTemplate(template);
+  const useWhatsApp = shouldSendWhatsApp(customer) || queueTemplate;
   const channel: NotificationChannel = useWhatsApp ? "whatsapp" : "sms";
 
   notifLog("info", "dispatch", {
     template,
     channel,
+    queueTemplate,
     whatsappAvailable: customer.whatsappAvailable,
     preferred: customer.preferredNotificationChannel,
     publicToken: customer.publicToken,
@@ -182,8 +277,28 @@ export async function sendCustomerNotification<T extends CustomerNotificationTem
 
   try {
     if (useWhatsApp) {
-      await sendWhatsAppForTemplate(template, customer, data);
-      return { ok: true, channel: "whatsapp" };
+      try {
+        await sendWhatsAppForTemplate(template, customer, data);
+        return { ok: true, channel: "whatsapp" };
+      } catch (waError) {
+        const waReason = waError instanceof Error ? waError.message : "whatsapp_failed";
+        notifLog("warn", "whatsapp_dispatch_failed", { template, error: waReason });
+
+        if (!isTransactionalSmsConfigured()) {
+          return { ok: false, channel: "whatsapp", error: waReason };
+        }
+        // Fall through to SMS when configured.
+        notifLog("info", "fallback_to_sms", { template });
+      }
+    }
+
+    if (!isTransactionalSmsConfigured()) {
+      return {
+        ok: false,
+        channel: "sms",
+        error:
+          "No delivery channel available. WhatsApp was not used and transactional SMS is not configured.",
+      };
     }
 
     const message = buildSmsBody(

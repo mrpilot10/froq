@@ -35,22 +35,26 @@ export function MerchantQrDrawer({
         <div className="merchant-qr-drawer">
           <div className="merchant-qr-drawer-head">
             <h3 id="merchant-qr-title" className="merchant-qr-drawer-title">
-              Queue QR
+              {isQueue ? "Queue QR" : "Loyalty QR"}
             </h3>
             <p className="merchant-qr-drawer-sub">
-              Guests will scan this to join {profile.businessName}&apos;s live queue.
+              {isQueue
+                ? `Guests will scan this to join ${profile.businessName}'s live queue.`
+                : `Customers will scan this to join ${profile.businessName}'s loyalty card.`}
             </p>
           </div>
 
           <div className="merchant-qr-frame merchant-qr-frame--lg merchant-qr-frame--locked">
             <div className="merchant-qr-locked">
               <Lock size={26} strokeWidth={2.2} />
-              <span>Unlocks with Queue Management</span>
+              <span>{isQueue ? "Unlocks with Queue Management" : "Unlocks with Loyalty Stamps"}</span>
             </div>
           </div>
 
           <p className="merchant-qr-drawer-sub">
-            Get started with Queue Management to generate your queue join code.
+            {isQueue
+              ? "Get started with Queue Management to generate your queue join code."
+              : "Get started with Loyalty Stamps to generate your loyalty join code."}
           </p>
         </div>
       </BottomSheet>
@@ -62,7 +66,7 @@ export function MerchantQrDrawer({
       <div className="merchant-qr-drawer">
         <div className="merchant-qr-drawer-head">
           <h3 id="merchant-qr-title" className="merchant-qr-drawer-title">
-            {isQueue ? "Queue QR" : "Scan to join"}
+            {isQueue ? "Queue QR" : "Loyalty QR"}
             {branchNote}
           </h3>
           <p className="merchant-qr-drawer-sub">

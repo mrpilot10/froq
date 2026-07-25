@@ -4,12 +4,19 @@ import { useState } from "react";
 import { ChevronDown, Check, MapPin, Pencil, Plus, Trash2, UserPlus, Users } from "lucide-react";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import type { Branch, MemberRole, MerchantMember } from "@/lib/merchant/types";
+import {
+  ASSIGNABLE_ROLES,
+  ROLE_HINTS,
+  ROLE_LABELS,
+} from "@/lib/merchant/roles";
 
 interface BranchesTeamDrawerProps {
   view: "branches" | "team" | null;
   branches: Branch[];
   members: MerchantMember[];
   role: MemberRole;
+  /** Loyalty plan branch cap (Starter 1 / Growth 3 / Pro 10). */
+  maxBranches: number;
   onCreateBranch: (input: { name: string; address?: string }) => Promise<string | null>;
   onUpdateBranch: (id: string, patch: { name?: string; address?: string }) => Promise<boolean>;
   onDeleteBranch: (id: string) => Promise<boolean>;
@@ -23,11 +30,6 @@ interface BranchesTeamDrawerProps {
   onRemoveMember: (id: string) => Promise<boolean>;
   onClose: () => void;
 }
-
-const ROLE_LABELS: Record<MemberRole, string> = {
-  owner: "Owner",
-  staff: "Staff",
-};
 
 export function BranchesTeamDrawer(props: BranchesTeamDrawerProps) {
   const { view, onClose } = props;
@@ -47,6 +49,7 @@ export function BranchesTeamDrawer(props: BranchesTeamDrawerProps) {
 function BranchesPanel({
   branches,
   role,
+  maxBranches,
   onCreateBranch,
   onUpdateBranch,
   onDeleteBranch,
@@ -57,19 +60,22 @@ function BranchesPanel({
   const [address, setAddress] = useState("");
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<MemberRole>("staff");
   const [busy, setBusy] = useState(false);
   const canInvite = role === "owner";
+  const atBranchLimit = branches.length >= maxBranches;
 
   const resetForm = () => {
     setName("");
     setAddress("");
     setInviteOpen(false);
     setInviteEmail("");
+    setInviteRole("staff");
     setAdding(false);
   };
 
   const add = async () => {
-    if (!name.trim() || busy) return;
+    if (!name.trim() || busy || atBranchLimit) return;
     setBusy(true);
     const branchId = await onCreateBranch({
       name: name.trim(),
@@ -79,8 +85,8 @@ function BranchesPanel({
     if (branchId && canInvite && inviteOpen && inviteEmail.trim()) {
       await onInviteMember({
         email: inviteEmail.trim(),
-        role: "staff",
-        branchIds: [branchId],
+        role: inviteRole,
+        branchIds: inviteRole === "owner" ? [] : [branchId],
       });
     }
     setBusy(false);
@@ -99,6 +105,10 @@ function BranchesPanel({
         <p className="merchant-edit-sheet-sub">
           Each branch gets its own QR, customers, and analytics. Switch branches from the header.
         </p>
+        <p className="merchant-edit-sheet-sub" style={{ marginTop: 4 }}>
+          {branches.length} / {maxBranches} branches on your plan
+          {atBranchLimit ? " · Upgrade to add more" : ""}
+        </p>
       </div>
 
       <div className="merchant-manage-list">
@@ -112,7 +122,7 @@ function BranchesPanel({
         ))}
       </div>
 
-      {adding ? (
+      {adding && !atBranchLimit ? (
         <div className="merchant-manage-form">
           <label className="auth-field">
             <span className="auth-label">Branch name</span>
@@ -165,9 +175,7 @@ function BranchesPanel({
                       onChange={(e) => setInviteEmail(e.target.value)}
                     />
                   </label>
-                  <p className="merchant-field-hint">
-                    They&apos;ll join as staff with access to this branch.
-                  </p>
+                  <RolePicker value={inviteRole} onChange={setInviteRole} />
                 </div>
               )}
             </div>
@@ -192,6 +200,10 @@ function BranchesPanel({
             </button>
           </div>
         </div>
+      ) : atBranchLimit ? (
+        <p className="merchant-edit-sheet-sub" style={{ marginTop: 12 }}>
+          Branch limit reached. Upgrade your loyalty plan to add more locations.
+        </p>
       ) : (
         <button type="button" className="merchant-manage-add" onClick={() => setAdding(true)}>
           <Plus size={16} strokeWidth={2.4} />
@@ -354,12 +366,14 @@ function TeamPanel({
 }: BranchesTeamDrawerProps) {
   const [adding, setAdding] = useState(false);
   const [email, setEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<MemberRole>("staff");
   const [branchIds, setBranchIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [editingMember, setEditingMember] = useState<MerchantMember | null>(null);
 
   const resetInvite = () => {
     setEmail("");
+    setInviteRole("staff");
     setBranchIds([]);
     setAdding(false);
   };
@@ -369,7 +383,7 @@ function TeamPanel({
     setBusy(true);
     const ok = await onInviteMember({
       email: email.trim(),
-      role: "staff",
+      role: inviteRole,
       branchIds,
     });
     setBusy(false);
@@ -386,7 +400,7 @@ function TeamPanel({
           Team
         </h3>
         <p className="merchant-edit-sheet-sub">
-          Invite staff. They&apos;ll get an email to set a password.
+          Invite owners, managers, or staff. They&apos;ll get an email to set a password.
         </p>
       </div>
 
@@ -400,6 +414,9 @@ function TeamPanel({
               <div className="merchant-manage-item-name">
                 {member.name || member.email}
                 {member.role === "owner" && <span className="merchant-manage-tag">Owner</span>}
+                {member.role === "manager" && (
+                  <span className="merchant-manage-tag">Manager</span>
+                )}
                 {member.role !== "owner" && !member.joined && (
                   <span className="merchant-manage-tag merchant-manage-tag--pending">Invited</span>
                 )}
@@ -411,7 +428,7 @@ function TeamPanel({
                 {ROLE_LABELS[member.role]} · {branchSummary(branches, member.branchIds)}
               </div>
             </div>
-            {member.role === "owner" ? (
+            {member.isPrimaryOwner ? (
               <span className="merchant-manage-role-static">{ROLE_LABELS.owner}</span>
             ) : (
               <div className="merchant-manage-item-actions">
@@ -441,8 +458,12 @@ function TeamPanel({
               onChange={(e) => setEmail(e.target.value)}
             />
           </label>
-          <BranchAccessPicker branches={branches} selected={branchIds} onChange={setBranchIds} />
-          <p className="merchant-field-hint">Invited members join as staff.</p>
+          <RolePicker value={inviteRole} onChange={setInviteRole} />
+          {inviteRole !== "owner" ? (
+            <BranchAccessPicker branches={branches} selected={branchIds} onChange={setBranchIds} />
+          ) : (
+            <p className="merchant-field-hint">Owners can access every branch.</p>
+          )}
           <div className="merchant-manage-form-actions">
             <button
               type="button"
@@ -476,6 +497,39 @@ function TeamPanel({
         onRemove={onRemoveMember}
         onClose={() => setEditingMember(null)}
       />
+    </div>
+  );
+}
+
+function RolePicker({
+  value,
+  onChange,
+}: {
+  value: MemberRole;
+  onChange: (role: MemberRole) => void;
+}) {
+  return (
+    <div className="auth-field">
+      <span className="auth-label">Role</span>
+      <div className="branch-access-picker">
+        {ASSIGNABLE_ROLES.map((role) => {
+          const selected = value === role;
+          return (
+            <button
+              key={role}
+              type="button"
+              className={`branch-access-option${selected ? " is-selected" : ""}`}
+              onClick={() => onChange(role)}
+            >
+              <span className="branch-access-check">
+                {selected ? <Check size={13} strokeWidth={3} /> : null}
+              </span>
+              <span className="branch-access-name">{ROLE_LABELS[role]}</span>
+            </button>
+          );
+        })}
+      </div>
+      <span className="merchant-field-hint">{ROLE_HINTS[value]}</span>
     </div>
   );
 }
@@ -575,13 +629,16 @@ function MemberEditBody({
   onRemove: (id: string) => Promise<boolean>;
   onClose: () => void;
 }) {
+  const [role, setRole] = useState<MemberRole>(
+    member.role === "owner" || member.role === "manager" ? member.role : "staff",
+  );
   const [branchIds, setBranchIds] = useState<string[]>(member.branchIds);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
     setBusy(true);
-    const ok = await onSave(member.id, "staff", branchIds);
+    const ok = await onSave(member.id, role, role === "owner" ? [] : branchIds);
     setBusy(false);
     if (ok) onClose();
   };
@@ -606,10 +663,12 @@ function MemberEditBody({
       </div>
 
       <div className="merchant-edit-fields">
-        <p className="merchant-field-hint" style={{ marginBottom: 4 }}>
-          Role: Staff — day-to-day stamps, approvals &amp; queue.
-        </p>
-        <BranchAccessPicker branches={branches} selected={branchIds} onChange={setBranchIds} />
+        <RolePicker value={role} onChange={setRole} />
+        {role !== "owner" ? (
+          <BranchAccessPicker branches={branches} selected={branchIds} onChange={setBranchIds} />
+        ) : (
+          <p className="merchant-field-hint">Owners can access every branch.</p>
+        )}
       </div>
 
       {confirmingDelete ? (

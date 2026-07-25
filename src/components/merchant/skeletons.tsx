@@ -1,3 +1,4 @@
+import { FROQ_LOGO_SRC } from "@/lib/brand";
 import Image from "next/image";
 import type { MerchantTab } from "@/lib/merchant/types";
 import { FroqFooter } from "@/components/shared/froq-footer";
@@ -204,7 +205,7 @@ export function MerchantGateSplash() {
       <div className="merchant-screen auth-screen">
         <header className="merchant-auth-head">
           <div className="merchant-auth-logo">
-            <Image src="/froq-logo.png" alt="Froq" width={64} height={64} priority />
+            <Image src={FROQ_LOGO_SRC} alt="Froq" width={64} height={64} priority />
           </div>
           <h1 className="merchant-auth-brand">Froq for Business</h1>
           <p className="merchant-auth-tag">Merchant dashboard</p>
@@ -233,7 +234,7 @@ export function MerchantLoadingScreen({ tab = "dashboard" }: { tab?: MerchantTab
         <header className="merchant-header">
           <div className="merchant-header-brand">
             <div className="merchant-header-logo">
-              <Image src="/froq-logo.png" alt="Froq" width={40} height={40} priority />
+              <Image src={FROQ_LOGO_SRC} alt="Froq" width={40} height={40} priority />
             </div>
             <div className="merchant-header-copy">
               <h1 className="merchant-header-name">Froq</h1>
@@ -254,6 +255,7 @@ export function MerchantLoadingScreen({ tab = "dashboard" }: { tab?: MerchantTab
 export function MerchantTabSkeleton({ tab }: { tab: MerchantTab }) {
   switch (tab) {
     case "customers":
+    case "loyalty-customers":
       return <CustomersSkeleton />;
     case "approvals":
       return <ApprovalsSkeleton />;
@@ -263,6 +265,8 @@ export function MerchantTabSkeleton({ tab }: { tab: MerchantTab }) {
     case "loyalty-settings":
     case "queue-settings":
       return <ProfileSkeleton />;
+    case "analytics":
+    case "loyalty-analytics":
     default:
       return <DashboardSkeleton />;
   }

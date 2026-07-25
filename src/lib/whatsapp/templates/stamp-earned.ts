@@ -13,6 +13,7 @@ export interface StampEarnedTemplateInput {
   businessName: string;
   currentStamps: number;
   requiredStamps: number;
+  rewardTitle: string;
   publicToken: string;
 }
 
@@ -24,6 +25,7 @@ export interface StampEarnedTemplateInput {
  *   {{2}} business.name
  *   {{3}} loyalty.currentStamps
  *   {{4}} loyalty.requiredStamps
+ *   {{5}} reward title
  *
  * Dynamic URL button (numbered independently):
  *   Meta template: https://froq.io/c/{{1}}
@@ -32,8 +34,12 @@ export interface StampEarnedTemplateInput {
 export function buildStampEarnedTemplate(
   input: StampEarnedTemplateInput,
 ): WhatsAppTemplatePayload {
-  const customerName = requireNonEmptyString(input.customerName, "customerName");
+  const customerName = requireNonEmptyString(
+    input.customerName.trim() || "there",
+    "customerName",
+  );
   const businessName = requireNonEmptyString(input.businessName, "businessName");
+  const rewardTitle = requireNonEmptyString(input.rewardTitle, "rewardTitle");
   let publicToken: string;
   try {
     publicToken = requireCustomerPublicToken(input.publicToken, "publicToken");
@@ -64,7 +70,7 @@ export function buildStampEarnedTemplate(
 
   return {
     templateName: WhatsAppTemplateName.StampVerified,
-    body: [customerName, businessName, currentStamps, requiredStamps],
+    body: [customerName, businessName, currentStamps, requiredStamps, rewardTitle],
     buttons: [buildUrlButton([publicToken])],
   };
 }

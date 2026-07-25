@@ -1,5 +1,7 @@
 "use client";
 
+import { FROQ_LOGO_SRC } from "@/lib/brand";
+
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -11,6 +13,7 @@ import { INDIA_CITIES, stateForCity } from "@/lib/geo/india-cities";
 import { writeCheckoutAccount } from "@/lib/merchant/checkout";
 import { markMerchantOnboarding, signUpMerchantWithPassword } from "@/app/merchant/actions";
 import { type PricingPlan } from "@/lib/merchant/pricing";
+import { FeatureText } from "@/components/landing/feature-text";
 
 const CASHFREE_MODE =
   process.env.NEXT_PUBLIC_CASHFREE_ENV === "production" ? "production" : "sandbox";
@@ -176,7 +179,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
             Back to plans
           </Link>
           <div className="checkout-brand">
-            <Image src="/froq-logo.png" alt="Froq" width={32} height={32} />
+            <Image src={FROQ_LOGO_SRC} alt="Froq" width={32} height={32} />
             <span>Froq</span>
           </div>
         </header>
@@ -193,7 +196,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
               {plan.features.map((feature) => (
                 <li key={feature}>
                   <Check size={14} strokeWidth={2.5} aria-hidden />
-                  {feature}
+                  <FeatureText text={feature} />
                 </li>
               ))}
             </ul>
@@ -434,7 +437,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
 
                 <p className="merchant-auth-note">
                   <Lock size={13} strokeWidth={2.2} />
-                  Secure checkout · Cancel anytime
+                  Secure checkout · 7-day money-back on first subscription
                 </p>
               </>
             )}

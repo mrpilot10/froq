@@ -1,18 +1,21 @@
 "use client";
 
-import { CustomersScreen } from "@/components/merchant/customers-screen";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { GlobalCustomersScreen } from "@/components/merchant/global-customers-screen";
 import { useMerchantWorkspace } from "@/components/merchant/merchant-workspace-context";
+import { PRODUCT_DEFAULT_TAB, TAB_HREF } from "@/lib/merchant/nav";
 
 export default function CustomersPage() {
-  const { customers, avgOrderValue, onBanCustomer, onDeleteCustomer, onOfferStamp } =
-    useMerchantWorkspace();
-  return (
-    <CustomersScreen
-      customers={customers}
-      avgOrderValue={avgOrderValue}
-      onBanCustomer={onBanCustomer}
-      onDeleteCustomer={onDeleteCustomer}
-      onOfferStamp={onOfferStamp}
-    />
-  );
+  const router = useRouter();
+  const { role } = useMerchantWorkspace();
+
+  useEffect(() => {
+    if (role !== "owner") {
+      router.replace(TAB_HREF[PRODUCT_DEFAULT_TAB.loyalty]);
+    }
+  }, [role, router]);
+
+  if (role !== "owner") return null;
+  return <GlobalCustomersScreen />;
 }

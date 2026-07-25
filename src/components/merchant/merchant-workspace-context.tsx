@@ -33,11 +33,13 @@ export interface MerchantWorkspaceValue {
   canViewAllBranches: boolean;
   avgOrderValue: number;
   goToTab: (tab: MerchantTab) => void;
-  onShowQr: () => void;
+  onShowQr: (product?: MerchantProduct) => void;
+  onRedeemCode: () => void;
   onSelectBranch: (branchId: string | null) => void;
   onManageBranches: () => void;
   onManageTeam: () => void;
   onPurchaseProduct: (product: MerchantProduct) => void;
+  onRefresh: () => Promise<void>;
   onCreateBranch: (input: { name: string; address?: string }) => Promise<string | null>;
   onUpdateBranch: (id: string, patch: { name?: string; address?: string }) => Promise<boolean>;
   onDeleteBranch: (id: string) => Promise<boolean>;
@@ -58,7 +60,17 @@ export interface MerchantWorkspaceValue {
   onRedeem: (code: string) => Promise<{ ok: boolean; error?: string }>;
   onBanCustomer: (id: string) => void;
   onDeleteCustomer: (id: string) => void;
-  onOfferStamp: (id: string) => Promise<boolean>;
+  onRequestOfferStampOtp: (customerId: string) => Promise<{
+    ok: boolean;
+    error?: string;
+    message?: string;
+    channel?: "whatsapp" | "sms";
+    retryAfter?: number;
+  }>;
+  onConfirmOfferStamp: (
+    customerId: string,
+    code: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
   onEditSection: (section: MerchantEditSection) => void;
   onSaveQueueBanner: (queueBanner: string, queueBannerLink: string) => Promise<void>;
   onDeleteAccount: () => void;

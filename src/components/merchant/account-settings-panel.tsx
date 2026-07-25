@@ -1,0 +1,402 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { Eye, EyeOff, KeyRound, Phone } from "lucide-react";
+import { toast } from "sonner";
+import {
+  changeMerchantPassword,
+  sendMerchantPhoneChangeOtp,
+  verifyAndUpdateMerchantPhone,
+} from "@/app/merchant/actions";
+import { formatPhoneDisplay, isValidPassword, isValidPhone } from "@/lib/auth/format";
+import { OTP_LENGTH, RESEND_SECONDS } from "@/lib/auth/otp/client";
+import { useResendCooldown } from "@/lib/auth/otp/use-resend-cooldown";
+import { createClient } from "@/lib/supabase/client";
+import { OtpInput } from "@/components/auth/otp-input";
+
+type Panel = "idle" | "password" | "phone";
+type PhoneStep = "edit" | "otp";
+
+interface AccountSettingsPanelProps {
+  email: string;
+  phone: string;
+  onPhoneUpdated: (phone: string) => void;
+}
+
+export function AccountSettingsPanel({
+  email,
+  phone,
+  onPhoneUpdated,
+}: AccountSettingsPanelProps) {
+  const [panel, setPanel] = useState<Panel>("idle");
+  const [accountPhone, setAccountPhone] = useState(phone);
+
+  useEffect(() => {
+    setPanel("idle");
+    setAccountPhone(phone);
+  }, [email, phone]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (cancelled || !user) return;
+      const metaPhone =
+        typeof user.user_metadata?.phone === "string" ? user.user_metadata.phone : "";
+      const resolved = metaPhone || user.phone || phone;
+      if (resolved) setAccountPhone(resolved);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [phone]);
+
+  const phoneDigits = accountPhone.replace(/\D/g, "").slice(-10);
+  const phoneDisplay = phoneDigits ? formatPhoneDisplay(phoneDigits) : accountPhone || "Not set";
+
+  return (
+    <div className="merchant-account-panel">
+      <ReadOnlyField label="Email" value={email || "Not set"} />
+
+      {panel === "idle" ? (
+        <>
+          <div className="merchant-account-row">
+            <ReadOnlyField label="Phone" value={phoneDisplay} />
+            <button
+              type="button"
+              className="merchant-account-link"
+              onClick={() => setPanel("phone")}
+            >
+              Update
+            </button>
+          </div>
+
+          <button
+            type="button"
+            className="merchant-account-action"
+            onClick={() => setPanel("password")}
+          >
+            <span className="merchant-account-action-icon" aria-hidden="true">
+              <KeyRound size={17} strokeWidth={2.2} />
+            </span>
+            <span className="merchant-account-action-copy">
+              <span className="merchant-account-action-title">Change password</span>
+              <span className="merchant-account-action-sub">Update your sign-in password</span>
+            </span>
+          </button>
+        </>
+      ) : null}
+
+      {panel === "password" ? (
+        <ChangePasswordForm onCancel={() => setPanel("idle")} />
+      ) : null}
+
+      {panel === "phone" ? (
+        <UpdatePhoneForm
+          currentPhone={accountPhone}
+          onCancel={() => setPanel("idle")}
+          onUpdated={(next) => {
+            setAccountPhone(next);
+            onPhoneUpdated(next);
+            setPanel("idle");
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <label className="auth-field">
+      <span className="auth-label">{label}</span>
+      <input
+        className="auth-input auth-input--readonly"
+        type="text"
+        value={value}
+        readOnly
+        aria-readonly="true"
+      />
+    </label>
+  );
+}
+
+function ChangePasswordForm({ onCancel }: { onCancel: () => void }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const handleSubmit = useCallback(async () => {
+    setError("");
+    if (!currentPassword) {
+      setError("Enter your current password.");
+      return;
+    }
+    if (!isValidPassword(password)) {
+      setError("New password must be at least 8 characters.");
+      return;
+    }
+    if (password !== confirm) {
+      setError("Passwords don’t match.");
+      return;
+    }
+
+    setBusy(true);
+    const res = await changeMerchantPassword(currentPassword, password);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.error ?? "Could not update password.");
+      return;
+    }
+    toast.success("Password updated");
+    onCancel();
+  }, [currentPassword, password, confirm, onCancel]);
+
+  return (
+    <div className="merchant-account-form">
+      <div className="merchant-account-form-head">
+        <span className="merchant-account-form-icon" aria-hidden="true">
+          <KeyRound size={18} strokeWidth={2.2} />
+        </span>
+        <div>
+          <h4 className="merchant-account-form-title">Change password</h4>
+          <p className="merchant-account-form-sub">Use at least 8 characters.</p>
+        </div>
+      </div>
+
+      <label className="auth-field">
+        <span className="auth-label">Current password</span>
+        <div className="auth-input-with-icon">
+          <input
+            className="auth-input"
+            type={showPassword ? "text" : "password"}
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(e) => {
+              setCurrentPassword(e.target.value);
+              setError("");
+            }}
+          />
+          <button
+            type="button"
+            className="auth-input-icon-btn"
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            onClick={() => setShowPassword((v) => !v)}
+          >
+            {showPassword ? <EyeOff size={18} strokeWidth={2} /> : <Eye size={18} strokeWidth={2} />}
+          </button>
+        </div>
+      </label>
+
+      <label className="auth-field">
+        <span className="auth-label">New password</span>
+        <input
+          className="auth-input"
+          type={showPassword ? "text" : "password"}
+          autoComplete="new-password"
+          placeholder="At least 8 characters"
+          value={password}
+          onChange={(e) => {
+            setPassword(e.target.value);
+            setError("");
+          }}
+        />
+      </label>
+
+      <label className="auth-field">
+        <span className="auth-label">Confirm new password</span>
+        <input
+          className="auth-input"
+          type={showPassword ? "text" : "password"}
+          autoComplete="new-password"
+          placeholder="Repeat password"
+          value={confirm}
+          onChange={(e) => {
+            setConfirm(e.target.value);
+            setError("");
+          }}
+        />
+      </label>
+
+      {error ? (
+        <p className="auth-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="merchant-account-form-actions">
+        <button type="button" className="merchant-edit-cancel" onClick={onCancel} disabled={busy}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="cta-btn merchant-cta-accent"
+          disabled={busy}
+          onClick={() => void handleSubmit()}
+        >
+          {busy ? "Updating…" : "Update password"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function UpdatePhoneForm({
+  currentPhone,
+  onCancel,
+  onUpdated,
+}: {
+  currentPhone: string;
+  onCancel: () => void;
+  onUpdated: (phone: string) => void;
+}) {
+  const [step, setStep] = useState<PhoneStep>("edit");
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+  const [busy, setBusy] = useState(false);
+  const cooldown = useResendCooldown();
+
+  const sendCode = useCallback(async () => {
+    if (!cooldown.canResend && step === "otp") return;
+    if (!isValidPhone(phone)) {
+      setError("Enter a valid 10-digit mobile number.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setInfo("");
+    const res = await sendMerchantPhoneChangeOtp(phone);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.message);
+      if (res.retryAfter) cooldown.start(res.retryAfter);
+      return;
+    }
+    setStep("otp");
+    setCode("");
+    setInfo(res.message);
+    cooldown.start(res.retryAfter ?? RESEND_SECONDS);
+  }, [phone, cooldown, step]);
+
+  const verify = useCallback(async () => {
+    if (code.length !== OTP_LENGTH) {
+      setError(`Enter the ${OTP_LENGTH}-digit code we sent you.`);
+      return;
+    }
+    setBusy(true);
+    setError("");
+    const res = await verifyAndUpdateMerchantPhone(phone, code);
+    setBusy(false);
+    if (!res.ok) {
+      setError(res.message);
+      return;
+    }
+    toast.success("Mobile number updated");
+    onUpdated(res.phone ?? `+91${phone.replace(/\D/g, "").slice(-10)}`);
+  }, [phone, code, onUpdated]);
+
+  return (
+    <div className="merchant-account-form">
+      <div className="merchant-account-form-head">
+        <span className="merchant-account-form-icon" aria-hidden="true">
+          <Phone size={18} strokeWidth={2.2} />
+        </span>
+        <div>
+          <h4 className="merchant-account-form-title">Update phone</h4>
+          <p className="merchant-account-form-sub">
+            {step === "edit"
+              ? currentPhone
+                ? `Current: ${formatPhoneDisplay(currentPhone.replace(/\D/g, "").slice(-10))}`
+                : "Add a mobile number for alerts and verification."
+              : `Enter the code sent to ${formatPhoneDisplay(phone)}`}
+          </p>
+        </div>
+      </div>
+
+      {step === "edit" ? (
+        <label className="auth-field">
+          <span className="auth-label">New mobile number</span>
+          <div className="auth-phone-row">
+            <span className="auth-phone-prefix">+91</span>
+            <input
+              className="auth-input auth-input-phone"
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel-national"
+              maxLength={10}
+              placeholder="10-digit number"
+              value={phone}
+              onChange={(e) => {
+                setPhone(e.target.value.replace(/\D/g, "").slice(0, 10));
+                setError("");
+              }}
+            />
+          </div>
+        </label>
+      ) : (
+        <>
+          {info ? <p className="merchant-field-hint">{info}</p> : null}
+          <OtpInput value={code} length={OTP_LENGTH} onChange={setCode} disabled={busy} />
+        </>
+      )}
+
+      {error ? (
+        <p className="auth-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="merchant-account-form-actions">
+        <button
+          type="button"
+          className="merchant-edit-cancel"
+          onClick={step === "otp" ? () => setStep("edit") : onCancel}
+          disabled={busy}
+        >
+          {step === "otp" ? "Back" : "Cancel"}
+        </button>
+        {step === "edit" ? (
+          <button
+            type="button"
+            className="cta-btn merchant-cta-accent"
+            disabled={busy || phone.length !== 10}
+            onClick={() => void sendCode()}
+          >
+            {busy ? "Sending…" : "Send code"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="cta-btn merchant-cta-accent"
+            disabled={busy || code.length !== OTP_LENGTH}
+            onClick={() => void verify()}
+          >
+            {busy ? "Verifying…" : "Verify & update"}
+          </button>
+        )}
+      </div>
+
+      {step === "otp" ? (
+        <p className="auth-resend" aria-live="polite">
+          {cooldown.secondsLeft > 0 ? (
+            <>
+              Resend code in <strong>{cooldown.secondsLeft}s</strong>
+            </>
+          ) : (
+            <button type="button" className="auth-link" disabled={busy} onClick={() => void sendCode()}>
+              Resend code
+            </button>
+          )}
+        </p>
+      ) : null}
+    </div>
+  );
+}

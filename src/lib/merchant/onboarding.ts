@@ -1,7 +1,7 @@
 import type { CheckoutAccount } from "./checkout";
 import type { MerchantProduct } from "./types";
 import { BRAND_COLORS } from "./constants";
-import { DEFAULT_ACCEPT_MINUTES, DEFAULT_ESTIMATED_WAIT_MINUTES } from "./queue-settings";
+import { DEFAULT_ESTIMATED_WAIT_MINUTES } from "./queue-settings";
 import type { RewardCooldownUnit } from "@/lib/loyalty/rules";
 
 /** One rendered screen in the onboarding wizard. */
@@ -50,7 +50,6 @@ export interface OnboardingDraft {
   minPurchaseAmount: number;
   // Queue product block
   estimatedWaitMinutes: number;
-  acceptMinutes: number;
 }
 
 export function emptyOnboardingDraft(account?: CheckoutAccount | null): OnboardingDraft {
@@ -79,7 +78,6 @@ export function emptyOnboardingDraft(account?: CheckoutAccount | null): Onboardi
     rewardCooldownUnit: "days",
     minPurchaseAmount: 0,
     estimatedWaitMinutes: DEFAULT_ESTIMATED_WAIT_MINUTES,
-    acceptMinutes: DEFAULT_ACCEPT_MINUTES,
   };
 }
 
@@ -113,6 +111,5 @@ export function canAdvanceStep(step: OnboardingStep, draft: OnboardingDraft): bo
 }
 
 export const WAIT_OPTIONS = [5, 10, 15, 20, 30, 45] as const;
-export const CALL_OPTIONS = [5, 10, 15, 20, 30] as const;
 export const STAMP_OPTIONS = [5, 6, 8, 10, 12] as const;
 export const COOLDOWN_VALUE_OPTIONS = [0, 1, 2, 3, 6, 12, 24, 48] as const;

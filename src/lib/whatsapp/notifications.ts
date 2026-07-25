@@ -5,9 +5,19 @@ import { customerHubUrl } from "@/lib/app-url";
 import { maskPhone, toCanonicalPhone } from "@/lib/auth/otp/phone";
 import {
   WhatsAppTemplateName,
+  buildQueueCustomerCalledReminder1Template,
+  buildQueueCustomerCalledReminder2Template,
+  buildQueueCustomerCalledReminder3Template,
+  buildQueueCustomerCalledTemplate,
+  buildQueueCustomerSeatedTemplate,
+  buildQueueCustomerSkippedTemplate,
+  buildQueueJoinedTemplate,
   requireNonEmptyString,
   requireNumberAsString,
   WhatsAppTemplateValidationError,
+  type QueueJoinedTemplateInput,
+  type QueuePartyTemplateInput,
+  type WhatsAppTemplatePayload,
 } from "@/lib/whatsapp/templates";
 
 const APITXT_SEND_WA_URL = "https://apitxt.com/api/sendWA";
@@ -20,9 +30,10 @@ export interface SendWhatsAppTemplateInput {
    * Permanent customer hub token (`frq_…`) for the dynamic URL button.
    * Meta template: https://froq.io/c/{{1}}
    * Payload: url_buttons is a JSON string: '{"0":"<publicToken>"}'
- * (APITxT requires a string; never send a nested object).
+   * (APITxT requires a string; never send a nested object).
+   * Omit for templates with no dynamic URL button (e.g. loyaltycard_reward_claimed).
    */
-  publicToken: string;
+  publicToken?: string;
 }
 
 export interface ApitxtSendWaResponse {
@@ -49,6 +60,52 @@ function waLog(
   else console.info(payload);
 }
 
+/** Meta body {{n}} labels for loyalty (and related) templates — logged with each send. */
+function labeledBodyVariables(
+  templateName: string,
+  bodyParams: string[],
+): Record<string, string> {
+  const labelsByTemplate: Record<string, string[]> = {
+    loyaltycard_stamp_verified: [
+      "customerName",
+      "businessName",
+      "currentStamps",
+      "requiredStamps",
+      "rewardTitle",
+    ],
+    loyaltycard_reward_unlocked_no_wait_time: [
+      "customerName",
+      "businessName",
+      "currentStamps",
+      "requiredStamps",
+      "rewardTitle",
+    ],
+    loyaltycard_stamp_collected_last_wait_time: [
+      "customerName",
+      "businessName",
+      "currentStamps",
+      "requiredStamps",
+      "waitLabel",
+      "rewardTitle",
+    ],
+    loyaltycard_reward_ready_wait_time: [
+      "customerName",
+      "businessName",
+      "currentStamps",
+      "requiredStamps",
+      "rewardTitle",
+    ],
+    loyaltycard_reward_claimed: ["customerName", "rewardTitle", "businessName"],
+  };
+  const labels = labelsByTemplate[templateName];
+  const out: Record<string, string> = {};
+  bodyParams.forEach((value, i) => {
+    const key = labels?.[i] ? `{{${i + 1}}}.${labels[i]}` : `{{${i + 1}}}`;
+    out[key] = value;
+  });
+  return out;
+}
+
 /**
  * Low-level APITXT Send WhatsApp Template API.
  * POST https://apitxt.com/api/sendWA
@@ -69,14 +126,16 @@ export async function sendWhatsAppTemplate(
   }
 
   const templateName = requireNonEmptyString(input.templateName, "templateName");
-  let publicToken: string;
-  try {
-    publicToken = requireCustomerPublicToken(input.publicToken, "publicToken");
-  } catch (error) {
-    throw new WhatsAppTemplateValidationError(
-      error instanceof Error ? error.message : "Invalid publicToken.",
-      "publicToken",
-    );
+  let publicToken: string | undefined;
+  if (input.publicToken != null && input.publicToken.trim()) {
+    try {
+      publicToken = requireCustomerPublicToken(input.publicToken, "publicToken");
+    } catch (error) {
+      throw new WhatsAppTemplateValidationError(
+        error instanceof Error ? error.message : "Invalid publicToken.",
+        "publicToken",
+      );
+    }
   }
 
   const mobile = toCanonicalPhone(input.mobile);
@@ -93,24 +152,29 @@ export async function sendWhatsAppTemplate(
     );
   }
 
-  const urlButtons = { "0": publicToken };
-  const body = {
+  const bodyParams = input.bodyParams.map((p) => p.trim());
+  const urlButtons = publicToken ? { "0": publicToken } : undefined;
+  const body: Record<string, unknown> = {
     authkey,
     template_name: templateName,
     project_ref_id: projectRefId,
     mobiles: mobile,
-    body_params: input.bodyParams.map((p) => p.trim()),
+    body_params: bodyParams,
+  };
+  if (urlButtons) {
     // APITxT schema requires url_buttons as a JSON string, not a nested object.
     // Dynamic URL button {{1}} — suffix only; Meta template base is /c/{{1}}.
-    url_buttons: JSON.stringify(urlButtons),
-  };
+    body.url_buttons = JSON.stringify(urlButtons);
+  }
 
   waLog("info", "send_wa_payload", {
     templateName,
     mobile: maskPhone(mobile),
-    urlButton0: publicToken,
-    urlButtons: urlButtons,
-    resolvedHubUrl: customerHubUrl(publicToken),
+    bodyParams,
+    variables: labeledBodyVariables(templateName, bodyParams),
+    urlButton0: publicToken ?? null,
+    urlButtons: urlButtons ?? null,
+    resolvedHubUrl: publicToken ? customerHubUrl(publicToken) : null,
   });
 
   let res: Response;
@@ -165,6 +229,33 @@ export async function sendWhatsAppTemplate(
     );
   }
 
+  // APITxT often returns HTTP 200 with a business error in status/message
+  // (e.g. 203 "Template not found or not approved"). Treat those as failures.
+  const providerStatus = parsed.status;
+  const providerMessage =
+    typeof parsed.message === "string" ? parsed.message.trim() : "";
+  const providerFailed =
+    providerStatus === "error" ||
+    providerStatus === "Error" ||
+    providerStatus === 203 ||
+    providerStatus === "203" ||
+    /template not found|not approved|failed/i.test(providerMessage);
+
+  if (providerFailed) {
+    waLog("error", "send_wa_provider_error", {
+      templateName,
+      mobile: maskPhone(mobile),
+      httpStatus: res.status,
+      providerStatus,
+      providerMessage,
+      body: parsed,
+    });
+    throw new Error(
+      providerMessage ||
+        `WhatsApp template "${templateName}" was not accepted by the provider.`,
+    );
+  }
+
   waLog("info", "send_wa_ok", {
     templateName,
     mobile: maskPhone(mobile),
@@ -184,18 +275,24 @@ export interface SendStampVerifiedInput {
   businessName: string;
   currentStamps: number;
   requiredStamps: number;
+  rewardTitle: string;
   publicToken: string;
 }
 
 /**
- * loyaltycard_stamp_verified — body: name, business, currentStamps, requiredStamps
+ * loyaltycard_stamp_verified —
+ * body: name, business, currentStamps, requiredStamps, rewardTitle
  * Button URL {{1}} = publicToken → Meta: https://froq.io/c/{{1}}
  */
 export async function sendStampVerified(
   input: SendStampVerifiedInput,
 ): Promise<ApitxtSendWaResponse> {
-  const customerName = requireNonEmptyString(input.customerName, "customerName");
+  const customerName = requireNonEmptyString(
+    input.customerName.trim() || "there",
+    "customerName",
+  );
   const businessName = requireNonEmptyString(input.businessName, "businessName");
+  const rewardTitle = requireNonEmptyString(input.rewardTitle, "rewardTitle");
   const publicToken = requireCustomerPublicToken(input.publicToken, "publicToken");
   const currentStamps = requireNumberAsString(input.currentStamps, "currentStamps");
   const requiredStamps = requireNumberAsString(input.requiredStamps, "requiredStamps");
@@ -216,7 +313,13 @@ export async function sendStampVerified(
   return sendWhatsAppTemplate({
     templateName: WhatsAppTemplateName.StampVerified,
     mobile: input.mobile,
-    bodyParams: [customerName, businessName, currentStamps, requiredStamps],
+    bodyParams: [
+      customerName,
+      businessName,
+      currentStamps,
+      requiredStamps,
+      rewardTitle,
+    ],
     publicToken,
   });
 }
@@ -239,7 +342,10 @@ export interface SendRewardUnlockedInput {
 export async function sendRewardUnlocked(
   input: SendRewardUnlockedInput,
 ): Promise<ApitxtSendWaResponse> {
-  const customerName = requireNonEmptyString(input.customerName, "customerName");
+  const customerName = requireNonEmptyString(
+    input.customerName.trim() || "there",
+    "customerName",
+  );
   const businessName = requireNonEmptyString(input.businessName, "businessName");
   const rewardTitle = requireNonEmptyString(input.rewardTitle, "rewardTitle");
   const publicToken = requireCustomerPublicToken(input.publicToken, "publicToken");
@@ -274,20 +380,25 @@ export interface SendStampCollectedLastWaitTimeInput {
   currentStamps: number;
   requiredStamps: number;
   waitLabel: string;
+  rewardTitle: string;
   publicToken: string;
 }
 
 /**
  * loyaltycard_stamp_collected_last_wait_time —
- * body: name, business, current, required, waitLabel (e.g. "6 hours")
+ * body: name, business, current, required, waitLabel, rewardTitle
  * Button URL {{1}} = publicToken
  */
 export async function sendStampCollectedLastWaitTime(
   input: SendStampCollectedLastWaitTimeInput,
 ): Promise<ApitxtSendWaResponse> {
-  const customerName = requireNonEmptyString(input.customerName, "customerName");
+  const customerName = requireNonEmptyString(
+    input.customerName.trim() || "there",
+    "customerName",
+  );
   const businessName = requireNonEmptyString(input.businessName, "businessName");
   const waitLabel = requireNonEmptyString(input.waitLabel, "waitLabel");
+  const rewardTitle = requireNonEmptyString(input.rewardTitle, "rewardTitle");
   const publicToken = requireCustomerPublicToken(input.publicToken, "publicToken");
   const currentStamps = requireNumberAsString(input.currentStamps, "currentStamps");
   const requiredStamps = requireNumberAsString(input.requiredStamps, "requiredStamps");
@@ -308,7 +419,14 @@ export async function sendStampCollectedLastWaitTime(
   return sendWhatsAppTemplate({
     templateName: WhatsAppTemplateName.StampCollectedLastWaitTime,
     mobile: input.mobile,
-    bodyParams: [customerName, businessName, currentStamps, requiredStamps, waitLabel],
+    bodyParams: [
+      customerName,
+      businessName,
+      currentStamps,
+      requiredStamps,
+      waitLabel,
+      rewardTitle,
+    ],
     publicToken,
   });
 }
@@ -365,25 +483,115 @@ export interface SendRewardRedeemedInput {
   customerName: string;
   businessName: string;
   rewardTitle: string;
-  publicToken: string;
 }
 
 /**
- * reward_redeemed — body: name, business, rewardTitle
- * Button URL {{1}} = publicToken
+ * loyaltycard_reward_claimed — Utility template, no URL button.
+ * Body: {{1}} customer name, {{2}} reward name, {{3}} business name
  */
 export async function sendRewardRedeemed(
   input: SendRewardRedeemedInput,
 ): Promise<ApitxtSendWaResponse> {
-  const customerName = requireNonEmptyString(input.customerName, "customerName");
+  const customerName = requireNonEmptyString(
+    input.customerName.trim() || "there",
+    "customerName",
+  );
   const businessName = requireNonEmptyString(input.businessName, "businessName");
   const rewardTitle = requireNonEmptyString(input.rewardTitle, "rewardTitle");
-  const publicToken = requireCustomerPublicToken(input.publicToken, "publicToken");
 
   return sendWhatsAppTemplate({
-    templateName: WhatsAppTemplateName.RewardRedeemed,
+    templateName: WhatsAppTemplateName.RewardClaimed,
     mobile: input.mobile,
-    bodyParams: [customerName, businessName, rewardTitle],
+    bodyParams: [customerName, rewardTitle, businessName],
+  });
+}
+
+// ── Queue Management templates ──────────────────────────────────────────────
+
+type QueueSendBase = {
+  mobile: string;
+  publicToken: string;
+};
+
+export type SendQueueJoinedInput = QueueSendBase & QueueJoinedTemplateInput;
+export type SendQueuePartyInput = QueueSendBase & QueuePartyTemplateInput;
+
+async function sendFromQueuePayload(
+  mobile: string,
+  payload: WhatsAppTemplatePayload,
+): Promise<ApitxtSendWaResponse> {
+  const publicToken = payload.buttons?.[0]?.parameters[0];
+  if (!publicToken) {
+    throw new WhatsAppTemplateValidationError(
+      "Queue templates require a publicToken URL button.",
+      "publicToken",
+    );
+  }
+  return sendWhatsAppTemplate({
+    templateName: payload.templateName,
+    mobile,
+    bodyParams: payload.body,
     publicToken,
   });
+}
+
+/** queue_first_notify — guest joined the waitlist. */
+export async function sendQueueJoined(
+  input: SendQueueJoinedInput,
+): Promise<ApitxtSendWaResponse> {
+  return sendFromQueuePayload(input.mobile, buildQueueJoinedTemplate(input));
+}
+
+/** @deprecated Prefer sendQueueJoined — same Meta template queue_first_notify. */
+export const sendQueueFirstNotify = sendQueueJoined;
+
+/** queue_call_now — merchant called this party. */
+export async function sendQueueCustomerCalled(
+  input: SendQueuePartyInput,
+): Promise<ApitxtSendWaResponse> {
+  return sendFromQueuePayload(input.mobile, buildQueueCustomerCalledTemplate(input));
+}
+
+/** queue_reminders_1 — first call follow-up. */
+export async function sendQueueCustomerCalledReminder1(
+  input: SendQueuePartyInput,
+): Promise<ApitxtSendWaResponse> {
+  return sendFromQueuePayload(
+    input.mobile,
+    buildQueueCustomerCalledReminder1Template(input),
+  );
+}
+
+/** queue_reminder_2 — second call follow-up. */
+export async function sendQueueCustomerCalledReminder2(
+  input: SendQueuePartyInput,
+): Promise<ApitxtSendWaResponse> {
+  return sendFromQueuePayload(
+    input.mobile,
+    buildQueueCustomerCalledReminder2Template(input),
+  );
+}
+
+/** queue_reminder_3 — third call follow-up. */
+export async function sendQueueCustomerCalledReminder3(
+  input: SendQueuePartyInput,
+): Promise<ApitxtSendWaResponse> {
+  return sendFromQueuePayload(
+    input.mobile,
+    buildQueueCustomerCalledReminder3Template(input),
+  );
+}
+
+/** queue_customer_skipped — party skipped / no-show. */
+export async function sendQueueCustomerSkipped(
+  input: SendQueuePartyInput,
+): Promise<ApitxtSendWaResponse> {
+  return sendFromQueuePayload(input.mobile, buildQueueCustomerSkippedTemplate(input));
+}
+
+/** queue_seated — party seated. */
+export async function sendQueueCustomerSeated(
+  input: SendQueuePartyInput,
+): Promise<ApitxtSendWaResponse> {
+  return sendFromQueuePayload(input.mobile, buildQueueCustomerSeatedTemplate(input));
 }

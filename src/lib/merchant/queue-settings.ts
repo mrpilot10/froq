@@ -1,28 +1,24 @@
-const ACCEPT_STORAGE_KEY = "froq.queue.acceptMinutes";
 const WAIT_STORAGE_KEY = "froq.queue.estimatedWaitMinutes";
 const WAIT_SAMPLES_KEY = "froq.queue.waitSamples";
 
-const DEFAULT_ACCEPT_MINUTES = 15;
+/** Fixed arrive window after a guest is called (not merchant-configurable). */
+export const CALL_ACCEPT_MINUTES = 10;
+/** @deprecated Use CALL_ACCEPT_MINUTES */
+const DEFAULT_ACCEPT_MINUTES = CALL_ACCEPT_MINUTES;
 const DEFAULT_ESTIMATED_WAIT_MINUTES = 10;
 const REMINDER_COUNT = 3;
 const MAX_WAIT_SAMPLES = 20;
 
 export function getAcceptWindowMinutes(): number {
-  if (typeof window === "undefined") return DEFAULT_ACCEPT_MINUTES;
-  const raw = window.localStorage.getItem(ACCEPT_STORAGE_KEY);
-  const parsed = raw ? Number(raw) : NaN;
-  if (!Number.isFinite(parsed) || parsed < 3 || parsed > 120) return DEFAULT_ACCEPT_MINUTES;
-  return Math.round(parsed);
+  return CALL_ACCEPT_MINUTES;
 }
 
-export function setAcceptWindowMinutes(minutes: number) {
-  const next = Math.min(120, Math.max(3, Math.round(minutes)));
-  window.localStorage.setItem(ACCEPT_STORAGE_KEY, String(next));
-  window.dispatchEvent(new CustomEvent("froq:queue-settings", { detail: { acceptMinutes: next } }));
-  return next;
+/** @deprecated Call window is fixed at CALL_ACCEPT_MINUTES — no-op kept for old callers. */
+export function setAcceptWindowMinutes(_minutes?: number) {
+  return CALL_ACCEPT_MINUTES;
 }
 
-export function acceptWindowMs(minutes = getAcceptWindowMinutes()) {
+export function acceptWindowMs(minutes = CALL_ACCEPT_MINUTES) {
   return minutes * 60_000;
 }
 

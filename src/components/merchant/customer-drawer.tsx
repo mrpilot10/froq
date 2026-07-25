@@ -5,15 +5,25 @@ import { Ban, Calendar, Mail, Phone, ShieldCheck, Stamp, Trash2 } from "lucide-r
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { formatPhoneDisplay } from "@/lib/auth/format";
 import { customerLtv, formatCurrency } from "@/lib/merchant/ltv";
-import type { MerchantCustomer } from "@/lib/merchant/types";
+import {
+  canModerateCustomers,
+  canViewCustomerData,
+} from "@/lib/merchant/roles";
+import type { MemberRole, MerchantCustomer } from "@/lib/merchant/types";
+import { OfferStampOtp, type RequestOfferStampOtpResult } from "./offer-stamp-otp";
 
 interface CustomerDrawerProps {
   customer: MerchantCustomer | null;
   avgOrderValue: number;
+  role: MemberRole;
   onClose: () => void;
   onBan: (id: string) => void;
   onDelete: (id: string) => void;
-  onOfferStamp: (id: string) => Promise<boolean>;
+  onRequestOfferStampOtp: (customerId: string) => Promise<RequestOfferStampOtpResult>;
+  onConfirmOfferStamp: (
+    customerId: string,
+    code: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 type ConfirmAction = "ban" | "delete" | null;
@@ -34,13 +44,17 @@ function getInitials(name: string) {
 export function CustomerDrawer({
   customer,
   avgOrderValue,
+  role,
   onClose,
   onBan,
   onDelete,
-  onOfferStamp,
+  onRequestOfferStampOtp,
+  onConfirmOfferStamp,
 }: CustomerDrawerProps) {
   const [confirm, setConfirm] = useState<ConfirmAction>(null);
   const [offering, setOffering] = useState(false);
+  const showData = canViewCustomerData(role);
+  const canModerate = canModerateCustomers(role);
 
   useEffect(() => {
     setConfirm(null);
@@ -75,68 +89,76 @@ export function CustomerDrawer({
               <h3 id="customer-drawer-name" className="merchant-drawer-name">
                 {customer.name}
               </h3>
-              <span className={`merchant-badge ${badge.className}`}>{badge.label}</span>
+              {showData ? (
+                <span className={`merchant-badge ${badge.className}`}>{badge.label}</span>
+              ) : (
+                <span className="merchant-list-sub">Offer a stamp with OTP</span>
+              )}
             </div>
           </div>
 
-          <div className="merchant-drawer-stats">
-            <div className="merchant-drawer-stat merchant-drawer-stat--accent">
-              <span className="merchant-drawer-stat-label">Lifetime value</span>
-              <span className="merchant-drawer-stat-value">
-                {formatCurrency(customerLtv(customer, avgOrderValue))}
-              </span>
-            </div>
-            <div className="merchant-drawer-stat">
-              <span className="merchant-drawer-stat-label">Visits</span>
-              <span className="merchant-drawer-stat-value">{customer.lifetimeVisits}</span>
-            </div>
-            <div className="merchant-drawer-stat">
-              <span className="merchant-drawer-stat-label">Stamps</span>
-              <span className="merchant-drawer-stat-value">
-                {customer.stamps}/{customer.totalStamps}
-              </span>
-            </div>
-            <div className="merchant-drawer-stat">
-              <span className="merchant-drawer-stat-label">Rewards claimed</span>
-              <span className="merchant-drawer-stat-value">{customer.rewardsClaimed}</span>
-            </div>
-          </div>
-
-          <div className="merchant-drawer-rows">
-            <div className="profile-row">
-              <div className="profile-row-icon">
-                <Phone size={18} strokeWidth={2.2} />
-              </div>
-              <div className="profile-row-copy">
-                <div className="profile-row-label">Mobile</div>
-                <div className="profile-row-value">{formatPhoneDisplay(customer.phone)}</div>
-              </div>
-            </div>
-
-            {customer.email && (
-              <div className="profile-row">
-                <div className="profile-row-icon">
-                  <Mail size={18} strokeWidth={2.2} />
+          {showData ? (
+            <>
+              <div className="merchant-drawer-stats">
+                <div className="merchant-drawer-stat merchant-drawer-stat--accent">
+                  <span className="merchant-drawer-stat-label">Lifetime value</span>
+                  <span className="merchant-drawer-stat-value">
+                    {formatCurrency(customerLtv(customer, avgOrderValue))}
+                  </span>
                 </div>
-                <div className="profile-row-copy">
-                  <div className="profile-row-label">Email</div>
-                  <div className="profile-row-value">{customer.email}</div>
+                <div className="merchant-drawer-stat">
+                  <span className="merchant-drawer-stat-label">Visits</span>
+                  <span className="merchant-drawer-stat-value">{customer.lifetimeVisits}</span>
+                </div>
+                <div className="merchant-drawer-stat">
+                  <span className="merchant-drawer-stat-label">Stamps</span>
+                  <span className="merchant-drawer-stat-value">
+                    {customer.stamps}/{customer.totalStamps}
+                  </span>
+                </div>
+                <div className="merchant-drawer-stat">
+                  <span className="merchant-drawer-stat-label">Rewards claimed</span>
+                  <span className="merchant-drawer-stat-value">{customer.rewardsClaimed}</span>
                 </div>
               </div>
-            )}
 
-            <div className="profile-row">
-              <div className="profile-row-icon">
-                <Calendar size={18} strokeWidth={2.2} />
-              </div>
-              <div className="profile-row-copy">
-                <div className="profile-row-label">Member since</div>
-                <div className="profile-row-value">{customer.memberSince}</div>
-              </div>
-            </div>
-          </div>
+              <div className="merchant-drawer-rows">
+                <div className="profile-row">
+                  <div className="profile-row-icon">
+                    <Phone size={18} strokeWidth={2.2} />
+                  </div>
+                  <div className="profile-row-copy">
+                    <div className="profile-row-label">Mobile</div>
+                    <div className="profile-row-value">{formatPhoneDisplay(customer.phone)}</div>
+                  </div>
+                </div>
 
-          {confirm ? (
+                {customer.email ? (
+                  <div className="profile-row">
+                    <div className="profile-row-icon">
+                      <Mail size={18} strokeWidth={2.2} />
+                    </div>
+                    <div className="profile-row-copy">
+                      <div className="profile-row-label">Email</div>
+                      <div className="profile-row-value">{customer.email}</div>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="profile-row">
+                  <div className="profile-row-icon">
+                    <Calendar size={18} strokeWidth={2.2} />
+                  </div>
+                  <div className="profile-row-copy">
+                    <div className="profile-row-label">Member since</div>
+                    <div className="profile-row-value">{customer.memberSince}</div>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {confirm && canModerate ? (
             <div className="merchant-confirm">
               <p className="merchant-confirm-text">
                 {confirm === "delete"
@@ -164,12 +186,24 @@ export function CustomerDrawer({
                 </button>
               </div>
             </div>
+          ) : offering && canOfferStamp ? (
+            <OfferStampOtp
+              customerName={customer.name}
+              autoSend
+              onRequestCode={() => onRequestOfferStampOtp(customer.id)}
+              onConfirm={async (code) => {
+                const result = await onConfirmOfferStamp(customer.id, code);
+                if (result.ok) setOffering(false);
+                return result;
+              }}
+              onCancel={() => setOffering(false)}
+            />
           ) : (
-            <div className="merchant-drawer-actions">
+            <div className="merchant-drawer-actions merchant-drawer-actions--stack">
               <button
                 type="button"
-                className="merchant-action-btn merchant-action-btn--approve"
-                disabled={!canOfferStamp || offering}
+                className="merchant-action-btn merchant-action-btn--approve merchant-action-btn--block"
+                disabled={!canOfferStamp}
                 title={
                   customer.status === "reward_ready"
                     ? "Redeem their reward before offering another stamp"
@@ -179,42 +213,42 @@ export function CustomerDrawer({
                         ? "Unban this customer first"
                         : undefined
                 }
-                onClick={async () => {
-                  setOffering(true);
-                  await onOfferStamp(customer.id);
-                  setOffering(false);
-                }}
+                onClick={() => setOffering(true)}
               >
                 <Stamp size={16} strokeWidth={2.3} />
-                {offering ? "Offering…" : "Offer stamp"}
+                Offer stamp
               </button>
-              {customer.banned ? (
-                <button
-                  type="button"
-                  className="merchant-action-btn merchant-action-btn--reject"
-                  onClick={() => onBan(customer.id)}
-                >
-                  <ShieldCheck size={16} strokeWidth={2.3} />
-                  Unban
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="merchant-action-btn merchant-action-btn--reject"
-                  onClick={() => setConfirm("ban")}
-                >
-                  <Ban size={16} strokeWidth={2.3} />
-                  Ban
-                </button>
-              )}
-              <button
-                type="button"
-                className="merchant-action-btn merchant-action-btn--danger"
-                onClick={() => setConfirm("delete")}
-              >
-                <Trash2 size={16} strokeWidth={2.3} />
-                Delete
-              </button>
+              {canModerate ? (
+                <div className="merchant-drawer-actions">
+                  {customer.banned ? (
+                    <button
+                      type="button"
+                      className="merchant-action-btn merchant-action-btn--reject"
+                      onClick={() => onBan(customer.id)}
+                    >
+                      <ShieldCheck size={16} strokeWidth={2.3} />
+                      Unban
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="merchant-action-btn merchant-action-btn--reject"
+                      onClick={() => setConfirm("ban")}
+                    >
+                      <Ban size={16} strokeWidth={2.3} />
+                      Ban
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="merchant-action-btn merchant-action-btn--danger"
+                    onClick={() => setConfirm("delete")}
+                  >
+                    <Trash2 size={16} strokeWidth={2.3} />
+                    Delete
+                  </button>
+                </div>
+              ) : null}
             </div>
           )}
         </div>

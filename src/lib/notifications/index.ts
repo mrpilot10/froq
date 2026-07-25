@@ -8,9 +8,13 @@
 export { sendCustomerNotification } from "./dispatcher";
 export type { SendCustomerNotificationResult } from "./dispatcher";
 
+export { processQueueCallReminders } from "./queue-call-reminders";
+export type { QueueCallReminderResult } from "./queue-call-reminders";
+
 export {
   CustomerNotificationTemplate,
   shouldSendWhatsApp,
+  isQueueNotificationTemplate,
   buildSmsBody,
   type NotifiableCustomer,
   type NotificationChannel,

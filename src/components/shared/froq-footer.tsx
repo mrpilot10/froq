@@ -1,3 +1,4 @@
+import { FROQ_LOGO_SRC } from "@/lib/brand";
 import Image from "next/image";
 
 interface FroqFooterProps {
@@ -11,7 +12,7 @@ export function FroqFooter({ className }: FroqFooterProps) {
         Powered by{" "}
         <span className="froq-footer-brand">
           <Image
-            src="/froq-logo.png"
+            src={FROQ_LOGO_SRC}
             alt="Froq"
             width={14}
             height={14}

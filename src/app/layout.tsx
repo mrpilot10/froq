@@ -3,6 +3,8 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import { Toaster } from "sonner";
 import { KeyboardAware } from "@/components/shared/keyboard-aware";
+import { PwaBoot } from "@/components/shared/pwa-boot";
+import { FROQ_LOGO_192_SRC, FROQ_LOGO_512_SRC, FROQ_LOGO_SRC } from "@/lib/brand";
 import "./globals.css";
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -24,11 +26,11 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/froq-logo.png", type: "image/png" },
-      { url: "/froq-logo-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/froq-logo-512.png", sizes: "512x512", type: "image/png" },
+      { url: FROQ_LOGO_SRC, type: "image/png" },
+      { url: FROQ_LOGO_192_SRC, sizes: "192x192", type: "image/png" },
+      { url: FROQ_LOGO_512_SRC, sizes: "512x512", type: "image/png" },
     ],
-    apple: [{ url: "/froq-logo-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [{ url: FROQ_LOGO_192_SRC, sizes: "192x192", type: "image/png" }],
   },
 };
 
@@ -49,36 +51,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${plusJakarta.variable} h-full`}>
-      <head>
-        {/*
-          Capture beforeinstallprompt as early as possible. On Android Chrome this
-          event often fires before React mounts its listeners, so without this the
-          native install prompt is lost and we fall back to manual steps.
-        */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              window.__froqInstallPrompt = null;
-              window.addEventListener('beforeinstallprompt', function (e) {
-                e.preventDefault();
-                window.__froqInstallPrompt = e;
-                window.dispatchEvent(new Event('froq:installprompt'));
-              });
-              window.addEventListener('appinstalled', function () {
-                window.__froqInstallPrompt = null;
-              });
-              // Register the service worker on load so Android treats the app as
-              // installable (otherwise beforeinstallprompt never fires).
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function () {
-                  navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {});
-                });
-              }
-            `,
-          }}
-        />
-      </head>
       <body className="min-h-full antialiased">
+        <PwaBoot />
         {children}
         <KeyboardAware />
         <Toaster

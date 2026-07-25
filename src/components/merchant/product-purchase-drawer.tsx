@@ -8,6 +8,7 @@ import { getDefaultPlanForProduct } from "@/lib/merchant/pricing";
 import { purchaseProduct } from "@/app/merchant/actions";
 import type { MerchantProduct } from "@/lib/merchant/types";
 import { PRODUCTS } from "@/lib/merchant/nav";
+import { FeatureText } from "@/components/landing/feature-text";
 
 const CASHFREE_MODE =
   process.env.NEXT_PUBLIC_CASHFREE_ENV === "production" ? "production" : "sandbox";
@@ -106,7 +107,7 @@ export function ProductPurchaseDrawer({
           {plan.features.map((feature) => (
             <li key={feature}>
               <Check size={14} strokeWidth={2.5} aria-hidden />
-              {feature}
+              <FeatureText text={feature} />
             </li>
           ))}
         </ul>
@@ -138,7 +139,7 @@ export function ProductPurchaseDrawer({
         </button>
         <p className="merchant-auth-note">
           <Lock size={13} strokeWidth={2.2} />
-          Secure checkout · Cancel anytime
+          Secure checkout · 7-day money-back on first subscription
         </p>
       </div>
     </BottomSheet>

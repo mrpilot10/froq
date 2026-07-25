@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/reward-wait-unlock",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/queue-call-reminders",
+      "schedule": "* * * * *"
     }
   ]
 }

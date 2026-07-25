@@ -123,8 +123,7 @@ export function toMember(row: MerchantMemberRow): MerchantMember {
     userId: row.user_id,
     name: row.name ?? "",
     email: row.email ?? "",
-    // Managers were removed; treat any legacy manager as staff.
-    role: row.role === "owner" ? "owner" : "staff",
+    role: row.role === "owner" ? "owner" : row.role === "manager" ? "manager" : "staff",
     branchIds:
       row.branch_ids && row.branch_ids.length > 0
         ? row.branch_ids

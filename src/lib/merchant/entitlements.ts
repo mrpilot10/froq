@@ -1,5 +1,6 @@
 import type { MerchantProductKind, ProductStatus } from "@/lib/supabase/database.types";
 import type { MerchantProduct } from "./types";
+import { isFreePlanId } from "./pricing";
 
 /**
  * Live per-merchant entitlement for a single product. Combines the purchase
@@ -11,6 +12,9 @@ export interface ProductEntitlement {
   planId: string | null;
   status: ProductStatus;
   onboarded: boolean;
+  pendingPlanId: string | null;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: string | null;
 }
 
 export type Entitlements = Record<MerchantProduct, ProductEntitlement | null>;
@@ -35,6 +39,15 @@ export function productNeedsOnboarding(
   return Boolean(entitlement && entitlement.status === "active" && !entitlement.onboarded);
 }
 
+/** Paid plan that is still in its current billing period. */
+export function isOnPaidPlan(entitlement: ProductEntitlement | null | undefined): boolean {
+  return Boolean(
+    entitlement &&
+      entitlement.status === "active" &&
+      !isFreePlanId(entitlement.planId),
+  );
+}
+
 /** Build the entitlements map from raw `merchant_products` rows. */
 export function entitlementsFromRows(
   rows: Array<{
@@ -42,6 +55,9 @@ export function entitlementsFromRows(
     plan_id: string | null;
     status: ProductStatus;
     onboarded_at: string | null;
+    pending_plan_id?: string | null;
+    cancel_at_period_end?: boolean | null;
+    current_period_end?: string | null;
   }>,
 ): Entitlements {
   const map: Entitlements = { loyalty: null, queue: null };
@@ -51,6 +67,9 @@ export function entitlementsFromRows(
       planId: row.plan_id,
       status: row.status,
       onboarded: row.onboarded_at != null,
+      pendingPlanId: row.pending_plan_id ?? null,
+      cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
+      currentPeriodEnd: row.current_period_end ?? null,
     };
   }
   return map;

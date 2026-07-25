@@ -8,9 +8,13 @@ export type MerchantProductKind = "loyalty" | "queue";
 export type ProductStatus = "active" | "past_due" | "canceled";
 export type MemberRole = "owner" | "manager" | "staff";
 export type RewardCooldownUnit = "hours" | "days" | "weeks";
+export type QueueCallStatus = "called" | "seated" | "skipped" | "left";
+export type QueueSessionStatus = "live" | "paused" | "ended";
+export type QueueEntryStatus = "waiting" | "called" | "seated" | "left";
+export type QueueEntryKind = "walkin" | "reservation";
 
-/** App-facing roles. Managers are treated as staff. */
-export type AppMemberRole = "owner" | "staff";
+/** App-facing roles used across merchant UI + actions. */
+export type AppMemberRole = "owner" | "manager" | "staff";
 
 export interface BranchRow {
   id: string;
@@ -86,6 +90,9 @@ export interface MerchantProductRow {
   status: ProductStatus;
   purchased_at: string;
   onboarded_at: string | null;
+  pending_plan_id: string | null;
+  cancel_at_period_end: boolean;
+  current_period_end: string | null;
 }
 
 export interface CustomerRow {
@@ -105,6 +112,65 @@ export interface CustomerRow {
   whatsapp_available: boolean;
   /** Preferred outbound channel for customer notifications. */
   preferred_notification_channel: "sms" | "whatsapp";
+}
+
+export interface QueueSessionRow {
+  id: string;
+  merchant_id: string;
+  branch_id: string | null;
+  number: number;
+  status: QueueSessionStatus;
+  started_at: string;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QueueEntryRow {
+  id: string;
+  merchant_id: string;
+  session_id: string;
+  branch_id: string | null;
+  customer_id: string | null;
+  name: string;
+  phone: string;
+  email: string | null;
+  party_size: number;
+  kind: QueueEntryKind;
+  status: QueueEntryStatus;
+  reservation_time: string | null;
+  joined_at: string;
+  called_at: string | null;
+  accept_by: string | null;
+  seated_at: string | null;
+  left_at: string | null;
+  notified_joined_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Tracks a called queue party for WhatsApp reminder cron (+3 / +7 / +9 min). */
+export interface QueueCallJobRow {
+  id: string;
+  merchant_id: string;
+  branch_id: string | null;
+  client_entry_id: string;
+  customer_id: string | null;
+  customer_name: string;
+  customer_phone: string;
+  party_size: number;
+  status: QueueCallStatus;
+  called_at: string;
+  called_notified_at: string | null;
+  reminder_1_scheduled_at: string;
+  reminder_2_scheduled_at: string;
+  reminder_3_scheduled_at: string;
+  reminder_1_sent_at: string | null;
+  reminder_2_sent_at: string | null;
+  reminder_3_sent_at: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface LoyaltyCardRow {
@@ -198,7 +264,17 @@ export interface Database {
       };
       merchant_products: {
         Row: MerchantProductRow;
-        Insert: Insert<MerchantProductRow, "id" | "purchased_at" | "status" | "plan_id" | "onboarded_at">;
+        Insert: Insert<
+          MerchantProductRow,
+          | "id"
+          | "purchased_at"
+          | "status"
+          | "plan_id"
+          | "onboarded_at"
+          | "pending_plan_id"
+          | "cancel_at_period_end"
+          | "current_period_end"
+        >;
         Update: Partial<MerchantProductRow>;
         Relationships: [];
       };
@@ -274,6 +350,58 @@ export interface Database {
         Row: PushSubscriptionRow;
         Insert: Insert<PushSubscriptionRow, "id" | "created_at">;
         Update: Partial<PushSubscriptionRow>;
+        Relationships: [];
+      };
+      queue_call_jobs: {
+        Row: QueueCallJobRow;
+        Insert: Insert<
+          QueueCallJobRow,
+          | "id"
+          | "created_at"
+          | "updated_at"
+          | "status"
+          | "called_at"
+          | "called_notified_at"
+          | "reminder_1_sent_at"
+          | "reminder_2_sent_at"
+          | "reminder_3_sent_at"
+          | "resolved_at"
+          | "customer_id"
+          | "branch_id"
+        >;
+        Update: Partial<QueueCallJobRow>;
+        Relationships: [];
+      };
+      queue_sessions: {
+        Row: QueueSessionRow;
+        Insert: Insert<
+          QueueSessionRow,
+          "id" | "created_at" | "updated_at" | "status" | "started_at" | "ended_at" | "branch_id"
+        >;
+        Update: Partial<QueueSessionRow>;
+        Relationships: [];
+      };
+      queue_entries: {
+        Row: QueueEntryRow;
+        Insert: Insert<
+          QueueEntryRow,
+          | "id"
+          | "created_at"
+          | "updated_at"
+          | "status"
+          | "kind"
+          | "joined_at"
+          | "called_at"
+          | "accept_by"
+          | "seated_at"
+          | "left_at"
+          | "notified_joined_at"
+          | "customer_id"
+          | "branch_id"
+          | "email"
+          | "reservation_time"
+        >;
+        Update: Partial<QueueEntryRow>;
         Relationships: [];
       };
     };

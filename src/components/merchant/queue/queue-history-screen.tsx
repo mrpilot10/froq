@@ -1,18 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { CalendarClock, ChevronDown, Clock3, History, Users } from "lucide-react";
-
-interface SessionRecord {
-  id: string;
-  number: number;
-  startedAtMs: number;
-  endedAtMs: number;
-  served: number;
-  left: number;
-  avgWait: number;
-  longestWait: number;
-}
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CalendarClock, ChevronDown, Clock3, History, Radio, Users } from "lucide-react";
+import { useMerchantWorkspace } from "@/components/merchant/merchant-workspace-context";
+import { joinUrlFor } from "@/components/merchant/use-merchant-qr";
+import {
+  ensureQueueDataEpoch,
+  loadQueueHistoryView,
+  type QueueSessionRecord,
+} from "@/lib/merchant/queue-session-storage";
 
 type RangeKey = "all" | "7d" | "30d" | "6m";
 type SortKey = "newest" | "oldest" | "served" | "wait";
@@ -33,33 +29,6 @@ const SORTS: { id: SortKey; label: string }[] = [
   { id: "wait", label: "Longest wait" },
 ];
 
-// Demo history — spread across ~6 months so range filters are meaningful.
-function buildSessions(): SessionRecord[] {
-  const dayOffsets = [0, 1, 2, 4, 6, 9, 13, 18, 24, 33, 45, 60, 80, 110, 150, 178];
-  const now = Date.now();
-  return dayOffsets.map((offset, i) => {
-    const day = new Date(now - offset * DAY_MS);
-    const startedAt = new Date(day);
-    startedAt.setHours(9, 2, 0, 0);
-    const endedAt = new Date(day);
-    endedAt.setHours(21 + (i % 2), 41 - ((i * 7) % 40), 0, 0);
-    const served = 22 + ((i * 9) % 34);
-    const left = (i * 3) % 7;
-    const avgWait = 8 + ((i * 5) % 14);
-    const longestWait = avgWait + 9 + ((i * 4) % 12);
-    return {
-      id: `s-${i}`,
-      number: 128 - i,
-      startedAtMs: startedAt.getTime(),
-      endedAtMs: endedAt.getTime(),
-      served,
-      left,
-      avgWait,
-      longestWait,
-    };
-  });
-}
-
 function formatClock(ms: number) {
   return new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
@@ -73,10 +42,48 @@ function formatDate(ms: number) {
 }
 
 export function QueueHistoryScreen() {
+  const { profile, activeBranchId } = useMerchantWorkspace();
   const [range, setRange] = useState<RangeKey>("30d");
   const [sort, setSort] = useState<SortKey>("newest");
-  const [now] = useState(() => Date.now());
-  const allSessions = useMemo(() => buildSessions(), []);
+  const [now, setNow] = useState(() => Date.now());
+  const [allSessions, setAllSessions] = useState<QueueSessionRecord[]>([]);
+  const [live, setLive] = useState<{
+    number: number;
+    startedAtMs: number;
+    state: "live" | "paused";
+  } | null>(null);
+
+  const queueUrl = useMemo(() => joinUrlFor(profile, "queue"), [profile]);
+
+  const refresh = useCallback(() => {
+    const view = loadQueueHistoryView(queueUrl, activeBranchId);
+    setAllSessions(view.sessions);
+    setLive(view.live);
+    setNow(Date.now());
+  }, [queueUrl, activeBranchId]);
+
+  useEffect(() => {
+    ensureQueueDataEpoch();
+    refresh();
+    const onHistory = () => refresh();
+    const onStorage = (event: StorageEvent) => {
+      if (!event.key) return;
+      if (
+        event.key.startsWith("froq.queue.history:") ||
+        event.key.startsWith("froq.queue.session:")
+      ) {
+        refresh();
+      }
+    };
+    window.addEventListener("froq:queue-history", onHistory);
+    window.addEventListener("focus", onHistory);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("froq:queue-history", onHistory);
+      window.removeEventListener("focus", onHistory);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [refresh]);
 
   const sessions = useMemo(() => {
     const days = RANGES.find((r) => r.id === range)?.days ?? null;
@@ -112,8 +119,35 @@ export function QueueHistoryScreen() {
     <div className="tab-screen">
       <div className="tab-head">
         <h2 className="tab-title">History</h2>
-        <p className="tab-sub">Every archived queue session, with wait times and outcomes</p>
+        <p className="tab-sub">Archived queue sessions from this branch, with wait times and outcomes</p>
       </div>
+
+      {live && (
+        <div className="panel-card qhist-live-card">
+          <div className="qhist-card-head">
+            <div className="qhist-card-copy">
+              <div className="qhist-card-title">
+                Session #{live.number}
+                <span
+                  className={`queue-state-badge queue-state-badge--${
+                    live.state === "live" ? "live" : "paused"
+                  }`}
+                >
+                  <span className="queue-state-dot" aria-hidden="true" />
+                  {live.state === "live" ? "Live now" : "Paused"}
+                </span>
+              </div>
+              <div className="qhist-card-sub">
+                Started {formatDate(live.startedAtMs)} · {formatClock(live.startedAtMs)}
+              </div>
+            </div>
+            <span className="qhist-served-pill qhist-served-pill--live">
+              <Radio size={13} strokeWidth={2.4} />
+              In progress
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="qhist-summary">
         <div className="qhist-summary-stat">
@@ -181,9 +215,13 @@ export function QueueHistoryScreen() {
           <div className="merchant-empty-icon">
             <History size={24} strokeWidth={2.2} />
           </div>
-          <p className="merchant-empty-title">No sessions in this range</p>
+          <p className="merchant-empty-title">
+            {live ? "No archived sessions yet" : "No sessions in this range"}
+          </p>
           <p className="merchant-empty-sub">
-            Try a wider date range to see earlier queue sessions.
+            {live
+              ? "End the current queue to archive today’s session here."
+              : "Start and end a live queue to build your session history."}
           </p>
         </div>
       ) : (

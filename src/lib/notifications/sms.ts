@@ -28,6 +28,14 @@ function smsLog(
   else console.info(payload);
 }
 
+export function isTransactionalSmsConfigured(): boolean {
+  return Boolean(
+    process.env.APITXT_AUTH_KEY?.trim() &&
+      process.env.APITXT_SMS_SENDER?.trim() &&
+      process.env.APITXT_SMS_PE_ID?.trim(),
+  );
+}
+
 /**
  * Sends a transactional SMS via APITxT sendMsg.
  * Requires APITXT_AUTH_KEY + APITXT_SMS_SENDER + APITXT_SMS_PE_ID.

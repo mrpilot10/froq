@@ -7,6 +7,7 @@ import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
 import { fileToLogoDataUrl } from "@/lib/merchant/image";
 import type { MerchantEditSection, MerchantProfile } from "@/lib/merchant/types";
+import { AccountSettingsPanel } from "./account-settings-panel";
 import { DeviceSetupRows, useDeviceSetup } from "./device-setup-rows";
 
 interface MerchantProfileEditScreenProps {
@@ -472,25 +473,30 @@ export function MerchantProfileEditScreen({
         )}
 
         {section === "account" && (
-          <>
-            <ReadOnlyField label="Email" value={profile.email || "Not set"} />
-            <ReadOnlyField label="Phone" value={profile.phone || "Not set"} />
-            <p className="merchant-field-hint">
-              Your email is used to sign in to the merchant dashboard. Contact Froq support to
-              update account credentials.
-            </p>
-          </>
+          <AccountSettingsPanel
+            email={profile.email}
+            phone={profile.phone}
+            onPhoneUpdated={(phone) => onChange({ ...profile, phone })}
+          />
         )}
           </div>
 
-          <div className="merchant-edit-sheet-actions">
-            <button type="button" className="merchant-edit-cancel" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="button" className="cta-btn merchant-cta-accent" onClick={onSave}>
-              Save changes
-            </button>
-          </div>
+          {section === "account" ? (
+            <div className="merchant-edit-sheet-actions">
+              <button type="button" className="cta-btn merchant-cta-accent" onClick={onClose}>
+                Done
+              </button>
+            </div>
+          ) : (
+            <div className="merchant-edit-sheet-actions">
+              <button type="button" className="merchant-edit-cancel" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="button" className="cta-btn merchant-cta-accent" onClick={onSave}>
+                Save changes
+              </button>
+            </div>
+          )}
         </div>
       )}
     </BottomSheet>
