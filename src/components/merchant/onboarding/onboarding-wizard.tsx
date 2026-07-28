@@ -6,8 +6,8 @@ import { useRef, useState, type ChangeEvent } from "react";
 import Image from "next/image";
 import {
   ArrowRight,
+  CalendarCheck,
   Check,
-  Clock3,
   Gift,
   ImagePlus,
   Link2,
@@ -20,6 +20,7 @@ import {
   Timer,
   TrendingUp,
   Trash2,
+  Users,
   Zap,
 } from "lucide-react";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
@@ -36,6 +37,7 @@ import {
   type OnboardingStep,
 } from "@/lib/merchant/onboarding";
 import { setInitialEstimatedWaitMinutes } from "@/lib/merchant/queue-settings";
+import { formatHoursSummary } from "@/lib/merchant/queue-hours";
 import {
   completeProductOnboarding,
   createMerchant,
@@ -44,12 +46,25 @@ import {
 import type { CheckoutAccount } from "@/lib/merchant/checkout";
 import type { MerchantProduct } from "@/lib/merchant/types";
 import { PRODUCTS } from "@/lib/merchant/nav";
+import { QueueHoursFields } from "@/components/merchant/queue/queue-hours-fields";
+import { ReservationSettingsFields } from "@/components/merchant/reservations/reservation-settings-fields";
+import { DEFAULT_RESERVATION_SETTINGS } from "@/lib/merchant/reservations";
 import {
   REWARD_COOLDOWN_UNITS,
   formatRewardCooldown,
   type RewardCooldownUnit,
 } from "@/lib/loyalty/rules";
 import { OnboardingVerifyStep } from "./onboarding-verify-step";
+
+function reservationProfilePatch(draft: OnboardingDraft) {
+  return {
+    reservationMaxPartySize: draft.reservationMaxPartySize,
+    reservationIntervalMinutes: draft.reservationIntervalMinutes,
+    reservationOpenTime: draft.reservationOpenTime,
+    reservationCloseTime: draft.reservationCloseTime,
+    reservationAllowSameDay: draft.reservationAllowSameDay,
+  };
+}
 
 interface OnboardingWizardProps {
   mode: OnboardingMode;
@@ -78,7 +93,12 @@ const STEP_HEAD: Record<
   color: { Icon: Palette, title: "Brand color", desc: "Pick the color customers see." },
   contact: { Icon: Link2, title: "Address & links", desc: "Where to find you online and offline." },
   reward: { Icon: Gift, title: "Your reward", desc: "Set up the reward customers earn." },
-  queue: { Icon: Clock3, title: "Queue setup", desc: "Set your wait-time defaults." },
+  queue: { Icon: Users, title: "Queue setup", desc: "Wait times, store hours, and auto sessions." },
+  reservation: {
+    Icon: CalendarCheck,
+    title: "Reservations setup",
+    desc: "Booking hours, slot spacing, and party size.",
+  },
   outro: { Icon: PartyPopper, title: "You're all set!", desc: "" },
 };
 
@@ -150,13 +170,36 @@ export function OnboardingWizard({
       if (!res.ok) return res;
       if (product === "queue") {
         setInitialEstimatedWaitMinutes(draft.estimatedWaitMinutes);
+        await updateMerchantProfile({
+          queueOpenTime: draft.queueOpenTime,
+          queueCloseTime: draft.queueCloseTime,
+          queueHoursTimezone: "Asia/Kolkata",
+          queueOpenDays: draft.queueOpenDays,
+          queueAutoStart: draft.queueAutoSessions,
+          queueAutoClose: draft.queueAutoSessions,
+        });
+      }
+      if (product === "reservation") {
+        await updateMerchantProfile(reservationProfilePatch(draft));
       }
       return res;
     }
 
     // Product-only onboarding for an existing store.
-    if (product === "queue") {
+    if (product === "reservation") {
+      const saved = await updateMerchantProfile(reservationProfilePatch(draft));
+      if (!saved.ok) return saved;
+    } else if (product === "queue") {
       setInitialEstimatedWaitMinutes(draft.estimatedWaitMinutes);
+      const saved = await updateMerchantProfile({
+        queueOpenTime: draft.queueOpenTime,
+        queueCloseTime: draft.queueCloseTime,
+        queueHoursTimezone: "Asia/Kolkata",
+        queueOpenDays: draft.queueOpenDays,
+        queueAutoStart: draft.queueAutoSessions,
+        queueAutoClose: draft.queueAutoSessions,
+      });
+      if (!saved.ok) return saved;
     } else {
       const saved = await updateMerchantProfile({
         rewardTitle: draft.rewardTitle.trim() || "Free reward",
@@ -277,7 +320,18 @@ export function OnboardingWizard({
                 {product === "loyalty" ? (
                   <SummaryRow label="Reward" value={draft.rewardName.trim() || "—"} />
                 ) : (
-                  <SummaryRow label="Est. wait" value={`${draft.estimatedWaitMinutes} min / party`} />
+                  <>
+                    <SummaryRow label="Est. wait" value={`${draft.estimatedWaitMinutes} min / party`} />
+                    <SummaryRow
+                      label="Hours"
+                      value={formatHoursSummary({
+                        openTime: draft.queueOpenTime,
+                        closeTime: draft.queueCloseTime,
+                        openDays: draft.queueOpenDays,
+                        autoSessions: draft.queueAutoSessions,
+                      })}
+                    />
+                  </>
                 )}
               </div>
             )}
@@ -610,6 +664,64 @@ export function OnboardingWizard({
                     We&apos;ll refine this automatically from real seating times.
                   </span>
                 </label>
+
+                <div className="wizard-queue-hours">
+                  <span className="auth-label">Store timings</span>
+                  <span className="merchant-field-hint" style={{ display: "block", marginBottom: 12 }}>
+                    Set your open hours. Auto start &amp; close is recommended so the queue runs itself.
+                  </span>
+                  <QueueHoursFields
+                    compact
+                    value={{
+                      openTime: draft.queueOpenTime,
+                      closeTime: draft.queueCloseTime,
+                      openDays: draft.queueOpenDays,
+                      autoSessions: draft.queueAutoSessions,
+                    }}
+                    onChange={(hours) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        queueOpenTime: hours.openTime,
+                        queueCloseTime: hours.closeTime,
+                        queueOpenDays: hours.openDays,
+                        queueAutoSessions: hours.autoSessions,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            {current === "reservation" && (
+              <div className="panel-card merchant-edit-panel">
+                <div className="wizard-queue-hours">
+                  <span className="auth-label">Booking window</span>
+                  <span className="merchant-field-hint" style={{ display: "block", marginBottom: 12 }}>
+                    Guests can only request slots inside these hours. You can fine-tune notes,
+                    reminders and auto-decline later in settings.
+                  </span>
+                  <ReservationSettingsFields
+                    compact
+                    value={{
+                      ...DEFAULT_RESERVATION_SETTINGS,
+                      maxPartySize: draft.reservationMaxPartySize,
+                      intervalMinutes: draft.reservationIntervalMinutes,
+                      openTime: draft.reservationOpenTime,
+                      closeTime: draft.reservationCloseTime,
+                      allowSameDay: draft.reservationAllowSameDay,
+                    }}
+                    onChange={(settings) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        reservationMaxPartySize: settings.maxPartySize,
+                        reservationIntervalMinutes: settings.intervalMinutes,
+                        reservationOpenTime: settings.openTime,
+                        reservationCloseTime: settings.closeTime,
+                        reservationAllowSameDay: settings.allowSameDay,
+                      }))
+                    }
+                  />
+                </div>
               </div>
             )}
           </div>

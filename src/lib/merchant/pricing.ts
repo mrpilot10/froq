@@ -81,6 +81,7 @@ export const ENTERPRISE_CONTACT = {
 function yearlyPlan(input: {
   id: string;
   name: string;
+  product: MerchantProduct;
   monthlyPrice: number;
   yearlyPrice: number;
   yearlyList: number;
@@ -93,7 +94,7 @@ function yearlyPlan(input: {
   return {
     id: `${input.id}-yearly`,
     name: input.name,
-    product: "loyalty",
+    product: input.product,
     price: input.yearlyPrice,
     priceLabel: inr(input.yearlyPrice),
     cycle: "/year",
@@ -113,6 +114,7 @@ function yearlyPlan(input: {
 function monthlyPlan(input: {
   id: string;
   name: string;
+  product: MerchantProduct;
   monthlyPrice: number;
   description: string;
   features: string[];
@@ -121,7 +123,7 @@ function monthlyPlan(input: {
   return {
     id: input.id,
     name: input.name,
-    product: "loyalty",
+    product: input.product,
     price: input.monthlyPrice,
     priceLabel: inr(input.monthlyPrice),
     cycle: "/month",
@@ -135,6 +137,7 @@ function monthlyPlan(input: {
 const STARTER_META = {
   id: "starter",
   name: "Starter",
+  product: "loyalty" as const,
   monthlyPrice: 299,
   yearlyPrice: 2999,
   yearlyList: 3588,
@@ -145,6 +148,7 @@ const STARTER_META = {
 const GROWTH_META = {
   id: "growth",
   name: "Growth",
+  product: "loyalty" as const,
   monthlyPrice: 699,
   yearlyPrice: 6999,
   yearlyList: 8388,
@@ -156,6 +160,7 @@ const GROWTH_META = {
 const PRO_META = {
   id: "pro",
   name: "Pro",
+  product: "loyalty" as const,
   monthlyPrice: 1499,
   yearlyPrice: 14999,
   yearlyList: 17988,
@@ -177,23 +182,178 @@ export const YEARLY_PRICING_PLANS: PricingPlan[] = [
   yearlyPlan(PRO_META),
 ];
 
-/** Queue Management plans (billed separately from loyalty). */
+const QUEUE_FEATURES = {
+  starter: [
+    "1 Branch",
+    "2,000 Queue Tickets / Month",
+    "Unlimited Staff Accounts",
+    "Digital Queue Management",
+    "QR Queue Join",
+    "WhatsApp Notifications",
+    "Live Queue Display",
+    "Queue Analytics",
+    "Customer History",
+    "Cloud Hosting & Automatic Updates",
+    "Email Support",
+  ],
+  growth: [
+    "3 Branches",
+    "5,000 Queue Tickets / Month",
+    "Unlimited Staff Accounts",
+    "Digital Queue Management",
+    "QR Queue Join",
+    "WhatsApp Notifications",
+    "Live Queue Display",
+    "Queue Analytics",
+    "Customer History",
+    "Cloud Hosting & Automatic Updates",
+    "Priority Support",
+  ],
+  pro: [
+    "10 Branches",
+    "20,000 Queue Tickets / Month",
+    "Unlimited Staff Accounts",
+    "Digital Queue Management",
+    "QR Queue Join",
+    "WhatsApp Notifications",
+    "Live Queue Display",
+    "Queue Analytics",
+    "Customer History",
+    "Cloud Hosting & Automatic Updates",
+    "Premium Support",
+  ],
+} as const;
+
+const QUEUE_STARTER_META = {
+  id: "queue-starter",
+  name: "Starter",
+  product: "queue" as const,
+  monthlyPrice: 799,
+  yearlyPrice: 7999,
+  yearlyList: 9588,
+  description: "For a single location running a digital waitlist.",
+  features: [...QUEUE_FEATURES.starter],
+};
+
+const QUEUE_GROWTH_META = {
+  id: "queue-growth",
+  name: "Growth",
+  product: "queue" as const,
+  monthlyPrice: 1499,
+  yearlyPrice: 14999,
+  yearlyList: 17988,
+  description: "For busy venues with more tickets and locations.",
+  features: [...QUEUE_FEATURES.growth],
+  highlighted: true,
+};
+
+const QUEUE_PRO_META = {
+  id: "queue-pro",
+  name: "Pro",
+  product: "queue" as const,
+  monthlyPrice: 3999,
+  yearlyPrice: 39999,
+  yearlyList: 47988,
+  description: "For multi-branch brands with high queue volume.",
+  features: [...QUEUE_FEATURES.pro],
+};
+
+/** Monthly Queue Management plans (billed separately from loyalty). */
 export const QUEUE_PLANS: PricingPlan[] = [
-  {
-    id: "queue",
-    name: "Queue",
-    product: "queue",
-    price: 999,
-    priceLabel: "₹999",
-    cycle: "/month",
-    description: "Live digital waitlist with ready-to-serve alerts.",
-    features: [
-      "Live digital waitlist & tokens",
-      "SMS / WhatsApp ready-to-serve alerts",
-      "Wait-time analytics on your customers",
-    ],
-    billing: "monthly",
-  },
+  monthlyPlan(QUEUE_STARTER_META),
+  monthlyPlan(QUEUE_GROWTH_META),
+  monthlyPlan(QUEUE_PRO_META),
+];
+
+/** Yearly Queue Management variants (same features, 2 months free). */
+export const YEARLY_QUEUE_PLANS: PricingPlan[] = [
+  yearlyPlan(QUEUE_STARTER_META),
+  yearlyPlan(QUEUE_GROWTH_META),
+  yearlyPlan(QUEUE_PRO_META),
+];
+
+const RESERVATION_FEATURES = {
+  starter: [
+    "1 Branch",
+    "Unlimited Booking Requests",
+    "QR & Link Reservations",
+    "WhatsApp Confirmations",
+    "Automatic Reminders",
+    "No-Show Tracking",
+    "Reservation Analytics",
+    "Cloud Hosting & Automatic Updates",
+    "Email Support",
+  ],
+  growth: [
+    "3 Branches",
+    "Unlimited Booking Requests",
+    "QR & Link Reservations",
+    "WhatsApp Confirmations",
+    "Automatic Reminders",
+    "Suggest Another Time",
+    "No-Show Tracking",
+    "Reservation Analytics",
+    "Priority Support",
+  ],
+  pro: [
+    "10 Branches",
+    "Unlimited Booking Requests",
+    "QR & Link Reservations",
+    "WhatsApp Confirmations",
+    "Automatic Reminders",
+    "Suggest Another Time",
+    "No-Show Tracking",
+    "Multi-Branch Dashboard",
+    "Premium Support",
+  ],
+} as const;
+
+const RESERVATION_STARTER_META = {
+  id: "reservation-starter",
+  name: "Starter",
+  product: "reservation" as const,
+  monthlyPrice: 499,
+  yearlyPrice: 4999,
+  yearlyList: 5988,
+  description: "For a single restaurant taking bookings on WhatsApp today.",
+  features: [...RESERVATION_FEATURES.starter],
+};
+
+const RESERVATION_GROWTH_META = {
+  id: "reservation-growth",
+  name: "Growth",
+  product: "reservation" as const,
+  monthlyPrice: 999,
+  yearlyPrice: 9999,
+  yearlyList: 11988,
+  description: "For busy dining rooms juggling requests across locations.",
+  features: [...RESERVATION_FEATURES.growth],
+  highlighted: true,
+};
+
+const RESERVATION_PRO_META = {
+  id: "reservation-pro",
+  name: "Pro",
+  product: "reservation" as const,
+  monthlyPrice: 2499,
+  yearlyPrice: 24999,
+  yearlyList: 29988,
+  description: "For multi-branch brands with high booking volume.",
+  features: [...RESERVATION_FEATURES.pro],
+};
+
+/** Monthly Reservations plans (billed separately from loyalty and queue). */
+export const RESERVATION_PLANS: PricingPlan[] = [
+  monthlyPlan(RESERVATION_STARTER_META),
+  monthlyPlan(RESERVATION_GROWTH_META),
+  monthlyPlan(RESERVATION_PRO_META),
+];
+
+/** Yearly Reservations variants (same features, 2 months free). */
+export const YEARLY_RESERVATION_PLANS: PricingPlan[] = [
+  yearlyPlan(RESERVATION_STARTER_META),
+  yearlyPlan(RESERVATION_GROWTH_META),
+  yearlyPlan(RESERVATION_PRO_META),
 ];
 
 /** Free tier after a paid period ends (post-cancellation). */
@@ -219,10 +379,16 @@ export const ALL_PLANS: PricingPlan[] = [
   ...PRICING_PLANS,
   ...YEARLY_PRICING_PLANS,
   ...QUEUE_PLANS,
+  ...YEARLY_QUEUE_PLANS,
+  ...RESERVATION_PLANS,
+  ...YEARLY_RESERVATION_PLANS,
 ];
 
 export function getPlanById(id: string) {
   if (id === FREE_PLAN.id) return FREE_PLAN;
+  // Legacy single-tier product checkout links still land on Growth.
+  if (id === "queue") return QUEUE_PLANS[1];
+  if (id === "reservation") return RESERVATION_PLANS[1];
   return ALL_PLANS.find((plan) => plan.id === id) ?? PRICING_PLANS[1];
 }
 
@@ -234,9 +400,24 @@ export function getPlanForBilling(baseId: string, billing: BillingCycle): Pricin
   return getPlanById(baseId);
 }
 
-/** Default plan to purchase for a given product. */
+/** Plans shown for a product on landing / manage-plan tables. */
+export function plansForProduct(
+  product: MerchantProduct,
+  billing: BillingCycle,
+): PricingPlan[] {
+  if (product === "queue") {
+    return billing === "yearly" ? YEARLY_QUEUE_PLANS : QUEUE_PLANS;
+  }
+  if (product === "reservation") {
+    return billing === "yearly" ? YEARLY_RESERVATION_PLANS : RESERVATION_PLANS;
+  }
+  return billing === "yearly" ? YEARLY_PRICING_PLANS : PRICING_PLANS;
+}
+
+/** Default plan to purchase for a given product (Growth). */
 export function getDefaultPlanForProduct(product: MerchantProduct): PricingPlan {
-  if (product === "queue") return QUEUE_PLANS[0];
+  if (product === "queue") return QUEUE_PLANS[1];
+  if (product === "reservation") return RESERVATION_PLANS[1];
   return PRICING_PLANS[1];
 }
 

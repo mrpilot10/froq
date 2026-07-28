@@ -162,7 +162,7 @@ export function CustomerDrawer({
             <div className="merchant-confirm">
               <p className="merchant-confirm-text">
                 {confirm === "delete"
-                  ? `Delete ${customer.name}? This permanently removes their loyalty record.`
+                  ? `Delete ${customer.name}? This permanently removes their loyalty and queue data across all products.`
                   : `Ban ${customer.name}? They won't be able to earn or redeem stamps.`}
               </p>
               <div className="merchant-confirm-actions">

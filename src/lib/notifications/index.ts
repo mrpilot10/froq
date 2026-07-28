@@ -26,7 +26,8 @@ export {
   type RewardReadyWaitTimeData,
   type RewardRedeemedData,
   type WaitlistCalledData,
-  type ReservationConfirmedData,
+  type ReservationData,
+  type ReservationDeclinedData,
 } from "./types";
 
 export {

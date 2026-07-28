@@ -13,6 +13,27 @@ const VIEWS: { value: QrView; label: string }[] = [
   { value: "poster", label: "Poster" },
 ];
 
+const QR_COPY: Record<MerchantProduct, { title: string; caption: (name: string) => string; alt: string }> = {
+  loyalty: {
+    title: "Loyalty QR",
+    caption: (name) =>
+      `Display this at your counter. Customers scan it to join ${name}'s loyalty program.`,
+    alt: "Loyalty join QR code",
+  },
+  queue: {
+    title: "Queue QR",
+    caption: (name) =>
+      `Display this at your entrance. Guests scan it to join ${name}'s live waitlist.`,
+    alt: "Queue join QR code",
+  },
+  reservation: {
+    title: "Reservation QR",
+    caption: (name) =>
+      `Display this at your entrance or share the link. Guests scan it to request a table at ${name}.`,
+    alt: "Reservation request QR code",
+  },
+};
+
 interface MerchantQrPanelProps {
   profile: MerchantProfile;
   product?: MerchantProduct;
@@ -24,13 +45,15 @@ export function MerchantQrPanel({
 }: MerchantQrPanelProps) {
   const [view, setView] = useState<QrView>("qr");
   const { qrUrl, joinUrl, download } = useMerchantQr(profile, product);
-  const isQueue = product === "queue";
+  const copy = QR_COPY[product];
+  // The printable poster template only exists for loyalty.
+  const posterAvailable = product === "loyalty";
 
   return (
     <div className="merchant-settings-group">
-      <h3 className="merchant-settings-title">{isQueue ? "Queue QR" : "Loyalty QR"}</h3>
+      <h3 className="merchant-settings-title">{copy.title}</h3>
       <div className="panel-card merchant-qr-panel">
-        {!isQueue && (
+        {posterAvailable && (
           <div className="merchant-qr-tabs" role="tablist" aria-label="QR download options">
             {VIEWS.map((item) => (
               <button
@@ -47,13 +70,9 @@ export function MerchantQrPanel({
           </div>
         )}
 
-        {view === "qr" || isQueue ? (
+        {view === "qr" || !posterAvailable ? (
           <>
-            <p className="merchant-qr-caption">
-              {isQueue
-                ? `Display this at your entrance. Guests scan it to join ${profile.businessName}'s live waitlist.`
-                : `Display this at your counter. Customers scan it to join ${profile.businessName}'s loyalty program.`}
-            </p>
+            <p className="merchant-qr-caption">{copy.caption(profile.businessName)}</p>
 
             <div className="merchant-qr-frame">
               {qrUrl ? (
@@ -61,7 +80,7 @@ export function MerchantQrPanel({
                 <img
                   className="merchant-qr-img"
                   src={qrUrl}
-                  alt={isQueue ? "Queue join QR code" : "Loyalty join QR code"}
+                  alt={copy.alt}
                   width={200}
                   height={200}
                 />

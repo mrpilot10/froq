@@ -1,8 +1,10 @@
 "use client";
 
 import Image from "next/image";
+import { useEffect, useState } from "react";
 import { Sparkles } from "lucide-react";
 import type { BusinessInfo } from "@/lib/loyalty/types";
+import { cooldownRestartButtonCopy } from "@/lib/loyalty/rules";
 import { BottomSheet } from "./bottom-sheet";
 
 interface ClaimedCelebrationProps {
@@ -11,8 +13,8 @@ interface ClaimedCelebrationProps {
   onStartAgain: () => void;
   /** When false, hide the "start again" messaging. */
   canRestart?: boolean;
-  /** Optional cooldown message after claim. */
-  cooldownMessage?: string | null;
+  /** Post-redeem stamp lock; drives live CTA countdown only. */
+  cooldownUntil?: string | null;
 }
 
 export function ClaimedCelebration({
@@ -20,9 +22,27 @@ export function ClaimedCelebration({
   business,
   onStartAgain,
   canRestart = true,
-  cooldownMessage = null,
+  cooldownUntil = null,
 }: ClaimedCelebrationProps) {
   const rewardName = business.rewardName?.trim() || "reward";
+  const [restartLabel, setRestartLabel] = useState(() =>
+    cooldownRestartButtonCopy(cooldownUntil),
+  );
+
+  useEffect(() => {
+    if (!open || !cooldownUntil) {
+      setRestartLabel(cooldownRestartButtonCopy(cooldownUntil));
+      return;
+    }
+    const tick = () => setRestartLabel(cooldownRestartButtonCopy(cooldownUntil));
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [open, cooldownUntil]);
+
+  const ctaLabel = !canRestart
+    ? "Done"
+    : restartLabel ?? "Back to card";
 
   return (
     <BottomSheet open={open} onClose={onStartAgain} labelledBy="claimed-title">
@@ -48,15 +68,15 @@ export function ClaimedCelebration({
         </h3>
         <p className="claimed-sub">
           Enjoy your <strong>{rewardName}</strong> from {business.name}!
-          {canRestart
-            ? cooldownMessage
-              ? ` ${cooldownMessage}.`
-              : " Your card’s been wiped clean — start collecting stamps again and your next reward is already on its way."
-            : " You’ve completed this rewards program."}
+          {canRestart && !restartLabel
+            ? " Your card’s been wiped clean — start collecting stamps again and your next reward is already on its way."
+            : !canRestart
+              ? " You’ve completed this rewards program."
+              : null}
         </p>
 
         <button type="button" className="done-btn" onClick={onStartAgain}>
-          {canRestart ? "Back to card" : "Done"}
+          {ctaLabel}
         </button>
       </div>
     </BottomSheet>

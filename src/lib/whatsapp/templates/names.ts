@@ -5,9 +5,11 @@ import { customerHubUrl as absoluteCustomerHubUrl, getAppOrigin } from "@/lib/ap
  * Values must match the approved template names in APITxT / Meta.
  *
  * Meta template URL button (dynamic):
- *   Loyalty: https://froq.io/c/{{1}}
- *   Queue:   https://a-t.cc/{{1}}
- * Runtime sends only the suffix: url_buttons["0"] = customer.publicToken (frq_…).
+ *   Loyalty:     https://froq.io/c/{{1}}  (also /join/{{1}} and /card/{{1}} redirect here)
+ *   Queue:       https://froq.io/queue/{{1}}  (frq_… token — merchant slug uses meer-s-cafe style)
+ *   Reservation: https://froq.io/r/{{1}}  (rsv_… reservation token)
+ * Runtime sends only the suffix: url_buttons["0"] = customer.publicToken (frq_…),
+ * or the reservation's own rsv_… token for reservation templates.
  * Sample values used for Meta approval must never be sent at runtime.
  */
 export const WhatsAppTemplateName = {
@@ -27,7 +29,18 @@ export const WhatsAppTemplateName = {
   RewardRedeemed: "loyaltycard_reward_claimed",
   Welcome: "welcome",
   WaitlistCalled: "waitlist_called",
+
+  /**
+   * Reservation lifecycle. Each of these has one URL button —
+   * https://froq.io/r/{{1}} — and no quick replies: WhatsApp notifies, the
+   * reservation page handles every guest action.
+   */
+  ReservationRequestReceived: "reservation_request_received",
   ReservationConfirmed: "reservation_confirmed",
+  ReservationDeclined: "reservation_declined",
+  /** Merchant proposed a different slot; the guest answers on their page. */
+  ReservationUpdated: "reservation_updated",
+  ReservationReminder: "reservation_reminder",
 
   /** Guest joined the live waitlist (Meta-approved name). */
   QueueJoined: "queue_first_notify",

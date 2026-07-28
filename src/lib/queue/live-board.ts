@@ -1,7 +1,12 @@
 import "server-only";
 
+import { callAcceptDeadlineMs } from "@/lib/merchant/queue-settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { QueueEntryRow, QueueSessionRow } from "@/lib/supabase/database.types";
+import type {
+  MemberRole,
+  QueueEntryRow,
+  QueueSessionRow,
+} from "@/lib/supabase/database.types";
 
 export type LiveQueueEntry = {
   id: string;
@@ -17,6 +22,8 @@ export type LiveQueueEntry = {
   status: "waiting" | "called" | "seated" | "left";
   kind: "walkin" | "reservation";
   reservationTime?: string;
+  /** How many of the 3 call reminders have been delivered (0–3). */
+  remindersSent?: number;
 };
 
 export type LiveQueueSession = {
@@ -25,6 +32,9 @@ export type LiveQueueSession = {
   status: "live" | "paused" | "ended";
   startedAtMs: number;
   endedAtMs?: number;
+  /** Teammate who started the session — absent on sessions created before audit tracking. */
+  startedByName?: string;
+  startedByRole?: MemberRole;
 };
 
 function ms(iso: string | null | undefined): number | undefined {
@@ -34,6 +44,10 @@ function ms(iso: string | null | undefined): number | undefined {
 }
 
 export function mapQueueEntryRow(row: QueueEntryRow): LiveQueueEntry {
+  const calledAtMs = ms(row.called_at);
+  // Prefer the fixed 10-minute call window over any stale accept_by in the DB.
+  const acceptByMs =
+    calledAtMs != null ? callAcceptDeadlineMs(calledAtMs) : ms(row.accept_by);
   return {
     id: row.id,
     name: row.name,
@@ -41,8 +55,8 @@ export function mapQueueEntryRow(row: QueueEntryRow): LiveQueueEntry {
     email: row.email ?? undefined,
     partySize: row.party_size,
     joinedAtMs: ms(row.joined_at) ?? Date.now(),
-    calledAtMs: ms(row.called_at),
-    acceptByMs: ms(row.accept_by),
+    calledAtMs,
+    acceptByMs,
     seatedAtMs: ms(row.seated_at),
     leftAtMs: ms(row.left_at),
     status: row.status,
@@ -58,6 +72,8 @@ export function mapQueueSessionRow(row: QueueSessionRow): LiveQueueSession {
     status: row.status,
     startedAtMs: ms(row.started_at) ?? Date.now(),
     endedAtMs: ms(row.ended_at),
+    startedByName: row.started_by_name ?? undefined,
+    startedByRole: row.started_by_role ?? undefined,
   };
 }
 

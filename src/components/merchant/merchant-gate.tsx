@@ -1,13 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
+import { usePathname } from "next/navigation";
 import { getMerchantBundle, type MerchantBundle } from "@/app/merchant/actions";
+import { productForPathname } from "@/lib/merchant/nav";
 import { createClient } from "@/lib/supabase/client";
 import { readCheckoutAccount } from "@/lib/merchant/checkout";
 import { MerchantExperience } from "./merchant-experience";
 import { MerchantLogin } from "./merchant-login";
-import { OnboardingWizard } from "./onboarding/onboarding-wizard";
 import { MerchantGateSplash } from "./skeletons";
+
+const OnboardingWizard = dynamic(
+  () => import("./onboarding/onboarding-wizard").then((m) => m.OnboardingWizard),
+  { ssr: false, loading: () => <MerchantGateSplash /> },
+);
 
 /** localStorage key for the merchant's currently selected branch (null = all). */
 export const ACTIVE_BRANCH_KEY = "froq.activeBranch";
@@ -21,9 +28,12 @@ export const ACTIVE_BRANCH_KEY = "froq.activeBranch";
  *   - session + store        → dashboard
  */
 export function MerchantGate({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   const supabase = useMemo(() => createClient(), []);
   const [bundle, setBundle] = useState<MerchantBundle | null>(null);
   const [clientReady, setClientReady] = useState(false);
+  /** True between a successful sign-in and the workspace bundle finishing. */
+  const [entering, setEntering] = useState(false);
 
   const refresh = useCallback(async () => {
     const branchId =
@@ -45,7 +55,19 @@ export function MerchantGate({ children }: { children: ReactNode }) {
         window.localStorage.removeItem(ACTIVE_BRANCH_KEY);
       }
     }
+    return next;
   }, []);
+
+  const handleAuthed = useCallback(async () => {
+    // Flip to the splash immediately so the login form never flashes back while
+    // the workspace bundle loads after sign-in.
+    setEntering(true);
+    try {
+      await refresh();
+    } finally {
+      setEntering(false);
+    }
+  }, [refresh]);
 
   const handleSelectBranch = useCallback(
     async (branchId: string | null) => {
@@ -68,10 +90,18 @@ export function MerchantGate({ children }: { children: ReactNode }) {
 
   const handleLogout = useCallback(async () => {
     await supabase.auth.signOut();
+    setEntering(false);
     setBundle({ status: "unauthenticated" });
   }, [supabase]);
 
-  if (!bundle) return <MerchantGateSplash />;
+  if (!bundle || entering) {
+    return (
+      <MerchantGateSplash
+        title={entering ? "Opening your dashboard" : "Loading your workspace"}
+        sub={entering ? "Signing you in…" : "Just a moment…"}
+      />
+    );
+  }
 
   if (bundle.status === "error") {
     return (
@@ -92,8 +122,10 @@ export function MerchantGate({ children }: { children: ReactNode }) {
   // /merchant). In both cases show the merchant login rather than auto-entering
   // the dashboard, so a customer is never silently treated as a merchant. Their
   // existing customer session is left intact unless they log in here.
+  // Logging in happens in place, so the merchant stays on the product URL they
+  // arrived at — /merchant/queue keeps them on the queue after signing in.
   if (bundle.status === "unauthenticated" || bundle.status === "not_registered") {
-    return <MerchantLogin onAuthed={refresh} />;
+    return <MerchantLogin onAuthed={handleAuthed} product={productForPathname(pathname)} />;
   }
 
   // Paid via checkout — global setup + first product for new merchants.
@@ -103,7 +135,9 @@ export function MerchantGate({ children }: { children: ReactNode }) {
         mode="full"
         product={bundle.product}
         checkoutAccount={checkoutAccount}
-        onComplete={refresh}
+        onComplete={async () => {
+          await refresh();
+        }}
       />
     );
   }
@@ -122,7 +156,9 @@ export function MerchantGate({ children }: { children: ReactNode }) {
       canViewAllBranches={bundle.canViewAllBranches}
       justJoined={bundle.justJoined}
       onSelectBranch={handleSelectBranch}
-      onRefresh={refresh}
+      onRefresh={async () => {
+        await refresh();
+      }}
       onLogout={handleLogout}
     >
       {children}

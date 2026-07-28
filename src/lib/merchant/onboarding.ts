@@ -2,6 +2,8 @@ import type { CheckoutAccount } from "./checkout";
 import type { MerchantProduct } from "./types";
 import { BRAND_COLORS } from "./constants";
 import { DEFAULT_ESTIMATED_WAIT_MINUTES } from "./queue-settings";
+import { DEFAULT_QUEUE_STORE_HOURS } from "./queue-hours";
+import { DEFAULT_RESERVATION_SETTINGS } from "./reservations";
 import type { RewardCooldownUnit } from "@/lib/loyalty/rules";
 
 /** One rendered screen in the onboarding wizard. */
@@ -13,6 +15,7 @@ export type OnboardingStep =
   | "contact" // address + social links
   | "reward" // loyalty product setup
   | "queue" // queue product setup
+  | "reservation" // reservations product setup
   | "outro";
 
 /**
@@ -50,6 +53,16 @@ export interface OnboardingDraft {
   minPurchaseAmount: number;
   // Queue product block
   estimatedWaitMinutes: number;
+  queueOpenTime: string;
+  queueCloseTime: string;
+  queueOpenDays: number[];
+  queueAutoSessions: boolean;
+  // Reservations product block
+  reservationMaxPartySize: number;
+  reservationIntervalMinutes: number;
+  reservationOpenTime: string;
+  reservationCloseTime: string;
+  reservationAllowSameDay: boolean;
 }
 
 export function emptyOnboardingDraft(account?: CheckoutAccount | null): OnboardingDraft {
@@ -78,11 +91,22 @@ export function emptyOnboardingDraft(account?: CheckoutAccount | null): Onboardi
     rewardCooldownUnit: "days",
     minPurchaseAmount: 0,
     estimatedWaitMinutes: DEFAULT_ESTIMATED_WAIT_MINUTES,
+    queueOpenTime: DEFAULT_QUEUE_STORE_HOURS.openTime,
+    queueCloseTime: DEFAULT_QUEUE_STORE_HOURS.closeTime,
+    queueOpenDays: [...DEFAULT_QUEUE_STORE_HOURS.openDays],
+    queueAutoSessions: DEFAULT_QUEUE_STORE_HOURS.autoSessions,
+    reservationMaxPartySize: DEFAULT_RESERVATION_SETTINGS.maxPartySize,
+    reservationIntervalMinutes: DEFAULT_RESERVATION_SETTINGS.intervalMinutes,
+    reservationOpenTime: DEFAULT_RESERVATION_SETTINGS.openTime,
+    reservationCloseTime: DEFAULT_RESERVATION_SETTINGS.closeTime,
+    reservationAllowSameDay: DEFAULT_RESERVATION_SETTINGS.allowSameDay,
   };
 }
 
 function productStep(product: MerchantProduct): OnboardingStep {
-  return product === "queue" ? "queue" : "reward";
+  if (product === "queue") return "queue";
+  if (product === "reservation") return "reservation";
+  return "reward";
 }
 
 /** Ordered list of steps for a given mode + product. */

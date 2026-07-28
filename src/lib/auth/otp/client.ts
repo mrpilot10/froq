@@ -38,10 +38,15 @@ async function postJson<T extends { ok: boolean; message: string }>(
   }
 }
 
-/** Requests an OTP for a 10-digit phone. Resending is just calling this again. */
-export async function sendOtp(phone: string): Promise<SendOtpResult> {
+/**
+ * Requests an OTP for a 10-digit phone. Resending is just calling this again.
+ *
+ * `captchaToken` must be a fresh Turnstile token — tokens are single-use, so a
+ * resend needs the widget reset first.
+ */
+export async function sendOtp(phone: string, captchaToken?: string | null): Promise<SendOtpResult> {
   try {
-    return await postJson<SendOtpResult>("/api/send-otp", { phone });
+    return await postJson<SendOtpResult>("/api/send-otp", { phone, captchaToken });
   } catch (error) {
     return {
       ok: false,
@@ -50,10 +55,19 @@ export async function sendOtp(phone: string): Promise<SendOtpResult> {
   }
 }
 
-/** Verifies the submitted code; on success the auth session cookie is set. */
-export async function verifyOtp(phone: string, otp: string): Promise<VerifyOtpResult> {
+/**
+ * Verifies the submitted code; on success the auth session cookie is set.
+ *
+ * Takes its own token: minting the session hits Supabase's captcha-protected
+ * password grant, and the token spent on `sendOtp` can't be replayed.
+ */
+export async function verifyOtp(
+  phone: string,
+  otp: string,
+  captchaToken?: string | null,
+): Promise<VerifyOtpResult> {
   try {
-    return await postJson<VerifyOtpResult>("/api/verify-otp", { phone, otp });
+    return await postJson<VerifyOtpResult>("/api/verify-otp", { phone, otp, captchaToken });
   } catch (error) {
     return {
       ok: false,

@@ -3,8 +3,9 @@
 import { FROQ_LOGO_SRC } from "@/lib/brand";
 
 import Image from "next/image";
+import Link from "next/link";
 import { BarChart3, LifeBuoy, LogOut, Settings, Users, type LucideIcon } from "lucide-react";
-import { PRODUCTS } from "@/lib/merchant/nav";
+import { PRODUCT_DEFAULT_TAB, PRODUCTS, TAB_HREF, isWorkspaceTab } from "@/lib/merchant/nav";
 import type { MerchantProduct, MerchantTab } from "@/lib/merchant/types";
 
 interface ProductRailProps {
@@ -17,9 +18,11 @@ interface ProductRailProps {
   onLogout?: () => void;
 }
 
-const OWNER_SHARED_ITEMS: Array<{ id: MerchantTab; label: string; Icon: LucideIcon }> = [
-  { id: "customers", label: "All customers", Icon: Users },
-  { id: "analytics", label: "All analytics", Icon: BarChart3 },
+type RailItem = { id: MerchantTab; label: string; Icon: LucideIcon; ownerOnly?: boolean };
+
+const SHARED_ITEMS: RailItem[] = [
+  { id: "customers", label: "All customers", Icon: Users, ownerOnly: true },
+  { id: "analytics", label: "Analytics", Icon: BarChart3 },
 ];
 
 export function ProductRail({
@@ -31,7 +34,10 @@ export function ProductRail({
   pendingCount = 0,
   onLogout,
 }: ProductRailProps) {
-  const sharedItems = isOwner ? OWNER_SHARED_ITEMS : [];
+  const sharedItems = SHARED_ITEMS.filter((item) => isOwner || !item.ownerOnly);
+  // Workspace tabs (analytics, all customers, settings) aren't product-scoped, so
+  // no product icon lights up there — the sidebar still keeps the last product.
+  const highlightedProduct = isWorkspaceTab(activeTab) ? null : activeProduct;
 
   return (
     <aside className="merchant-rail" aria-label="Products">
@@ -43,17 +49,21 @@ export function ProductRail({
 
       <nav className="merchant-rail-nav" aria-label="Switch product">
         {PRODUCTS.map(({ id, name, Icon }) => {
-          const isActive = activeProduct === id;
+          const isActive = highlightedProduct === id;
           const showBadge = id === "loyalty" && pendingCount > 0;
           return (
-            <button
+            <Link
               key={id}
-              type="button"
+              href={TAB_HREF[PRODUCT_DEFAULT_TAB[id]]}
+              prefetch
               className={`merchant-rail-item${isActive ? " active" : ""}`}
               aria-current={isActive ? "true" : undefined}
               aria-label={name}
               data-tip={name}
-              onClick={() => onProductChange(id)}
+              onClick={(event) => {
+                event.preventDefault();
+                onProductChange(id);
+              }}
             >
               <span className="merchant-rail-icon">
                 <Icon size={22} strokeWidth={isActive ? 2.4 : 2} />
@@ -63,7 +73,7 @@ export function ProductRail({
                   </span>
                 )}
               </span>
-            </button>
+            </Link>
           );
         })}
       </nav>
@@ -75,19 +85,23 @@ export function ProductRail({
             {sharedItems.map(({ id, label, Icon }) => {
               const isActive = activeTab === id;
               return (
-                <button
+                <Link
                   key={id}
-                  type="button"
+                  href={TAB_HREF[id]}
+                  prefetch
                   className={`merchant-rail-item${isActive ? " active" : ""}`}
                   aria-current={isActive ? "true" : undefined}
                   aria-label={label}
                   data-tip={label}
-                  onClick={() => onTabChange(id)}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onTabChange(id);
+                  }}
                 >
                   <span className="merchant-rail-icon">
                     <Icon size={20} strokeWidth={isActive ? 2.4 : 2} />
                   </span>
-                </button>
+                </Link>
               );
             })}
           </nav>
@@ -95,22 +109,24 @@ export function ProductRail({
       ) : null}
 
       <div className="merchant-rail-foot">
-        <button
-          type="button"
+        <Link
+          href={TAB_HREF.profile}
+          prefetch
           className={`merchant-rail-item merchant-rail-item--ghost${activeTab === "profile" ? " active" : ""}`}
           aria-current={activeTab === "profile" ? "true" : undefined}
           aria-label="Business settings"
           data-tip="Business settings"
-          onClick={() => onTabChange("profile")}
+          onClick={(event) => {
+            event.preventDefault();
+            onTabChange("profile");
+          }}
         >
           <span className="merchant-rail-icon">
             <Settings size={20} strokeWidth={2} />
           </span>
-        </button>
-        <a
-          href="https://froq.io/help"
-          target="_blank"
-          rel="noreferrer"
+        </Link>
+        <Link
+          href="/help"
           className="merchant-rail-item merchant-rail-item--ghost"
           aria-label="Help"
           data-tip="Help"
@@ -118,7 +134,7 @@ export function ProductRail({
           <span className="merchant-rail-icon">
             <LifeBuoy size={20} strokeWidth={2} />
           </span>
-        </a>
+        </Link>
         {onLogout && (
           <button
             type="button"

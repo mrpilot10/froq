@@ -29,7 +29,7 @@ export default function LoyaltyHomePage() {
       onConfirmOfferStamp={onConfirmOfferStamp}
       onShowQr={() => onShowQr("loyalty")}
       onRedeemCode={onRedeemCode}
-      onOpenAnalytics={() => goToTab("loyalty-analytics")}
+      onOpenAnalytics={() => goToTab("analytics")}
     />
   );
 }

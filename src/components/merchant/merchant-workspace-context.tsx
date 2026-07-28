@@ -73,6 +73,15 @@ export interface MerchantWorkspaceValue {
   ) => Promise<{ ok: boolean; error?: string }>;
   onEditSection: (section: MerchantEditSection) => void;
   onSaveQueueBanner: (queueBanner: string, queueBannerLink: string) => Promise<void>;
+  onSaveQueueHours: (hours: {
+    openTime: string;
+    closeTime: string;
+    openDays: number[];
+    autoSessions: boolean;
+  }) => Promise<void>;
+  onSaveReservationSettings: (patch: Partial<MerchantProfile>) => Promise<void>;
+  /** Stop / resume public booking requests, like pausing the live queue. */
+  onSetReservationPaused: (paused: boolean) => Promise<void>;
   onDeleteAccount: () => void;
   onLogout?: () => void;
 }

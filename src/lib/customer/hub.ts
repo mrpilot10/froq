@@ -3,6 +3,16 @@ export function customerHubPath(publicToken: string): string {
   return `/c/${encodeURIComponent(publicToken.trim())}`;
 }
 
+/**
+ * WhatsApp / SMS may use /join/frq_… or /card/frq_… — redirect to /c/frq_….
+ * Returns null when the segment is a merchant slug (normal join/card flow).
+ */
+export function loyaltyHubRedirectPath(slugOrToken: string): string | null {
+  const decoded = decodeURIComponent(slugOrToken).trim();
+  if (!isCustomerPublicToken(decoded)) return null;
+  return customerHubPath(decoded);
+}
+
 /** True when the value looks like a generated customer public token. */
 export function isCustomerPublicToken(token: string): boolean {
   return /^frq_[a-zA-Z0-9]+$/i.test(token.trim());

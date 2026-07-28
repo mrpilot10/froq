@@ -25,11 +25,6 @@ export type AnalyticsVisitRow = {
   customer_id: string | null;
 };
 
-export type AnalyticsRedemptionRow = {
-  customer_id: string | null;
-  redeemed_at: string;
-};
-
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export const DASHBOARD_RANGE_LABELS: Record<DashboardDateRange, string> = {
@@ -40,8 +35,37 @@ export const DASHBOARD_RANGE_LABELS: Record<DashboardDateRange, string> = {
   all: "All time",
 };
 
-export function dashboardRangeStart(range: DashboardDateRange): Date | null {
-  const now = new Date();
+/** Maps UI presets → merchant_loyalty_range_stats granularity. */
+export const RANGE_RPC_GRANULARITY: Record<
+  DashboardDateRange,
+  "tod_quad" | "day" | "week" | "month"
+> = {
+  today: "tod_quad",
+  "7d": "day",
+  "30d": "week",
+  "12m": "month",
+  all: "month",
+};
+
+export const LOYALTY_STATS_TIMEZONE = "Asia/Kolkata";
+
+export type LoyaltyRangeBucket = {
+  bucket_index: number;
+  bucket_start: string;
+  visit_count: number;
+};
+
+export type LoyaltyRangeStats = {
+  stamps_in_range: number;
+  rewards_in_range: number;
+  chart_granularity: string;
+  chart_buckets: LoyaltyRangeBucket[];
+};
+
+export function dashboardRangeStart(
+  range: DashboardDateRange,
+  now: Date = new Date(),
+): Date | null {
   if (range === "today") {
     const start = new Date(now);
     start.setHours(0, 0, 0, 0);
@@ -66,6 +90,43 @@ export function dashboardRangeStart(range: DashboardDateRange): Date | null {
     return start;
   }
   return null;
+}
+
+/** Caller args for merchant_loyalty_range_stats (bounds owned by JS presets). */
+export function rangeRpcArgsForPreset(
+  range: DashboardDateRange,
+  now: Date = new Date(),
+  timezone: string = LOYALTY_STATS_TIMEZONE,
+) {
+  const start = dashboardRangeStart(range, now);
+  return {
+    p_start: start ? start.toISOString() : null,
+    p_end: now.toISOString(),
+    p_granularity: RANGE_RPC_GRANULARITY[range],
+    p_timezone: timezone,
+  };
+}
+
+/**
+ * Overlay RPC visit_count onto labels/title/sub from the existing
+ * chartBucketsForRange labelers (empty visit array → identical axis).
+ */
+export function chartFromRangeStats(
+  range: DashboardDateRange,
+  rangeBuckets: LoyaltyRangeBucket[],
+): { title: string; sub: string; buckets: DashboardChartBucket[] } {
+  const axis = chartBucketsForRange(range, []);
+  const byIndex = new Map(
+    rangeBuckets.map((b) => [b.bucket_index, b.visit_count] as const),
+  );
+  return {
+    title: axis.title,
+    sub: axis.sub,
+    buckets: axis.buckets.map((bucket, index) => ({
+      label: bucket.label,
+      value: byIndex.get(index) ?? 0,
+    })),
+  };
 }
 
 function startOfToday() {
@@ -273,72 +334,29 @@ function buildFunnel(customers: AnalyticsCustomerRow[]): AnalyticsFunnelStage[] 
   });
 }
 
-/**
- * Average gap between a customer's distinct visit *days* (not every stamp).
- * Multiple stamps on the same day count as one visit day, so rapid stamp
- * offers don't collapse the average to 0.1 days.
- */
-function avgDaysBetweenVisits(visits: AnalyticsVisitRow[]): number | null {
-  const dayKey = (ms: number) => {
-    const d = new Date(ms);
-    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-  };
+export type LoyaltyLifetimeStats = {
+  total_visits: number;
+  total_redemptions: number;
+  avg_days_between_visits: number | null;
+  most_active_dow: number | null;
+  most_active_hour: number | null;
+};
 
-  const byCustomer = new Map<string, Set<string>>();
-  const dayTimestamps = new Map<string, number>(); // key → noon-ish timestamp for sorting
-
-  for (const row of visits) {
-    if (!row.customer_id) continue;
-    const ms = new Date(row.created_at).getTime();
-    const key = `${row.customer_id}:${dayKey(ms)}`;
-    const set = byCustomer.get(row.customer_id) ?? new Set<string>();
-    set.add(dayKey(ms));
-    byCustomer.set(row.customer_id, set);
-    if (!dayTimestamps.has(key)) {
-      const start = new Date(row.created_at);
-      start.setHours(12, 0, 0, 0);
-      dayTimestamps.set(key, start.getTime());
-    }
-  }
-
-  const gaps: number[] = [];
-  for (const [customerId, days] of byCustomer) {
-    if (days.size < 2) continue;
-    const times = [...days]
-      .map((day) => dayTimestamps.get(`${customerId}:${day}`) ?? 0)
-      .filter(Boolean)
-      .sort((a, b) => a - b);
-    for (let i = 1; i < times.length; i += 1) {
-      gaps.push((times[i] - times[i - 1]) / 86_400_000);
-    }
-  }
-
-  if (gaps.length === 0) return null;
-  const avg = gaps.reduce((a, b) => a + b, 0) / gaps.length;
-  // Whole days when >= 1; otherwise keep one decimal only if meaningful (>= 0.5).
+/** Whole days when >= 1; otherwise keep one decimal only if meaningful (>= 0.5). */
+function formatAvgDaysBetweenVisits(avg: number | null): number | null {
+  if (avg === null || Number.isNaN(avg)) return null;
   if (avg >= 1) return Math.round(avg);
   if (avg >= 0.5) return Math.round(avg * 10) / 10;
   return null;
 }
 
-function mostActiveDayHour(visits: AnalyticsVisitRow[]): {
-  day: string | null;
-  hour: string | null;
-} {
-  if (visits.length === 0) return { day: null, hour: null };
-
-  const dayCounts = Array.from({ length: 7 }, () => 0);
-  const hourCounts = Array.from({ length: 24 }, () => 0);
-  for (const row of visits) {
-    const date = new Date(row.created_at);
-    dayCounts[date.getDay()] += 1;
-    hourCounts[date.getHours()] += 1;
-  }
-  const dayIdx = dayCounts.indexOf(Math.max(...dayCounts));
-  const hourIdx = hourCounts.indexOf(Math.max(...hourCounts));
+function formatMostActiveDayHour(
+  dow: number | null,
+  hour: number | null,
+): { day: string | null; hour: string | null } {
   return {
-    day: dayCounts[dayIdx] > 0 ? DAY_NAMES[dayIdx] : null,
-    hour: hourCounts[hourIdx] > 0 ? formatHourLabel(hourIdx) : null,
+    day: dow !== null && dow >= 0 && dow <= 6 ? DAY_NAMES[dow] : null,
+    hour: hour !== null && hour >= 0 && hour <= 23 ? formatHourLabel(hour) : null,
   };
 }
 
@@ -442,19 +460,18 @@ export function computeLoyaltyAnalytics(input: {
   range: DashboardDateRange;
   customers: AnalyticsCustomerRow[];
   visits: AnalyticsVisitRow[];
-  redemptions: AnalyticsRedemptionRow[];
   pendingApprovals: number;
+  lifetime: LoyaltyLifetimeStats;
+  /**
+   * From merchant_loyalty_range_stats. null = RPC error → rangeStatsError;
+   * do not substitute truncated visit arrays (those numbers are wrong).
+   */
+  rangeStats: LoyaltyRangeStats | null;
 }): DashboardFilteredStats {
-  const { range, customers, visits, redemptions, pendingApprovals } = input;
+  const { range, customers, visits, pendingApprovals, lifetime, rangeStats } = input;
   const rangeStart = dashboardRangeStart(range);
   const activePool = customers.filter((c) => !c.banned);
-
-  const filteredVisits = rangeStart
-    ? visits.filter((row) => new Date(row.created_at) >= rangeStart)
-    : visits;
-  const filteredRedemptions = rangeStart
-    ? redemptions.filter((row) => new Date(row.redeemed_at) >= rangeStart)
-    : redemptions;
+  const rangeStatsError = rangeStats == null;
 
   const todayStart = startOfToday();
   const monthStart = startOfMonth();
@@ -463,12 +480,12 @@ export function computeLoyaltyAnalytics(input: {
   const totalCustomers = activePool.length;
   const activeCustomers = activePool.filter((c) => c.status === "active").length;
   const activeCards = activeCustomers;
-  const totalStampsAllTime = visits.length;
+  const totalStampsAllTime = lifetime.total_visits;
   const stampsToday = visits.filter((v) => new Date(v.created_at) >= todayStart).length;
   const stampsThisMonth = visits.filter((v) => new Date(v.created_at) >= monthStart).length;
-  const stampsInRange = filteredVisits.length;
-  const rewardsRedeemedAllTime = redemptions.length;
-  const rewardsInRange = filteredRedemptions.length;
+  const stampsInRange = rangeStats?.stamps_in_range ?? 0;
+  const rewardsRedeemedAllTime = lifetime.total_redemptions;
+  const rewardsInRange = rangeStats?.rewards_in_range ?? 0;
 
   const avgVisitsPerCustomer =
     totalCustomers > 0
@@ -480,16 +497,19 @@ export function computeLoyaltyAnalytics(input: {
       : 0;
 
   const avgStampsPerCustomer =
-    totalCustomers > 0 ? Math.round((totalStampsAllTime / totalCustomers) * 10) / 10 : 0;
+    totalCustomers > 0
+      ? Math.round((lifetime.total_visits / totalCustomers) * 10) / 10
+      : 0;
 
   const nearReward = activePool.filter(
     (c) => c.status === "active" && c.total_stamps > 0 && c.total_stamps - c.stamps === 1,
   ).length;
 
-  const redeemers = new Set(
-    redemptions.map((r) => r.customer_id).filter(Boolean) as string[],
-  );
-  const redemptionRate = pct(redeemers.size, totalCustomers);
+  // Numerator includes banned customers with rewards_claimed > 0; denominator is non-banned.
+  const redeemersIncludingBanned = customers.filter(
+    (c) => Number(c.rewards_claimed) > 0,
+  ).length;
+  const redemptionRate = pct(redeemersIncludingBanned, totalCustomers);
 
   const returningCustomers = activePool.filter((c) => c.lifetime_visits >= 2).length;
   const repeatVisitRate = pct(returningCustomers, totalCustomers);
@@ -505,9 +525,14 @@ export function computeLoyaltyAnalytics(input: {
     return new Date(c.last_visit).getTime() < inactiveCutoff;
   }).length;
 
-  const avgDays = avgDaysBetweenVisits(visits);
-  const { day: mostActiveDay, hour: mostActiveHour } = mostActiveDayHour(visits);
-  const chart = chartBucketsForRange(range, filteredVisits);
+  const avgDays = formatAvgDaysBetweenVisits(lifetime.avg_days_between_visits);
+  const { day: mostActiveDay, hour: mostActiveHour } = formatMostActiveDayHour(
+    lifetime.most_active_dow,
+    lifetime.most_active_hour,
+  );
+  const chart = rangeStats
+    ? chartFromRangeStats(range, rangeStats.chart_buckets)
+    : chartBucketsForRange(range, []);
   const topCustomers = buildTopCustomers(customers);
   const funnel = buildFunnel(customers);
   const insights = buildInsights({
@@ -531,6 +556,7 @@ export function computeLoyaltyAnalytics(input: {
     stampsThisMonth,
     rewardsRedeemedAllTime,
     rewardsInRange,
+    rangeStatsError,
     pendingApprovals,
     avgVisitsPerCustomer,
     avgStampsPerCustomer,

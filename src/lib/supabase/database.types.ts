@@ -4,7 +4,7 @@
 export type CardStatus = "active" | "reward_ready" | "claimed";
 export type RewardCycleStatus = "collecting" | "waiting" | "ready";
 export type ApprovalStatus = "pending" | "approved" | "rejected";
-export type MerchantProductKind = "loyalty" | "queue";
+export type MerchantProductKind = "loyalty" | "queue" | "reservation";
 export type ProductStatus = "active" | "past_due" | "canceled";
 export type MemberRole = "owner" | "manager" | "staff";
 export type RewardCooldownUnit = "hours" | "days" | "weeks";
@@ -12,6 +12,13 @@ export type QueueCallStatus = "called" | "seated" | "skipped" | "left";
 export type QueueSessionStatus = "live" | "paused" | "ended";
 export type QueueEntryStatus = "waiting" | "called" | "seated" | "left";
 export type QueueEntryKind = "walkin" | "reservation";
+export type ReservationStatus =
+  | "pending"
+  | "confirmed"
+  | "declined"
+  | "cancelled"
+  | "completed"
+  | "no_show";
 
 /** App-facing roles used across merchant UI + actions. */
 export type AppMemberRole = "owner" | "manager" | "staff";
@@ -78,6 +85,29 @@ export interface MerchantRow {
   marketing_emails: boolean;
   queue_banner: string | null;
   queue_banner_link: string | null;
+  /** Local open time for queue auto-start. */
+  queue_open_time: string;
+  /** Local close time for queue auto-close. */
+  queue_close_time: string;
+  queue_hours_timezone: string;
+  /** 0=Sunday … 6=Saturday. */
+  queue_open_days: number[];
+  queue_auto_start: boolean;
+  queue_auto_close: boolean;
+  /** Short line shown above the public reservation form. */
+  reservation_description: string | null;
+  reservation_max_party_size: number;
+  /** Minutes between bookable slots on the public form. */
+  reservation_interval_minutes: number;
+  reservation_open_time: string;
+  reservation_close_time: string;
+  reservation_allow_same_day: boolean;
+  reservation_allow_notes: boolean;
+  /** 0 = never auto decline (future automation). */
+  reservation_auto_decline_hours: number;
+  reservation_whatsapp_enabled: boolean;
+  /** Merchant stopped taking new online bookings (their own still work). */
+  reservation_paused: boolean;
   slug: string;
   created_at: string;
 }
@@ -93,6 +123,8 @@ export interface MerchantProductRow {
   pending_plan_id: string | null;
   cancel_at_period_end: boolean;
   current_period_end: string | null;
+  trial_started_at: string | null;
+  trial_ends_at: string | null;
 }
 
 export interface CustomerRow {
@@ -122,6 +154,10 @@ export interface QueueSessionRow {
   status: QueueSessionStatus;
   started_at: string;
   ended_at: string | null;
+  /** Teammate who started the session; name/role snapshotted at start time. */
+  started_by_user_id: string | null;
+  started_by_name: string | null;
+  started_by_role: MemberRole | null;
   created_at: string;
   updated_at: string;
 }
@@ -149,6 +185,66 @@ export interface QueueEntryRow {
   updated_at: string;
 }
 
+export interface ReservationRow {
+  id: string;
+  merchant_id: string;
+  branch_id: string | null;
+  reservation_number: number;
+  /** Permanent `rsv_…` token behind the guest's reservation page. */
+  public_token: string;
+  customer_id: string | null;
+  customer_name: string;
+  customer_phone: string;
+  customer_whatsapp: string | null;
+  party_size: number;
+  /** YYYY-MM-DD in the merchant's local timezone. */
+  reservation_date: string;
+  /** HH:MM(:SS) local time. */
+  reservation_time: string;
+  status: ReservationStatus;
+  notes: string | null;
+  merchant_notes: string | null;
+  decline_reason: string | null;
+  /** Set when the merchant proposed a different slot (status stays pending). */
+  suggested_at: string | null;
+  /** The proposed slot, held until the guest accepts it on their page. */
+  suggested_date: string | null;
+  suggested_time: string | null;
+  suggestion_accepted_at: string | null;
+  confirmed_at: string | null;
+  declined_at: string | null;
+  cancelled_at: string | null;
+  /** Who cancelled: "merchant" or "customer". */
+  cancelled_by: string | null;
+  completed_at: string | null;
+  no_show_at: string | null;
+  reminder_24h_sent_at: string | null;
+  reminder_2h_sent_at: string | null;
+  reminder_30m_sent_at: string | null;
+  /** Last send that never reached the guest; cleared once one succeeds. */
+  notify_failed_template: string | null;
+  notify_failed_reason: string | null;
+  notify_failed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One attributed action on a booking — see 0060_reservation_events.sql. */
+export interface ReservationEventRow {
+  id: string;
+  reservation_id: string;
+  merchant_id: string;
+  event: string;
+  /** staff | guest | system. */
+  actor_kind: string;
+  actor_user_id: string | null;
+  /** Name and role snapshotted when the action happened; never backfilled. */
+  actor_name: string | null;
+  actor_role: string | null;
+  detail: string | null;
+  created_at: string;
+}
+
 /** Tracks a called queue party for WhatsApp reminder cron (+3 / +7 / +9 min). */
 export interface QueueCallJobRow {
   id: string;
@@ -162,6 +258,7 @@ export interface QueueCallJobRow {
   status: QueueCallStatus;
   called_at: string;
   called_notified_at: string | null;
+  call_notify_processing_at: string | null;
   reminder_1_scheduled_at: string;
   reminder_2_scheduled_at: string;
   reminder_3_scheduled_at: string;
@@ -201,6 +298,10 @@ export interface VisitRow {
   branch_id: string | null;
   amount: number;
   created_at: string;
+  /** Teammate who granted the stamp; null for rows written before 0052. */
+  performed_by_user_id: string | null;
+  performed_by_name: string | null;
+  performed_by_role: MemberRole | null;
 }
 
 export interface ApprovalRow {
@@ -221,6 +322,10 @@ export interface RedemptionRow {
   customer_id: string | null;
   code: string;
   redeemed_at: string;
+  /** Teammate who redeemed the reward; null for rows written before 0052. */
+  performed_by_user_id: string | null;
+  performed_by_name: string | null;
+  performed_by_role: MemberRole | null;
 }
 
 export interface PushSubscriptionRow {
@@ -229,6 +334,20 @@ export interface PushSubscriptionRow {
   endpoint: string;
   p256dh: string;
   auth: string;
+  created_at: string;
+}
+
+export interface SupportTicketRow {
+  id: string;
+  reference: string;
+  merchant_id: string | null;
+  user_id: string | null;
+  name: string;
+  email: string;
+  category: string;
+  subject: string;
+  message: string;
+  status: string;
   created_at: string;
 }
 
@@ -352,6 +471,12 @@ export interface Database {
         Update: Partial<PushSubscriptionRow>;
         Relationships: [];
       };
+      support_tickets: {
+        Row: SupportTicketRow;
+        Insert: Insert<SupportTicketRow, "id" | "created_at" | "status">;
+        Update: Partial<SupportTicketRow>;
+        Relationships: [];
+      };
       queue_call_jobs: {
         Row: QueueCallJobRow;
         Insert: Insert<
@@ -362,6 +487,7 @@ export interface Database {
           | "status"
           | "called_at"
           | "called_notified_at"
+          | "call_notify_processing_at"
           | "reminder_1_sent_at"
           | "reminder_2_sent_at"
           | "reminder_3_sent_at"
@@ -376,7 +502,16 @@ export interface Database {
         Row: QueueSessionRow;
         Insert: Insert<
           QueueSessionRow,
-          "id" | "created_at" | "updated_at" | "status" | "started_at" | "ended_at" | "branch_id"
+          | "id"
+          | "created_at"
+          | "updated_at"
+          | "status"
+          | "started_at"
+          | "ended_at"
+          | "branch_id"
+          | "started_by_user_id"
+          | "started_by_name"
+          | "started_by_role"
         >;
         Update: Partial<QueueSessionRow>;
         Relationships: [];
@@ -402,6 +537,57 @@ export interface Database {
           | "reservation_time"
         >;
         Update: Partial<QueueEntryRow>;
+        Relationships: [];
+      };
+      reservations: {
+        Row: ReservationRow;
+        Insert: Insert<
+          ReservationRow,
+          | "id"
+          | "created_at"
+          | "updated_at"
+          | "status"
+          | "reservation_number"
+          | "public_token"
+          | "branch_id"
+          | "customer_id"
+          | "customer_whatsapp"
+          | "notes"
+          | "merchant_notes"
+          | "decline_reason"
+          | "suggested_at"
+          | "suggested_date"
+          | "suggested_time"
+          | "suggestion_accepted_at"
+          | "confirmed_at"
+          | "declined_at"
+          | "cancelled_at"
+          | "cancelled_by"
+          | "completed_at"
+          | "no_show_at"
+          | "reminder_24h_sent_at"
+          | "reminder_2h_sent_at"
+          | "reminder_30m_sent_at"
+          | "notify_failed_template"
+          | "notify_failed_reason"
+          | "notify_failed_at"
+        >;
+        Update: Partial<ReservationRow>;
+        Relationships: [];
+      };
+      reservation_events: {
+        Row: ReservationEventRow;
+        Insert: Insert<
+          ReservationEventRow,
+          | "id"
+          | "created_at"
+          | "actor_kind"
+          | "actor_user_id"
+          | "actor_name"
+          | "actor_role"
+          | "detail"
+        >;
+        Update: Partial<ReservationEventRow>;
         Relationships: [];
       };
     };
@@ -439,6 +625,20 @@ export interface Database {
       reject_stamp: { Args: { p_approval_id: string }; Returns: undefined };
       offer_stamp: { Args: { p_customer_id: string }; Returns: number };
       redeem_reward: { Args: { p_customer_id: string; p_code: string }; Returns: undefined };
+      merchant_loyalty_lifetime_stats: {
+        Args: {
+          p_merchant_id: string;
+          p_branch_id?: string | null;
+          p_timezone?: string;
+        };
+        Returns: {
+          total_visits: number;
+          total_redemptions: number;
+          avg_days_between_visits: number | null;
+          most_active_dow: number | null;
+          most_active_hour: number | null;
+        }[];
+      };
     };
     Enums: {
       card_status: CardStatus;
@@ -446,6 +646,7 @@ export interface Database {
       merchant_product: MerchantProductKind;
       product_status: ProductStatus;
       member_role: MemberRole;
+      reservation_status: ReservationStatus;
     };
   };
 }

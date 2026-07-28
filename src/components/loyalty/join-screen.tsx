@@ -9,6 +9,8 @@ import { formatPhoneDisplay, isValidEmail, isValidPhone } from "@/lib/auth/forma
 import { OTP_LENGTH, RESEND_SECONDS, sendOtp, verifyOtp } from "@/lib/auth/otp/client";
 import { useResendCooldown } from "@/lib/auth/otp/use-resend-cooldown";
 import { checkShopMembership, joinMerchant } from "@/app/actions/customer";
+import { TurnstileField } from "@/components/turnstile/turnstile-field";
+import { useTurnstile } from "@/lib/turnstile/use-turnstile";
 import { customerHubPath } from "@/lib/customer/hub";
 import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { OtpInput } from "@/components/auth/otp-input";
@@ -66,6 +68,9 @@ export function JoinScreen({
   const [isReturningMember, setIsReturningMember] = useState(false);
   const [deliveryMessage, setDeliveryMessage] = useState("");
   const resend = useResendCooldown();
+  // Both OTP steps need their own token: sending the code is verified by us,
+  // while minting the session goes through Supabase's captcha-protected grant.
+  const captcha = useTurnstile({ action: "customer-phone-login" });
 
   const e164 = authedPhone || `+91${phone}`;
 
@@ -116,9 +121,14 @@ export function JoinScreen({
       return;
     }
     if (!resend.canResend && step === "otp") return;
+    if (!captcha.ready) {
+      setError(captcha.blockedMessage);
+      return;
+    }
     setError("");
     setStep("checking");
-    const result = await sendOtp(phone);
+    const result = await sendOtp(phone, captcha.token);
+    captcha.reset();
     if (!result.ok) {
       setError(result.message);
       setStep(step === "otp" ? "otp" : "phone");
@@ -128,16 +138,21 @@ export function JoinScreen({
     setDeliveryMessage(result.message);
     resend.start(result.retryAfter ?? RESEND_SECONDS);
     setStep("otp");
-  }, [phone, resend, step]);
+  }, [phone, resend, step, captcha]);
 
   const verify = useCallback(async () => {
     if (otp.length !== OTP_LENGTH) {
       setError("Enter the 6-digit code we sent you.");
       return;
     }
+    if (!captcha.ready) {
+      setError(captcha.blockedMessage);
+      return;
+    }
     setError("");
     setStep("checking");
-    const result = await verifyOtp(phone, otp);
+    const result = await verifyOtp(phone, otp, captcha.token);
+    captcha.reset();
     if (!result.ok) {
       setError(result.message);
       setStep("otp");
@@ -157,7 +172,7 @@ export function JoinScreen({
     }
 
     setStep("signup");
-  }, [otp, phone, slug, router, nextPath]);
+  }, [otp, phone, slug, router, nextPath, captcha]);
 
   const join = useCallback(async () => {
     if (!name.trim()) {
@@ -239,12 +254,18 @@ export function JoinScreen({
                   />
                 </div>
               </label>
+              <TurnstileField {...captcha.fieldProps} />
               {error && (
                 <p className="auth-error" role="alert">
                   {error}
                 </p>
               )}
-              <button type="button" className="cta-btn auth-submit" onClick={sendCode}>
+              <button
+                type="button"
+                className="cta-btn auth-submit"
+                onClick={sendCode}
+                disabled={!captcha.ready}
+              >
                 Send Verification Code
               </button>
               <p className="merchant-auth-note">
@@ -285,6 +306,7 @@ export function JoinScreen({
                 )}
               </div>
               <OtpInput value={otp} length={OTP_LENGTH} onChange={setOtp} />
+              <TurnstileField {...captcha.fieldProps} />
               {error && (
                 <p className="auth-error" role="alert">
                   {error}
@@ -293,7 +315,7 @@ export function JoinScreen({
               <button
                 type="button"
                 className="cta-btn auth-submit"
-                disabled={otp.length !== OTP_LENGTH}
+                disabled={otp.length !== OTP_LENGTH || !captcha.ready}
                 onClick={verify}
               >
                 Verify &amp; continue

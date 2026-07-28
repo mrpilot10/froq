@@ -1,15 +1,16 @@
 "use client";
 
-import { AnalyticsScreen } from "@/components/merchant/analytics-screen";
-import { useMerchantWorkspace } from "@/components/merchant/merchant-workspace-context";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { TAB_HREF } from "@/lib/merchant/nav";
 
-export default function LoyaltyAnalyticsPage() {
-  const { profile, dashboardStats, activeBranchId } = useMerchantWorkspace();
-  return (
-    <AnalyticsScreen
-      profile={profile}
-      initialStats={dashboardStats}
-      activeBranchId={activeBranchId}
-    />
-  );
+/** Loyalty analytics moved to the workspace analytics hub. */
+export default function LoyaltyAnalyticsRedirectPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace(TAB_HREF.analytics);
+  }, [router]);
+
+  return null;
 }

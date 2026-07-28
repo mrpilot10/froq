@@ -6,6 +6,7 @@ import { deleteCustomerAccount, getCustomerHub, type CustomerHome } from "@/app/
 import { customerHubPath } from "@/lib/customer/hub";
 import { createClient } from "@/lib/supabase/client";
 import { LoyaltyExperience } from "@/components/loyalty/loyalty-experience";
+import { LoyaltyCardSkeleton } from "@/components/loyalty/loyalty-card-skeleton";
 
 interface CustomerHubGateProps {
   token: string;
@@ -81,8 +82,11 @@ export function CustomerHubGate({ token }: CustomerHubGateProps) {
     return res;
   }, [home, supabase, router]);
 
+  // `home === null` is "still fetching"; every other non-ready status is being
+  // redirected away by the effect above, so keep the skeleton up rather than
+  // flashing a blank page mid-redirect.
   if (!home || home.status !== "ready") {
-    return null;
+    return <LoyaltyCardSkeleton />;
   }
 
   // Hub composition: only modules that apply for this customer right now.

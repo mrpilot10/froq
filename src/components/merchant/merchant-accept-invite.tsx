@@ -9,6 +9,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Eye, EyeOff, UserPlus } from "lucide-react";
 import { isValidPassword, isValidPhone } from "@/lib/auth/format";
 import { completeTeamInvite, getTeamInvite } from "@/app/merchant/actions";
+import { TurnstileField } from "@/components/turnstile/turnstile-field";
+import { useTurnstile } from "@/lib/turnstile/use-turnstile";
 import { FroqFooter } from "@/components/shared/froq-footer";
 
 type Status = "loading" | "ready" | "saving" | "done" | "invalid";
@@ -29,6 +31,7 @@ export function MerchantAcceptInvite() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const captcha = useTurnstile({ action: "team-invite" });
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +87,10 @@ export function MerchantAcceptInvite() {
       setError("Passwords don’t match.");
       return;
     }
+    if (!captcha.ready) {
+      setError(captcha.blockedMessage);
+      return;
+    }
 
     setStatus("saving");
     const res = await completeTeamInvite({
@@ -92,7 +99,9 @@ export function MerchantAcceptInvite() {
       lastName,
       phone,
       password,
+      captchaToken: captcha.token ?? undefined,
     });
+    captcha.reset();
     if (!res.ok) {
       setError(res.error ?? "Could not complete your invite.");
       setStatus("ready");
@@ -248,13 +257,19 @@ export function MerchantAcceptInvite() {
                 />
               </label>
 
+              <TurnstileField {...captcha.fieldProps} />
+
               {error && (
                 <p className="auth-error" role="alert">
                   {error}
                 </p>
               )}
 
-              <button type="submit" className="cta-btn merchant-cta-accent auth-submit">
+              <button
+                type="submit"
+                className="cta-btn merchant-cta-accent auth-submit"
+                disabled={!captcha.ready}
+              >
                 Create account
               </button>
             </form>

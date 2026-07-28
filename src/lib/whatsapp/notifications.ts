@@ -2,6 +2,10 @@ import "server-only";
 
 import { requireCustomerPublicToken } from "@/lib/customer/hub";
 import { customerHubUrl } from "@/lib/app-url";
+import {
+  requireReservationPublicToken,
+  reservationUrl,
+} from "@/lib/reservations/link";
 import { maskPhone, toCanonicalPhone } from "@/lib/auth/otp/phone";
 import {
   WhatsAppTemplateName,
@@ -34,6 +38,12 @@ export interface SendWhatsAppTemplateInput {
    * Omit for templates with no dynamic URL button (e.g. loyaltycard_reward_claimed).
    */
   publicToken?: string;
+  /**
+   * Reservation page token (`rsv_…`) for templates whose Meta URL button is
+   * https://froq.io/r/{{1}} instead of the customer hub. Mutually exclusive
+   * with `publicToken` — reservation messages link to the booking, not the card.
+   */
+  reservationToken?: string;
 }
 
 export interface ApitxtSendWaResponse {
@@ -96,6 +106,41 @@ function labeledBodyVariables(
       "rewardTitle",
     ],
     loyaltycard_reward_claimed: ["customerName", "rewardTitle", "businessName"],
+    reservation_request_received: [
+      "customerName",
+      "businessName",
+      "date",
+      "time",
+      "partySize",
+    ],
+    reservation_confirmed: [
+      "customerName",
+      "businessName",
+      "date",
+      "time",
+      "partySize",
+    ],
+    reservation_declined: [
+      "customerName",
+      "businessName",
+      "date",
+      "time",
+      "partySize",
+    ],
+    reservation_updated: [
+      "customerName",
+      "businessName",
+      "date",
+      "time",
+      "partySize",
+    ],
+    reservation_reminder: [
+      "customerName",
+      "businessName",
+      "date",
+      "time",
+      "partySize",
+    ],
   };
   const labels = labelsByTemplate[templateName];
   const out: Record<string, string> = {};
@@ -138,6 +183,21 @@ export async function sendWhatsAppTemplate(
     }
   }
 
+  let reservationToken: string | undefined;
+  if (input.reservationToken != null && input.reservationToken.trim()) {
+    try {
+      reservationToken = requireReservationPublicToken(
+        input.reservationToken,
+        "reservationToken",
+      );
+    } catch (error) {
+      throw new WhatsAppTemplateValidationError(
+        error instanceof Error ? error.message : "Invalid reservationToken.",
+        "reservationToken",
+      );
+    }
+  }
+
   const mobile = toCanonicalPhone(input.mobile);
   if (!mobile) {
     throw new WhatsAppTemplateValidationError("Enter a valid mobile number.", "mobile");
@@ -153,7 +213,9 @@ export async function sendWhatsAppTemplate(
   }
 
   const bodyParams = input.bodyParams.map((p) => p.trim());
-  const urlButtons = publicToken ? { "0": publicToken } : undefined;
+  // Reservation templates register /r/{{1}}; everything else /c/{{1}}.
+  const urlButtonParam = reservationToken ?? publicToken;
+  const urlButtons = urlButtonParam ? { "0": urlButtonParam } : undefined;
   const body: Record<string, unknown> = {
     authkey,
     template_name: templateName,
@@ -163,7 +225,7 @@ export async function sendWhatsAppTemplate(
   };
   if (urlButtons) {
     // APITxT schema requires url_buttons as a JSON string, not a nested object.
-    // Dynamic URL button {{1}} — suffix only; Meta template base is /c/{{1}}.
+    // Dynamic URL button {{1}} — suffix only; the base lives in the Meta template.
     body.url_buttons = JSON.stringify(urlButtons);
   }
 
@@ -172,9 +234,13 @@ export async function sendWhatsAppTemplate(
     mobile: maskPhone(mobile),
     bodyParams,
     variables: labeledBodyVariables(templateName, bodyParams),
-    urlButton0: publicToken ?? null,
+    urlButton0: urlButtonParam ?? null,
     urlButtons: urlButtons ?? null,
-    resolvedHubUrl: publicToken ? customerHubUrl(publicToken) : null,
+    resolvedUrl: reservationToken
+      ? reservationUrl(reservationToken)
+      : publicToken
+        ? customerHubUrl(publicToken)
+        : null,
   });
 
   let res: Response;

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import {
   Check,
   ChevronRight,
+  Clock3,
   ImagePlus,
   Trash2,
   Users,
@@ -17,14 +18,24 @@ import {
   getWaitEstimateMeta,
   setInitialEstimatedWaitMinutes,
 } from "@/lib/merchant/queue-settings";
+import {
+  formatHoursSummary,
+  type QueueStoreHours,
+  validateQueueStoreHours,
+} from "@/lib/merchant/queue-hours";
 import { fileToBannerDataUrl } from "@/lib/merchant/image";
 import type { MerchantProfile } from "@/lib/merchant/types";
 import { MerchantPlanCard } from "../plan-card";
 import { MerchantQrPanel } from "../qr-panel";
+import {
+  hoursFromProfile,
+  profilePatchFromHours,
+  QueueHoursFields,
+} from "./queue-hours-fields";
 
 const WAIT_OPTIONS = [5, 8, 10, 12, 15, 20, 30];
 
-type SheetKind = "wait" | "banner" | null;
+type SheetKind = "wait" | "banner" | "hours" | null;
 
 const SHEET_META: Record<Exclude<SheetKind, null>, { title: string; subtitle: string }> = {
   wait: {
@@ -35,6 +46,10 @@ const SHEET_META: Record<Exclude<SheetKind, null>, { title: string; subtitle: st
     title: "Guest banner",
     subtitle: "Image shown on the join screen after a guest joins",
   },
+  hours: {
+    title: "Store timings",
+    subtitle: "Set when you’re open and let Froq start or close the queue for you",
+  },
 };
 
 interface QueueSettingsScreenProps {
@@ -42,6 +57,7 @@ interface QueueSettingsScreenProps {
   banner: string;
   bannerLink: string;
   onSaveBanner: (banner: string, bannerLink: string) => Promise<void> | void;
+  onSaveHours: (hours: QueueStoreHours) => Promise<void> | void;
   productEnabled?: boolean;
   onGetStarted?: () => void;
   onManagePlan?: () => void;
@@ -54,6 +70,7 @@ export function QueueSettingsScreen({
   banner,
   bannerLink,
   onSaveBanner,
+  onSaveHours,
   productEnabled,
   onGetStarted,
   onManagePlan,
@@ -66,14 +83,19 @@ export function QueueSettingsScreen({
   }));
   const [bannerUrl, setBannerUrl] = useState(banner);
   const [linkUrl, setLinkUrl] = useState(bannerLink);
+  const [hours, setHours] = useState<QueueStoreHours>(() => hoursFromProfile(profile));
   const [savingBanner, setSavingBanner] = useState(false);
+  const [savingHours, setSavingHours] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [sheet, setSheet] = useState<SheetKind>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [waitReady, setWaitReady] = useState(false);
+
   useEffect(() => {
     setWaitMinutes(getInitialEstimatedWaitMinutes());
     setWaitMeta(getWaitEstimateMeta());
+    setWaitReady(true);
   }, []);
 
   useEffect(() => {
@@ -83,6 +105,16 @@ export function QueueSettingsScreen({
   useEffect(() => {
     setLinkUrl(bannerLink);
   }, [bannerLink]);
+
+  useEffect(() => {
+    setHours(hoursFromProfile(profile));
+  }, [
+    profile.queueOpenTime,
+    profile.queueCloseTime,
+    profile.queueOpenDays,
+    profile.queueAutoStart,
+    profile.queueAutoClose,
+  ]);
 
   const bannerDirty = bannerUrl !== (banner ?? "") || linkUrl !== (bannerLink ?? "");
   const closeSheet = () => setSheet(null);
@@ -116,6 +148,21 @@ export function QueueSettingsScreen({
     }
   };
 
+  const saveHours = async () => {
+    const error = validateQueueStoreHours(hours);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    setSavingHours(true);
+    try {
+      await onSaveHours(hours);
+      closeSheet();
+    } finally {
+      setSavingHours(false);
+    }
+  };
+
   const saveWait = (minutes: number) => {
     const next = setInitialEstimatedWaitMinutes(minutes);
     setWaitMinutes(next);
@@ -126,16 +173,25 @@ export function QueueSettingsScreen({
   const rows: Array<{
     id: Exclude<SheetKind, null>;
     label: string;
-    value: string;
+    value: ReactNode;
     Icon: typeof Users;
   }> = [
     {
+      id: "hours",
+      label: "Store timings",
+      value: formatHoursSummary(hours),
+      Icon: Clock3,
+    },
+    {
       id: "wait",
       label: "Estimated wait",
-      value:
-        waitMeta.source === "learned"
-          ? `${waitMeta.minutes} min/party · learned`
-          : `${waitMeta.minutes} min/party · your estimate`,
+      value: !waitReady ? (
+        <span className="sk sk-line" style={{ width: 150, display: "block" }} />
+      ) : waitMeta.source === "learned" ? (
+        `${waitMeta.minutes} min/party · learned`
+      ) : (
+        `${waitMeta.minutes} min/party · your estimate`
+      ),
       Icon: Users,
     },
     {
@@ -203,6 +259,20 @@ export function QueueSettingsScreen({
             </div>
 
             <div className="merchant-edit-fields">
+              {sheet === "hours" && (
+                <>
+                  <QueueHoursFields value={hours} onChange={setHours} />
+                  <button
+                    type="button"
+                    className="cta-btn merchant-cta-accent"
+                    disabled={savingHours}
+                    onClick={() => void saveHours()}
+                  >
+                    {savingHours ? "Saving…" : "Save timings"}
+                  </button>
+                </>
+              )}
+
               {sheet === "wait" && (
                 <div className="auth-field">
                   <span className="auth-label">Initial estimate (min per party)</span>
@@ -325,3 +395,5 @@ export function QueueSettingsScreen({
     </div>
   );
 }
+
+export { profilePatchFromHours };

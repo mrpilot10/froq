@@ -1,6 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import QRCode from "qrcode";
 import {
   BarChart3,
@@ -11,9 +20,11 @@ import {
   Megaphone,
   Minus,
   Pause,
+  Phone,
   Play,
   Plus,
   QrCode,
+  Search,
   Square,
   Timer,
   UserPlus,
@@ -23,9 +34,11 @@ import { toast } from "sonner";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import {
   CALL_ACCEPT_MINUTES,
+  callAcceptDeadlineMs,
   getWaitEstimateMeta,
   recordActualWaitMinutes,
 } from "@/lib/merchant/queue-settings";
+import { formatWaitShort, waitSegments } from "@/lib/queue/format";
 import type { MerchantProfile } from "@/lib/merchant/types";
 import {
   addLiveQueueEntry,
@@ -37,9 +50,12 @@ import {
 import {
   archiveQueueSession,
   ensureQueueDataEpoch,
+  type QueueSessionActor,
 } from "@/lib/merchant/queue-session-storage";
+import { startedByLabel } from "@/lib/merchant/queue-session-actor";
 import { joinUrlFor } from "../use-merchant-qr";
 import { useMerchantWorkspace } from "../merchant-workspace-context";
+import { QueueHomeSkeleton } from "./queue-skeletons";
 
 interface QueueHomeScreenProps {
   profile: MerchantProfile;
@@ -60,18 +76,20 @@ interface QueueEntry {
   status: "called" | "waiting" | "seated" | "left";
   kind: "walkin" | "reservation";
   reservationTime?: string;
+  /** How many of the 3 call reminders have been delivered (0–3). */
+  remindersSent?: number;
 }
 
 type SheetKind = "guest" | "reservation" | "qr" | "end" | null;
 type QueueListFilter = "waiting" | "seated" | "left";
 type QueueState = "not_started" | "live" | "paused" | "ended";
 
-interface QueueSession {
+interface QueueSession extends QueueSessionActor {
   number: number;
   startedAtMs: number;
 }
 
-interface EndedSummary {
+interface EndedSummary extends QueueSessionActor {
   number: number;
   startedAtMs: number;
   endedAtMs: number;
@@ -97,6 +115,15 @@ const EMPTY_QUEUE: PersistedQueue = {
   entries: [],
   lastSessionNumber: 0,
 };
+
+/** Lazily filled when the QR sheet opens — keyed by join URL. */
+const queueQrCache = new Map<string, string>();
+
+const QR_ENCODE_OPTS = {
+  margin: 1,
+  width: 440,
+  color: { dark: "#000000", light: "#ffffff" },
+} as const;
 
 function isQueueState(value: unknown): value is QueueState {
   return (
@@ -164,13 +191,269 @@ function waitMinutes(joinedAtMs: number, now: number) {
   return Math.max(0, Math.floor((now - joinedAtMs) / 60_000));
 }
 
+/**
+ * Cheap poll fingerprint — every field QueueEntryCard renders (plus status for
+ * filter membership). Entry order is encoded by concatenation order (token #).
+ * email is omitted: not shown on the card today.
+ */
+function fingerprintEntries(entries: QueueEntry[]): string {
+  let out = String(entries.length);
+  for (const e of entries) {
+    out += `\n${e.id}\0${e.status}\0${e.joinedAtMs}\0${e.calledAtMs ?? ""}\0${
+      e.acceptByMs ?? ""
+    }\0${e.seatedAtMs ?? ""}\0${e.leftAtMs ?? ""}\0${e.partySize}\0${e.name}\0${
+      e.phone
+    }\0${e.kind}\0${e.reservationTime ?? ""}\0${e.remindersSent ?? ""}`;
+  }
+  return out;
+}
+
+function fingerprintSession(session: {
+  status: QueueState;
+  number: number;
+  startedAtMs: number;
+}): string {
+  return `${session.status}\0${session.number}\0${session.startedAtMs}`;
+}
+
+/** 1s accept-window countdown — owns its own clock so the list does not re-render. */
+const AcceptWindowCountdown = memo(function AcceptWindowCountdown({
+  calledAtMs,
+  acceptByMs,
+}: {
+  calledAtMs?: number;
+  acceptByMs?: number;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const deadlineMs =
+    calledAtMs != null ? callAcceptDeadlineMs(calledAtMs) : acceptByMs;
+  const msLeft = deadlineMs != null ? deadlineMs - now : 0;
+  const label = formatCountdown(msLeft);
+  return (
+    <div
+      className={`queue-timer${msLeft < 60_000 ? " is-urgent" : ""}`}
+      aria-label={`${label} left to arrive`}
+    >
+      <Timer size={14} strokeWidth={2.4} />
+      <span className="queue-timer-value">{label}</span>
+    </div>
+  );
+});
+
+/**
+ * Wait-minute label — ticks on each minute boundary for this join time (≤60s),
+ * so "3 min" cannot linger after 4:00 elapsed.
+ */
+const WaitMinutesLabel = memo(function WaitMinutesLabel({
+  joinedAtMs,
+}: {
+  joinedAtMs: number;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    let intervalId = 0;
+    const tick = () => setNow(Date.now());
+    // Sync immediately on mount / joinedAt change — do not keep a stale `now`
+    // from a prior interval across prop updates (wrong minute until next boundary).
+    tick();
+    const elapsed = Date.now() - joinedAtMs;
+    const msIntoMinute = ((elapsed % 60_000) + 60_000) % 60_000;
+    const msToNextMinute = msIntoMinute === 0 ? 60_000 : 60_000 - msIntoMinute;
+    const timeoutId = window.setTimeout(() => {
+      tick();
+      intervalId = window.setInterval(tick, 60_000);
+    }, msToNextMinute);
+    return () => {
+      window.clearTimeout(timeoutId);
+      if (intervalId) window.clearInterval(intervalId);
+    };
+  }, [joinedAtMs]);
+  return <>{waitLabel(waitMinutes(joinedAtMs, now))}</>;
+});
+
+type QueueEntryCardProps = {
+  entry: QueueEntry;
+  token: number;
+  pendingSeating: boolean;
+  pendingLeaving: boolean;
+  actionsBusy: boolean;
+  onCall: (entry: QueueEntry) => void;
+  onSeated: (entry: QueueEntry) => void;
+  onLeft: (entry: QueueEntry) => void;
+};
+
+const QueueEntryCard = memo(function QueueEntryCard({
+  entry,
+  token,
+  pendingSeating,
+  pendingLeaving,
+  actionsBusy,
+  onCall,
+  onSeated,
+  onLeft,
+}: QueueEntryCardProps) {
+  const isSeated = entry.status === "seated";
+  const isLeft = entry.status === "left";
+  const calledCard = entry.status === "called";
+  const timeLabel = (ms?: number) =>
+    ms
+      ? new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      : "";
+
+  const remindersSent = Math.min(3, Math.max(0, entry.remindersSent ?? 0));
+
+  return (
+    <div
+      className={`panel-card queue-entry${calledCard ? " queue-entry--called" : ""}${
+        isSeated ? " queue-entry--seated" : ""
+      }${isLeft ? " queue-entry--left" : ""}`}
+    >
+      <div className="queue-entry-main">
+        <span className="queue-token">#{token}</span>
+        <div className="merchant-avatar">{initials(entry.name)}</div>
+        <div className="queue-entry-copy">
+          <div className="merchant-list-title">
+            {entry.name}
+            {entry.kind === "reservation" && (
+              <span className="queue-entry-badge">Reservation</span>
+            )}
+          </div>
+          {entry.phone ? (
+            <a
+              className="merchant-list-sub queue-entry-phone"
+              href={`tel:${entry.phone.replace(/[^\d+]/g, "")}`}
+            >
+              <Phone size={13} strokeWidth={2.4} aria-hidden="true" />
+              <span>{entry.phone}</span>
+            </a>
+          ) : (
+            <div className="merchant-list-sub">No phone</div>
+          )}
+          <div className="queue-entry-meta">
+            {isSeated
+              ? `${partyLabel(entry.partySize)} · seated${
+                  entry.seatedAtMs ? ` · ${timeLabel(entry.seatedAtMs)}` : ""
+                }`
+              : isLeft
+                ? `${partyLabel(entry.partySize)} · left${
+                    entry.leftAtMs ? ` · ${timeLabel(entry.leftAtMs)}` : ""
+                  }`
+                : calledCard
+                  ? `${partyLabel(entry.partySize)} · Called`
+                  : (
+                      <>
+                        {partyLabel(entry.partySize)} ·{" "}
+                        <WaitMinutesLabel joinedAtMs={entry.joinedAtMs} />
+                      </>
+                    )}
+            {entry.kind === "reservation" && entry.reservationTime && !isSeated && !isLeft
+              ? ` · ${entry.reservationTime}`
+              : ""}
+          </div>
+        </div>
+
+        {calledCard ? (
+          <AcceptWindowCountdown
+            calledAtMs={entry.calledAtMs}
+            acceptByMs={entry.acceptByMs}
+          />
+        ) : null}
+
+        {!isSeated && !isLeft && !calledCard ? (
+          <div className="queue-entry-trailing">
+            <div className="queue-entry-actions">
+              <button
+                type="button"
+                className="queue-act queue-act--call"
+                disabled={actionsBusy}
+                onClick={() => onCall(entry)}
+              >
+                <Megaphone size={14} strokeWidth={2.3} />
+                Call
+              </button>
+              <button
+                type="button"
+                className="queue-act queue-act--left"
+                disabled={actionsBusy}
+                aria-busy={pendingLeaving || undefined}
+                onClick={() => onLeft(entry)}
+              >
+                {pendingLeaving ? (
+                  <span className="merchant-btn-spinner" aria-hidden="true" />
+                ) : (
+                  <X size={14} strokeWidth={2.3} />
+                )}
+                {pendingLeaving ? "Leaving…" : "Left"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {calledCard ? (
+        <div className="queue-entry-foot">
+          <div className="queue-reminders" aria-label="Reminders sent">
+            <span className="queue-reminders-label">
+              Reminders {remindersSent}/3
+            </span>
+            <span className="queue-reminders-dots" aria-hidden="true">
+              {[0, 1, 2].map((index) => (
+                <span
+                  key={index}
+                  className={`queue-reminders-dot${
+                    index < remindersSent ? " is-sent" : ""
+                  }`}
+                />
+              ))}
+            </span>
+          </div>
+          <div className="queue-entry-actions">
+            <button
+              type="button"
+              className="queue-act queue-act--served"
+              disabled={actionsBusy}
+              aria-busy={pendingSeating || undefined}
+              onClick={() => onSeated(entry)}
+            >
+              {pendingSeating ? (
+                <span className="merchant-btn-spinner" aria-hidden="true" />
+              ) : (
+                <Check size={14} strokeWidth={2.3} />
+              )}
+              {pendingSeating ? "Seating…" : "Seated"}
+            </button>
+            <button
+              type="button"
+              className="queue-act queue-act--left"
+              disabled={actionsBusy}
+              aria-busy={pendingLeaving || undefined}
+              onClick={() => onLeft(entry)}
+            >
+              {pendingLeaving ? (
+                <span className="merchant-btn-spinner" aria-hidden="true" />
+              ) : (
+                <X size={14} strokeWidth={2.3} />
+              )}
+              {pendingLeaving ? "Leaving…" : "Left"}
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
 function partyLabel(size: number) {
   return `Party of ${size}`;
 }
 
 function waitLabel(mins: number) {
   if (mins < 1) return "just joined";
-  return `waiting ${mins} min`;
+  return `waiting ${formatWaitShort(mins)}`;
 }
 
 function formatCountdown(msLeft: number) {
@@ -188,16 +471,27 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
   const [lastSessionNumber, setLastSessionNumber] = useState(0);
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [listFilter, setListFilter] = useState<QueueListFilter>("waiting");
-  const [now, setNow] = useState(() => Date.now());
+  const [searchQuery, setSearchQuery] = useState("");
   const acceptMinutes = CALL_ACCEPT_MINUTES;
   const [minsPerParty, setMinsPerParty] = useState(10);
   const [waitSource, setWaitSource] = useState<"initial" | "learned">("initial");
   const [waitSamples, setWaitSamples] = useState(0);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  /** In-flight Seated / Left action — spinner on the pressed button. */
+  const [pendingResolve, setPendingResolve] = useState<{
+    entryId: string;
+    action: "seated" | "left";
+  } | null>(null);
   const resolvedCallRef = useRef<Set<string>>(new Set());
   /** Only persist after hydrate for this exact sessionKey (avoids clobber races). */
   const hydratedKeyRef = useRef<string | null>(null);
+  const pendingResolveRef = useRef<{
+    entryId: string;
+    action: "seated" | "left";
+  } | null>(null);
+  /** Entries with a call request in flight — stops double-taps at the source. */
+  const callingRef = useRef<Set<string>>(new Set());
 
   const isLive = queueState === "live";
   const isPaused = queueState === "paused";
@@ -223,6 +517,13 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     [queueUrl, activeBranchId],
   );
 
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const queueStateRef = useRef(queueState);
+  queueStateRef.current = queueState;
+
   const applyQueueSnapshot = useCallback((snapshot: PersistedQueue) => {
     setQueueState(snapshot.queueState);
     setSession(snapshot.session);
@@ -235,18 +536,40 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     const board = await fetchLiveQueueBoard({ branchId: activeBranchId });
     if (!board.ok) return;
     if (board.session) {
-      setQueueState(board.session.status);
-      setSession({
+      const nextSession = {
         number: board.session.number,
         startedAtMs: board.session.startedAtMs,
-      });
+        startedByName: board.session.startedByName,
+        startedByRole: board.session.startedByRole,
+      };
+      const nextState = board.session.status as QueueState;
+      const sessionChanged =
+        fingerprintSession({
+          status: nextState,
+          number: nextSession.number,
+          startedAtMs: nextSession.startedAtMs,
+        }) !==
+        fingerprintSession({
+          status: queueStateRef.current,
+          number: sessionRef.current?.number ?? -1,
+          startedAtMs: sessionRef.current?.startedAtMs ?? -1,
+        });
+      const entriesChanged =
+        fingerprintEntries(board.entries) !== fingerprintEntries(entriesRef.current);
+
+      if (sessionChanged) {
+        setQueueState(nextState);
+        setSession(nextSession);
+      }
       setLastSessionNumber((n) => Math.max(n, board.session!.number));
-      setEntries(board.entries);
-      if (board.session.status !== "ended") setEndedSummary(null);
-    } else if (queueState === "live" || queueState === "paused") {
+      if (entriesChanged) setEntries(board.entries);
+      if (board.session.status !== "ended") {
+        setEndedSummary((prev) => (prev == null ? prev : null));
+      }
+    } else if (queueStateRef.current === "live" || queueStateRef.current === "paused") {
       // Server has no open session — keep local ended/not_started if already there.
     }
-  }, [activeBranchId, queueState]);
+  }, [activeBranchId]);
 
   const startQueue = () => {
     void startLiveQueueSession({ branchId: activeBranchId }).then((result) => {
@@ -257,6 +580,8 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
       setSession({
         number: result.session.number,
         startedAtMs: result.session.startedAtMs,
+        startedByName: result.session.startedByName,
+        startedByRole: result.session.startedByRole,
       });
       setLastSessionNumber(result.session.number);
       setEndedSummary(null);
@@ -314,6 +639,8 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
         left: entries.filter((e) => e.status !== "seated").length,
         avgWait: 0,
         longestWait: 0,
+        startedByName: session?.startedByName,
+        startedByRole: session?.startedByRole,
       };
       setEntries((prev) =>
         prev.map((e) =>
@@ -351,6 +678,8 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
       setSession({
         number: board.session.number,
         startedAtMs: board.session.startedAtMs,
+        startedByName: board.session.startedByName,
+        startedByRole: board.session.startedByRole,
       });
       setLastSessionNumber((n) => Math.max(n, board.session!.number));
       setEntries(board.entries);
@@ -394,14 +723,18 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     lastSessionNumber,
   ]);
 
+  // Encode QR only when the sheet is open; reuse cache for the same queueUrl.
   useEffect(() => {
+    if (sheet !== "qr") return;
+    const cached = queueQrCache.get(queueUrl);
+    if (cached) {
+      setQrUrl(cached);
+      return;
+    }
     let active = true;
-    QRCode.toDataURL(queueUrl, {
-      margin: 1,
-      width: 440,
-      color: { dark: "#000000", light: "#ffffff" },
-    })
+    QRCode.toDataURL(queueUrl, QR_ENCODE_OPTS)
       .then((url) => {
+        queueQrCache.set(queueUrl, url);
         if (active) setQrUrl(url);
       })
       .catch(() => {
@@ -410,7 +743,7 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     return () => {
       active = false;
     };
-  }, [queueUrl]);
+  }, [sheet, queueUrl]);
 
   useEffect(() => {
     const meta = getWaitEstimateMeta();
@@ -440,23 +773,25 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     return () => window.removeEventListener("froq:queue-settings", onSettings);
   }, []);
 
-  // Tick every second while guests are called (accept-window countdown).
-  useEffect(() => {
-    const hasCalled = entries.some((e) => e.status === "called");
-    const id = window.setInterval(
-      () => setNow(Date.now()),
-      hasCalled ? 1000 : 30_000,
-    );
-    return () => window.clearInterval(id);
-  }, [entries]);
-
   // After reminder 3, keep status "called" until the merchant marks
   // Seated / Left / Skipped — never auto-resolve from the accept window.
 
-  const called = entries.filter((e) => e.status === "called");
-  const waiting = entries.filter((e) => e.status === "waiting");
-  const seated = entries.filter((e) => e.status === "seated");
-  const left = entries.filter((e) => e.status === "left");
+  const called = useMemo(
+    () => entries.filter((e) => e.status === "called"),
+    [entries],
+  );
+  const waiting = useMemo(
+    () => entries.filter((e) => e.status === "waiting"),
+    [entries],
+  );
+  const seated = useMemo(
+    () => entries.filter((e) => e.status === "seated"),
+    [entries],
+  );
+  const left = useMemo(
+    () => entries.filter((e) => e.status === "left"),
+    [entries],
+  );
   const servedCount = seated.length;
 
   const openSheet = (kind: SheetKind) => {
@@ -574,116 +909,133 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     });
   };
 
+  const callEntry = useCallback(
+    (entry: QueueEntry) => {
+      if (callingRef.current.has(entry.id)) return;
+      callingRef.current.add(entry.id);
+      void updateLiveQueueEntryStatus({
+        entryId: entry.id,
+        status: "called",
+        branchId: activeBranchId,
+      })
+        .then((result) => {
+          if (!result.ok || !result.entry) {
+            toast.error(result.error ?? "Couldn't call guest");
+            return;
+          }
+          setEntries((prev) =>
+            prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
+          );
+          if (result.error) {
+            toast.warning(`${entry.name} called · WhatsApp failed: ${result.error}`);
+          } else {
+            toast.success(
+              `${entry.name} has been called · ${acceptMinutes} min to arrive`,
+            );
+          }
+          void syncLiveBoard();
+        })
+        .finally(() => {
+          callingRef.current.delete(entry.id);
+        });
+    },
+    [activeBranchId, acceptMinutes, syncLiveBoard],
+  );
+
   const callNext = useCallback(() => {
     const nextWaiting = entries.find((e) => e.status === "waiting");
     if (!nextWaiting) {
       toast("No one is waiting in the queue");
       return;
     }
-    void updateLiveQueueEntryStatus({
-      entryId: nextWaiting.id,
-      status: "called",
-      branchId: activeBranchId,
-    }).then((result) => {
-      if (!result.ok || !result.entry) {
-        toast.error(result.error ?? "Couldn't call guest");
-        return;
-      }
-      setEntries((prev) =>
-        prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
-      );
-      if (result.error) {
-        toast.warning(
-          `${result.entry.name} called · WhatsApp failed: ${result.error}`,
-        );
-      } else {
-        toast.success(
-          `${result.entry.name} has been called · ${acceptMinutes} min to arrive`,
-        );
-      }
-      void syncLiveBoard();
-    });
-  }, [entries, activeBranchId, syncLiveBoard]);
+    callEntry(nextWaiting);
+  }, [entries, callEntry]);
 
-  const callEntry = (entry: QueueEntry) => {
-    void updateLiveQueueEntryStatus({
-      entryId: entry.id,
-      status: "called",
-      branchId: activeBranchId,
-    }).then((result) => {
-      if (!result.ok || !result.entry) {
-        toast.error(result.error ?? "Couldn't call guest");
-        return;
-      }
-      setEntries((prev) =>
-        prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
+  const markServed = useCallback(
+    (entry: QueueEntry) => {
+      if (pendingResolveRef.current) return;
+      const pending = { entryId: entry.id, action: "seated" as const };
+      pendingResolveRef.current = pending;
+      setPendingResolve(pending);
+      const seatedAtMs = Date.now();
+      const actualWait = Math.max(
+        0,
+        Math.round((seatedAtMs - entry.joinedAtMs) / 60_000),
       );
-      if (result.error) {
-        toast.warning(`${entry.name} called · WhatsApp failed: ${result.error}`);
-      } else {
-        toast.success(
-          `${entry.name} has been called · ${acceptMinutes} min to arrive`,
-        );
-      }
-      void syncLiveBoard();
-    });
-  };
+      const learned = recordActualWaitMinutes(actualWait);
+      const meta = getWaitEstimateMeta();
+      setMinsPerParty(learned);
+      setWaitSource(meta.source);
+      setWaitSamples(meta.samples);
+      void updateLiveQueueEntryStatus({
+        entryId: entry.id,
+        status: "seated",
+        branchId: activeBranchId,
+      })
+        .then((result) => {
+          if (!result.ok || !result.entry) {
+            toast.error(result.error ?? "Couldn't mark seated");
+            return;
+          }
+          setEntries((prev) =>
+            prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
+          );
+          if (result.error) {
+            toast.warning(
+              `${entry.name} seated · WhatsApp failed: ${result.error}`,
+            );
+          } else {
+            toast.success(
+              `${entry.name} marked as seated · wait was ${formatWaitShort(actualWait)}`,
+            );
+          }
+          void syncLiveBoard();
+        })
+        .finally(() => {
+          pendingResolveRef.current = null;
+          setPendingResolve((prev) =>
+            prev?.entryId === entry.id && prev.action === "seated" ? null : prev,
+          );
+        });
+    },
+    [activeBranchId, syncLiveBoard],
+  );
 
-  const markServed = (entry: QueueEntry) => {
-    const seatedAtMs = Date.now();
-    const actualWait = Math.max(0, Math.round((seatedAtMs - entry.joinedAtMs) / 60_000));
-    const learned = recordActualWaitMinutes(actualWait);
-    const meta = getWaitEstimateMeta();
-    setMinsPerParty(learned);
-    setWaitSource(meta.source);
-    setWaitSamples(meta.samples);
-    void updateLiveQueueEntryStatus({
-      entryId: entry.id,
-      status: "seated",
-      branchId: activeBranchId,
-    }).then((result) => {
-      if (!result.ok || !result.entry) {
-        toast.error(result.error ?? "Couldn't mark seated");
-        return;
-      }
-      setEntries((prev) =>
-        prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
-      );
-      setListFilter("seated");
-      if (result.error) {
-        toast.warning(
-          `${entry.name} seated · WhatsApp failed: ${result.error}`,
-        );
-      } else {
-        toast.success(
-          `${entry.name} marked as seated · wait was ${actualWait} min`,
-        );
-      }
-      void syncLiveBoard();
-    });
-  };
-
-  const markLeft = (entry: QueueEntry) => {
-    void updateLiveQueueEntryStatus({
-      entryId: entry.id,
-      status: "left",
-      branchId: activeBranchId,
-    }).then((result) => {
-      if (!result.ok || !result.entry) {
-        toast.error(result.error ?? "Couldn't mark left");
-        return;
-      }
-      setEntries((prev) =>
-        prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
-      );
-      if (result.error) {
-        toast.warning(`${entry.name} left · WhatsApp failed: ${result.error}`);
-      } else {
-        toast(`${entry.name} marked as left`);
-      }
-      void syncLiveBoard();
-    });
-  };
+  const markLeft = useCallback(
+    (entry: QueueEntry) => {
+      if (pendingResolveRef.current) return;
+      const pending = { entryId: entry.id, action: "left" as const };
+      pendingResolveRef.current = pending;
+      setPendingResolve(pending);
+      void updateLiveQueueEntryStatus({
+        entryId: entry.id,
+        status: "left",
+        branchId: activeBranchId,
+      })
+        .then((result) => {
+          if (!result.ok || !result.entry) {
+            toast.error(result.error ?? "Couldn't mark left");
+            return;
+          }
+          setEntries((prev) =>
+            prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
+          );
+          if (result.error) {
+            toast.warning(`${entry.name} left · WhatsApp failed: ${result.error}`);
+          } else {
+            toast(`${entry.name} marked as left`);
+          }
+          void syncLiveBoard();
+        })
+        .finally(() => {
+          pendingResolveRef.current = null;
+          setPendingResolve((prev) =>
+            prev?.entryId === entry.id && prev.action === "left" ? null : prev,
+          );
+        });
+    },
+    [activeBranchId, syncLiveBoard],
+  );
 
   const avgPerTable = minsPerParty;
   const currentWait = waiting.length * avgPerTable;
@@ -705,111 +1057,46 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     link.click();
   };
 
-  const renderEntry = (entry: QueueEntry, token: number) => {
-    const mins = waitMinutes(entry.joinedAtMs, now);
-    const isSeated = entry.status === "seated";
-    const isLeft = entry.status === "left";
-    const calledCard = entry.status === "called";
-    const msLeft = calledCard && entry.acceptByMs ? entry.acceptByMs - now : 0;
-    const timeLabel = (ms?: number) =>
-      ms
-        ? new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-        : "";
-    const meta = isSeated
-      ? `${partyLabel(entry.partySize)} · seated${entry.seatedAtMs ? ` · ${timeLabel(entry.seatedAtMs)}` : ""}`
-      : isLeft
-        ? `${partyLabel(entry.partySize)} · left${entry.leftAtMs ? ` · ${timeLabel(entry.leftAtMs)}` : ""}`
-        : calledCard
-          ? `${partyLabel(entry.partySize)} · called · waiting to enter`
-          : `${partyLabel(entry.partySize)} · ${waitLabel(mins)}`;
-
-    return (
-      <div
-        key={entry.id}
-        className={`panel-card queue-entry${calledCard ? " queue-entry--called" : ""}${
-          isSeated ? " queue-entry--seated" : ""
-        }${isLeft ? " queue-entry--left" : ""}`}
-      >
-        <span className="queue-token">#{token}</span>
-        <div className="merchant-avatar">{initials(entry.name)}</div>
-        <div className="queue-entry-copy">
-          <div className="merchant-list-title">
-            {entry.name}
-            {entry.kind === "reservation" && (
-              <span className="queue-entry-badge">Reservation</span>
-            )}
-          </div>
-          <div className="merchant-list-sub">{entry.phone || "No phone"}</div>
-          <div className="queue-entry-meta">
-            {meta}
-            {entry.kind === "reservation" && entry.reservationTime && !isSeated && !isLeft
-              ? ` · ${entry.reservationTime}`
-              : ""}
-          </div>
-        </div>
-
-        {(calledCard || (!isSeated && !isLeft)) && (
-          <div className="queue-entry-trailing">
-            {calledCard && (
-              <div
-                className={`queue-timer${msLeft < 60_000 ? " is-urgent" : ""}`}
-                aria-label={`${formatCountdown(msLeft)} left to arrive`}
-              >
-                <Timer size={14} strokeWidth={2.4} />
-                <span className="queue-timer-value">{formatCountdown(msLeft)}</span>
-              </div>
-            )}
-
-            {!isSeated && !isLeft && (
-              <div className="queue-entry-actions">
-                {calledCard ? (
-                  <>
-                    <button type="button" className="queue-act queue-act--served" onClick={() => markServed(entry)}>
-                      <Check size={14} strokeWidth={2.3} />
-                      Seated
-                    </button>
-                    <button type="button" className="queue-act queue-act--left" onClick={() => markLeft(entry)}>
-                      <X size={14} strokeWidth={2.3} />
-                      Left
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button type="button" className="queue-act queue-act--call" onClick={() => callEntry(entry)}>
-                      <Megaphone size={14} strokeWidth={2.3} />
-                      Call
-                    </button>
-                    <button type="button" className="queue-act queue-act--left" onClick={() => markLeft(entry)}>
-                      <X size={14} strokeWidth={2.3} />
-                      Left
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
+  const actionsBusy = Boolean(pendingResolve);
 
   // Waiting filter shows called guests first, then the rest of the line.
-  const waitingList = [...called, ...waiting];
+  const waitingList = useMemo(() => [...called, ...waiting], [called, waiting]);
 
-  const filters: Array<{ id: QueueListFilter; label: string; count: number }> = [
-    { id: "waiting", label: "Waiting", count: waitingList.length },
-    { id: "seated", label: "Seated", count: seated.length },
-    { id: "left", label: "Left", count: left.length },
-  ];
+  const filters = useMemo(
+    (): Array<{ id: QueueListFilter; label: string; count: number }> => [
+      { id: "waiting", label: "Waiting", count: waitingList.length },
+      { id: "seated", label: "Seated", count: seated.length },
+      { id: "left", label: "Left", count: left.length },
+    ],
+    [waitingList.length, seated.length, left.length],
+  );
 
-  const activeList =
+  const filteredByTab =
     listFilter === "waiting" ? waitingList : listFilter === "seated" ? seated : left;
-  const emptyCopy =
-    listFilter === "waiting"
+
+  const activeList = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return filteredByTab;
+    const digits = q.replace(/\D/g, "");
+    return filteredByTab.filter((entry) => {
+      if (entry.name.toLowerCase().includes(q)) return true;
+      if (digits && entry.phone.replace(/\D/g, "").includes(digits)) return true;
+      return (entry.email ?? "").toLowerCase().includes(q);
+    });
+  }, [filteredByTab, searchQuery]);
+
+  const searching = searchQuery.trim().length > 0;
+  const emptyCopy = searching
+    ? "No guests match that search."
+    : listFilter === "waiting"
       ? "The line is empty."
       : listFilter === "seated"
         ? "No seated guests yet."
         : "No guests have left.";
+
+  // Session state lives in localStorage, so rendering before hydration would
+  // flash "Queue hasn't started yet" over a queue that is actually running.
+  if (!hydrated) return <QueueHomeSkeleton />;
 
   return (
     <>
@@ -827,7 +1114,9 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
             </div>
             <p className="tab-sub">
               {session && showDashboard
-                ? `Session #${session.number} · Started ${formatClock(session.startedAtMs)}`
+                ? `Session #${session.number} · Started ${formatClock(session.startedAtMs)}${
+                    startedByLabel(session) ? ` by ${startedByLabel(session)}` : ""
+                  }`
                 : queueState === "ended" && endedSummary
                   ? `Session #${endedSummary.number} · Archived`
                   : "Add walk-ins and call guests when their table is ready"}
@@ -926,6 +1215,11 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
                 <span className="queue-summary-eyebrow">Today&apos;s queue completed</span>
                 <span className="queue-summary-session">Session #{endedSummary.number}</span>
               </div>
+              {startedByLabel(endedSummary) ? (
+                <p className="queue-summary-actor">
+                  Started by {startedByLabel(endedSummary)}
+                </p>
+              ) : null}
               <div className="queue-summary-times">
                 <div className="queue-summary-time">
                   <span className="queue-summary-time-label">Started</span>
@@ -952,15 +1246,23 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
                 </div>
                 <div className="queue-summary-stat">
                   <span className="queue-summary-stat-value">
-                    {endedSummary.avgWait}
-                    <span className="queue-summary-stat-unit">min</span>
+                    {waitSegments(endedSummary.avgWait).map((part) => (
+                      <Fragment key={part.unit}>
+                        {part.value}
+                        <span className="queue-summary-stat-unit">{part.unit}</span>
+                      </Fragment>
+                    ))}
                   </span>
                   <span className="queue-summary-stat-label">Average wait</span>
                 </div>
                 <div className="queue-summary-stat">
                   <span className="queue-summary-stat-value">
-                    {endedSummary.longestWait}
-                    <span className="queue-summary-stat-unit">min</span>
+                    {waitSegments(endedSummary.longestWait).map((part) => (
+                      <Fragment key={part.unit}>
+                        {part.value}
+                        <span className="queue-summary-stat-unit">{part.unit}</span>
+                      </Fragment>
+                    ))}
                   </span>
                   <span className="queue-summary-stat-label">Longest wait</span>
                 </div>
@@ -1002,12 +1304,16 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
                   <span className="merchant-ltv-eyebrow">Current wait</span>
                 </div>
                 <div className="merchant-ltv-value queue-wait-value">
-                  {currentWait}
-                  <span className="queue-wait-unit">min</span>
+                  {waitSegments(currentWait).map((part) => (
+                    <Fragment key={part.unit}>
+                      {part.value}
+                      <span className="queue-wait-unit">{part.unit}</span>
+                    </Fragment>
+                  ))}
                 </div>
                 <p className="queue-wait-sub">
                   {waiting.length} {waiting.length === 1 ? "party" : "parties"} in line ·{" "}
-                  {avgPerTable} min per party
+                  {formatWaitShort(avgPerTable)} per party
                   {waitSource === "learned"
                     ? ` · learned from ${waitSamples} seating${waitSamples === 1 ? "" : "s"}`
                     : " · your estimate"}
@@ -1123,6 +1429,30 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
                 <span className="merchant-section-meta">{activeList.length} shown</span>
               </div>
               <div className="queue-board">
+                <label className="merchant-customer-search-field queue-search-field">
+                  <Search size={16} strokeWidth={2.2} aria-hidden />
+                  <input
+                    type="search"
+                    className="merchant-customer-search-input"
+                    placeholder="Search by name or phone…"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    autoComplete="off"
+                    enterKeyHint="search"
+                    aria-label="Search queue guests"
+                  />
+                  {searchQuery ? (
+                    <button
+                      type="button"
+                      className="merchant-customer-search-clear"
+                      aria-label="Clear search"
+                      onClick={() => setSearchQuery("")}
+                    >
+                      <X size={14} strokeWidth={2.4} />
+                    </button>
+                  ) : null}
+                </label>
+
                 <div className="queue-tabs" role="tablist" aria-label="Queue filters">
                   {filters.map(({ id, label, count }) => (
                     <button
@@ -1143,7 +1473,25 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
                   <p className="queue-list-empty">{emptyCopy}</p>
                 ) : (
                   <div className="queue-list">
-                    {activeList.map((entry, i) => renderEntry(entry, i + 1))}
+                    {activeList.map((entry, i) => (
+                      <QueueEntryCard
+                        key={entry.id}
+                        entry={entry}
+                        token={i + 1}
+                        pendingSeating={
+                          pendingResolve?.entryId === entry.id &&
+                          pendingResolve.action === "seated"
+                        }
+                        pendingLeaving={
+                          pendingResolve?.entryId === entry.id &&
+                          pendingResolve.action === "left"
+                        }
+                        actionsBusy={actionsBusy}
+                        onCall={callEntry}
+                        onSeated={markServed}
+                        onLeft={markLeft}
+                      />
+                    ))}
                   </div>
                 )}
               </div>

@@ -3,9 +3,17 @@
  * Keys are scoped per queue URL + branch so multi-branch merchants stay isolated.
  */
 
+import type { MemberRole } from "./types";
+
 export type QueueState = "not_started" | "live" | "paused" | "ended";
 
-export interface QueueSessionRecord {
+/** Teammate who started a session; absent on sessions predating audit tracking. */
+export interface QueueSessionActor {
+  startedByName?: string;
+  startedByRole?: MemberRole;
+}
+
+export interface QueueSessionRecord extends QueueSessionActor {
   id: string;
   number: number;
   startedAtMs: number;
@@ -16,12 +24,12 @@ export interface QueueSessionRecord {
   longestWait: number;
 }
 
-export interface QueueSessionSnapshot {
+export interface QueueSessionSnapshot extends QueueSessionActor {
   number: number;
   startedAtMs: number;
 }
 
-export interface QueueEndedSummary {
+export interface QueueEndedSummary extends QueueSessionActor {
   number: number;
   startedAtMs: number;
   endedAtMs: number;
@@ -41,7 +49,7 @@ export interface PersistedLiveQueue {
 const HISTORY_PREFIX = "froq.queue.history:";
 const MAX_HISTORY = 200;
 /** Bump to wipe all client queue keys once after a reset. */
-const QUEUE_DATA_EPOCH = "2";
+const QUEUE_DATA_EPOCH = "3";
 const QUEUE_DATA_EPOCH_KEY = "froq.queue.dataEpoch";
 
 /**
@@ -181,7 +189,13 @@ export function loadQueueHistoryView(
   branchId: string | null,
 ): {
   sessions: QueueSessionRecord[];
-  live: { number: number; startedAtMs: number; state: "live" | "paused" } | null;
+  live:
+    | (QueueSessionActor & {
+        number: number;
+        startedAtMs: number;
+        state: "live" | "paused";
+      })
+    | null;
 } {
   const archived = readQueueHistory(queueUrl, branchId);
   const liveSnap = readLiveQueueSnapshot(queueUrl, branchId);
@@ -203,6 +217,8 @@ export function loadQueueHistoryView(
           left: summary.left,
           avgWait: summary.avgWait,
           longestWait: summary.longestWait,
+          startedByName: summary.startedByName,
+          startedByRole: summary.startedByRole,
         },
         ...archived,
       ];
@@ -217,6 +233,8 @@ export function loadQueueHistoryView(
           number: liveSnap.session.number,
           startedAtMs: liveSnap.session.startedAtMs,
           state: liveSnap.queueState,
+          startedByName: liveSnap.session.startedByName,
+          startedByRole: liveSnap.session.startedByRole,
         }
       : null;
 

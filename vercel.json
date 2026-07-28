@@ -7,6 +7,14 @@
     {
       "path": "/api/cron/queue-call-reminders",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/queue-auto-sessions",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/reservation-reminders",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

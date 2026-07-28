@@ -1,10 +1,33 @@
+import { CALL_ACCEPT_MINUTES } from "@/lib/merchant/queue-settings";
+
 /**
- * Fixed reminder schedule after a party is marked "called".
- * Offsets are from called_at. Update only this array to change timing.
+ * Minutes remaining in the post-call accept window when each reminder fires.
+ * Reminder 1 → 7 min left, reminder 2 → 3 min left, reminder 3 → 1 min left.
  */
-export const CALL_REMINDER_MINUTES = [3, 7, 9] as const;
+export const CALL_REMINDER_MINUTES_LEFT = [7, 3, 1] as const;
+
+/** Offsets from called_at (accept window minus minutes left). */
+export const CALL_REMINDER_MINUTES: readonly [number, number, number] = [
+  CALL_ACCEPT_MINUTES - CALL_REMINDER_MINUTES_LEFT[0],
+  CALL_ACCEPT_MINUTES - CALL_REMINDER_MINUTES_LEFT[1],
+  CALL_ACCEPT_MINUTES - CALL_REMINDER_MINUTES_LEFT[2],
+];
 
 export type QueueCallReminderNumber = 1 | 2 | 3;
+
+/**
+ * Initial `queue_call_now` recovery (null-claim catch-up).
+ * Reminder 1 fires at CALL_REMINDER_MINUTES[0] (3 min = 180s) — keep this
+ * well below that so the initial call always has a chance to land first.
+ */
+export const CALL_NOTIFY_CATCHUP_AFTER_MS = 30_000;
+
+/**
+ * Stale processing lock release for in-flight `queue_call_now` sends.
+ * Clears `call_notify_processing_at` only — never touches `called_notified_at`.
+ * Must stay below reminder 1 (180s).
+ */
+export const CALL_NOTIFY_PROCESSING_STALE_MS = 120_000;
 
 /** @deprecated Prefer CALL_REMINDER_MINUTES — kept as a keyed map for callers. */
 export const QUEUE_CALL_REMINDER_OFFSETS_MS = {

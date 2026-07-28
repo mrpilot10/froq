@@ -32,6 +32,43 @@ export function formatEstimatedWaitTime(minutes: number): string {
   return `${hourPart} ${mins} ${mins === 1 ? "min" : "mins"}`;
 }
 
+export interface WaitSegment {
+  value: number;
+  unit: "h" | "m";
+}
+
+/**
+ * Wait duration split into renderable parts so UIs can style the unit
+ * separately. Minutes are dropped once they hit zero on an exact hour.
+ *
+ *   45 → [45m]
+ *   60 → [1h]
+ *   75 → [1h, 15m]
+ *   1608 → [26h, 48m]
+ */
+export function waitSegments(minutes: number): WaitSegment[] {
+  const total = Number.isFinite(minutes) ? Math.max(0, Math.round(minutes)) : 0;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+
+  if (hours === 0) return [{ value: mins, unit: "m" }];
+  if (mins === 0) return [{ value: hours, unit: "h" }];
+  return [
+    { value: hours, unit: "h" },
+    { value: mins, unit: "m" },
+  ];
+}
+
+/**
+ * Compact wait duration for inline copy and toasts.
+ *   45 → "45m", 75 → "1h 15m", 1608 → "26h 48m"
+ */
+export function formatWaitShort(minutes: number): string {
+  return waitSegments(minutes)
+    .map((part) => `${part.value}${part.unit}`)
+    .join(" ");
+}
+
 /**
  * Party / booking size for queue templates.
  *   1 → "1 person"

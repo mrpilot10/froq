@@ -2,10 +2,11 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  CALL_REMINDER_MINUTES,
+  CALL_REMINDER_MINUTES_LEFT,
   QUEUE_CALL_REMINDER_TEMPLATE,
   type QueueCallReminderNumber,
 } from "@/lib/queue/call-reminders";
+import { catchUpUndeliveredQueueCalls } from "@/lib/notifications/queue-call-now";
 import { sendCustomerNotification } from "@/lib/notifications/dispatcher";
 
 export interface QueueCallReminderResult {
@@ -112,7 +113,9 @@ async function loadNotifiableCustomer(
 
   return {
     phone: customer.phone,
-    name: customer.name || job.customer_name,
+    // The job carries the name given when this guest joined; `customers.name`
+    // can belong to an earlier visitor on the same number.
+    name: job.customer_name?.trim() || customer.name,
     publicToken: customer.public_token,
     whatsappAvailable: customer.whatsapp_available === true,
     preferredNotificationChannel:
@@ -133,7 +136,7 @@ async function loadBusinessName(
 }
 
 /**
- * Cron worker: send due queue call reminders (CALL_REMINDER_MINUTES).
+ * Cron worker: recover initial call notify, then send due reminders.
  *
  * Missed-cron recovery: any reminder with scheduled_at <= now and
  * sent_at IS NULL is eligible — delayed wakes catch up in order.
@@ -149,6 +152,11 @@ export async function processQueueCallReminders(
   const admin = createAdminClient();
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
+
+  const catchup = await catchUpUndeliveredQueueCalls(admin, nowMs, limit);
+  if (catchup.sent || catchup.failed) {
+    jobLog("info", "initial_call_catchup_summary", catchup);
+  }
 
   // Candidates: still called, at least one reminder unsent, and rem1 schedule
   // has passed (implies later reminders may also be due for catch-up).
@@ -248,7 +256,11 @@ export async function processQueueCallReminders(
 
         const businessName = await loadBusinessName(admin, working.merchant_id);
         const result = await sendCustomerNotification({
-          customer,
+          customer: {
+            ...customer,
+            whatsappAvailable: true,
+            preferredNotificationChannel: "whatsapp",
+          },
           template: QUEUE_CALL_REMINDER_TEMPLATE[reminder],
           data: {
             businessName,
@@ -270,7 +282,7 @@ export async function processQueueCallReminders(
         jobLog("info", "reminder_sent", {
           jobId: working.id,
           reminder,
-          minutes: CALL_REMINDER_MINUTES[reminder - 1],
+          minutesLeft: CALL_REMINDER_MINUTES_LEFT[reminder - 1],
           channel: result.channel,
         });
       } catch (err) {

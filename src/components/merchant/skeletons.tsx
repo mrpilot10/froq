@@ -199,7 +199,13 @@ export function ProfileSkeleton() {
 // Neutral brand splash shown during the very first gate load, before we know
 // whether the visitor is logged in. Using the auth-screen layout (logo + spinner)
 // avoids flashing the dashboard skeleton on the way to the login screen.
-export function MerchantGateSplash() {
+export function MerchantGateSplash({
+  title = "Loading your workspace",
+  sub = "Just a moment…",
+}: {
+  title?: string;
+  sub?: string;
+} = {}) {
   return (
     <div className="merchant-page merchant-theme">
       <div className="merchant-screen auth-screen">
@@ -214,8 +220,8 @@ export function MerchantGateSplash() {
         <div className="auth-card">
           <div className="auth-loading" aria-live="polite" aria-busy="true">
             <div className="processing-spinner" aria-hidden="true" />
-            <p className="processing-title">Loading your workspace</p>
-            <p className="processing-sub">Just a moment…</p>
+            <p className="processing-title">{title}</p>
+            <p className="processing-sub">{sub}</p>
           </div>
         </div>
 
@@ -256,6 +262,7 @@ export function MerchantTabSkeleton({ tab }: { tab: MerchantTab }) {
   switch (tab) {
     case "customers":
     case "loyalty-customers":
+    case "queue-customers":
       return <CustomersSkeleton />;
     case "approvals":
       return <ApprovalsSkeleton />;
@@ -266,7 +273,7 @@ export function MerchantTabSkeleton({ tab }: { tab: MerchantTab }) {
     case "queue-settings":
       return <ProfileSkeleton />;
     case "analytics":
-    case "loyalty-analytics":
+    case "loyalty-history":
     default:
       return <DashboardSkeleton />;
   }

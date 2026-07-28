@@ -2,30 +2,85 @@
 
 import { FROQ_LOGO_SRC } from "@/lib/brand";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, Eye, EyeOff, KeyRound, Lock, Mail } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { isValidEmail, isValidPassword } from "@/lib/auth/format";
 import {
   requestMerchantPasswordReset,
   signInMerchantWithPassword,
 } from "@/app/merchant/actions";
+import { GoogleIdentityProvider } from "@/components/auth/google-identity-provider";
+import { GoogleOneTap } from "@/components/auth/google-one-tap";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+import { googleAuthErrorMessage } from "@/lib/auth/google-errors";
+import { TurnstileField } from "@/components/turnstile/turnstile-field";
+import { useTurnstile } from "@/lib/turnstile/use-turnstile";
 import { FroqFooter } from "@/components/shared/froq-footer";
+import type { MerchantProduct } from "@/lib/merchant/types";
 
 type View = "login" | "forgot" | "sent";
 
 interface MerchantLoginProps {
-  onAuthed: () => void;
+  onAuthed: () => void | Promise<void>;
+  /** Product the merchant is signing in to; null on product-agnostic routes. */
+  product?: MerchantProduct | null;
 }
 
-export function MerchantLogin({ onAuthed }: MerchantLoginProps) {
+/**
+ * Per-product framing. Signing in happens against one Froq account either way —
+ * only the wording and the "create an account" destination change, so arriving
+ * from Queue Management doesn't look like a loyalty login.
+ */
+const PRODUCT_COPY: Record<MerchantProduct, { tag: string; signUpHref: string }> = {
+  loyalty: { tag: "Loyalty Stamps dashboard", signUpHref: "/loyalty-stamps#pricing" },
+  queue: { tag: "Queue Management dashboard", signUpHref: "/checkout?plan=queue-growth" },
+  reservation: {
+    tag: "Reservations dashboard",
+    signUpHref: "/checkout?plan=reservation-growth",
+  },
+};
+
+/**
+ * Why the merchant bounced back from /auth/callback without a session. The gate
+ * mounts this after hydration, so reading the URL here is safe.
+ */
+function initialOAuthError(): string {
+  if (typeof window === "undefined") return "";
+  const reason = new URLSearchParams(window.location.search).get("auth_error");
+  if (!reason) return "";
+  return googleAuthErrorMessage(reason);
+}
+
+export function MerchantLogin({ onAuthed, product = null }: MerchantLoginProps) {
+  const copy = product ? PRODUCT_COPY[product] : null;
+  const pathname = usePathname();
   const [view, setView] = useState<View>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialOAuthError);
   const [loading, setLoading] = useState(false);
+  // One challenge serves both views: switching between sign-in and forgot
+  // remounts the widget, which mints a token for whichever form is showing.
+  const captcha = useTurnstile({ action: view === "forgot" ? "password-reset" : "merchant-sign-in" });
+
+  // Drop the param once it has been shown, so a refresh doesn't keep a stale
+  // Google failure on screen.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("auth_error")) return;
+
+    params.delete("auth_error");
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}`,
+    );
+  }, []);
 
   const handleSignIn = useCallback(
     async (event: React.FormEvent) => {
@@ -40,19 +95,31 @@ export function MerchantLogin({ onAuthed }: MerchantLoginProps) {
         setError("Password must be at least 8 characters.");
         return;
       }
-
-      setLoading(true);
-      const res = await signInMerchantWithPassword(email, password);
-      setLoading(false);
-
-      if (!res.ok) {
-        setError(res.error ?? "Could not sign in.");
+      if (!captcha.ready) {
+        setError(captcha.blockedMessage);
         return;
       }
 
-      onAuthed();
+      setLoading(true);
+      try {
+        const res = await signInMerchantWithPassword(email, password, captcha.token ?? undefined);
+        // Single-use token: replace it before any retry, successful or not.
+        captcha.reset();
+        if (!res.ok) {
+          setError(res.error ?? "Could not sign in.");
+          setLoading(false);
+          return;
+        }
+
+        // Keep the signing-in UI up until the gate finishes loading the
+        // workspace — clearing loading here used to flash the form again.
+        await onAuthed();
+      } catch {
+        setError("Could not sign in.");
+        setLoading(false);
+      }
     },
-    [email, password, onAuthed],
+    [email, password, onAuthed, captcha],
   );
 
   const handleForgot = useCallback(
@@ -64,9 +131,14 @@ export function MerchantLogin({ onAuthed }: MerchantLoginProps) {
         setError("Enter a valid email address.");
         return;
       }
+      if (!captcha.ready) {
+        setError(captcha.blockedMessage);
+        return;
+      }
 
       setLoading(true);
-      const res = await requestMerchantPasswordReset(email);
+      const res = await requestMerchantPasswordReset(email, captcha.token ?? undefined);
+      captcha.reset();
       setLoading(false);
 
       if (!res.ok) {
@@ -76,8 +148,20 @@ export function MerchantLogin({ onAuthed }: MerchantLoginProps) {
 
       setView("sent");
     },
-    [email],
+    [email, captcha],
   );
+
+  // One Tap and Google's button report through the card's own progress and
+  // error UI, so a Google sign-in looks like any other.
+  const handleGoogleStart = useCallback(() => {
+    setError("");
+    setLoading(true);
+  }, []);
+
+  const handleGoogleError = useCallback((message: string) => {
+    setError(message);
+    setLoading(false);
+  }, []);
 
   return (
     <div className="merchant-page merchant-theme">
@@ -87,7 +171,7 @@ export function MerchantLogin({ onAuthed }: MerchantLoginProps) {
             <Image src={FROQ_LOGO_SRC} alt="Froq" width={64} height={64} priority />
           </div>
           <h1 className="merchant-auth-brand">Froq for Business</h1>
-          <p className="merchant-auth-tag">Merchant dashboard</p>
+          <p className="merchant-auth-tag">{copy?.tag ?? "Merchant dashboard"}</p>
         </header>
 
         <div className="auth-card">
@@ -163,13 +247,19 @@ export function MerchantLogin({ onAuthed }: MerchantLoginProps) {
                 />
               </label>
 
+              <TurnstileField {...captcha.fieldProps} />
+
               {error && (
                 <p className="auth-error" role="alert">
                   {error}
                 </p>
               )}
 
-              <button type="submit" className="cta-btn merchant-cta-accent auth-submit">
+              <button
+                type="submit"
+                className="cta-btn merchant-cta-accent auth-submit"
+                disabled={!captcha.ready}
+              >
                 Send reset link
               </button>
             </form>
@@ -181,8 +271,23 @@ export function MerchantLogin({ onAuthed }: MerchantLoginProps) {
                 </div>
                 <h2 className="auth-title">Merchant log in</h2>
                 <p className="auth-sub">
-                  Sign in with the email and password you used when creating your Froq account.
+                  Continue with Google, or use the email and password you set up your Froq account
+                  with.
                 </p>
+              </div>
+
+              <GoogleIdentityProvider
+                next={pathname || "/merchant"}
+                onStart={handleGoogleStart}
+                onSignedIn={onAuthed}
+                onError={handleGoogleError}
+              >
+                <GoogleOneTap />
+                <GoogleSignInButton />
+              </GoogleIdentityProvider>
+
+              <div className="auth-divider">
+                <span>or</span>
               </div>
 
               <label className="auth-field">
@@ -239,20 +344,26 @@ export function MerchantLogin({ onAuthed }: MerchantLoginProps) {
                 </div>
               </label>
 
+              <TurnstileField {...captcha.fieldProps} />
+
               {error && (
                 <p className="auth-error" role="alert">
                   {error}
                 </p>
               )}
 
-              <button type="submit" className="cta-btn merchant-cta-accent auth-submit">
+              <button
+                type="submit"
+                className="cta-btn merchant-cta-accent auth-submit"
+                disabled={!captcha.ready}
+              >
                 Sign in
               </button>
 
               <p className="merchant-auth-note">
                 <Lock size={13} strokeWidth={2.2} />
                 New here?{" "}
-                <Link href="/#pricing" className="auth-link">
+                <Link href={copy?.signUpHref ?? "/loyalty-stamps#pricing"} className="auth-link">
                   Create an account
                 </Link>
               </p>

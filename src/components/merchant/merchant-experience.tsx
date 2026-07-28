@@ -2,7 +2,16 @@
 
 import { FROQ_LOGO_SRC } from "@/lib/brand";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Menu } from "lucide-react";
@@ -10,6 +19,7 @@ import { toast } from "sonner";
 import type { Branch, MemberRole, MerchantCustomer, MerchantEditSection, MerchantMember, MerchantProduct, MerchantProfile, MerchantTab, PendingApproval, DashboardFilteredStats } from "@/lib/merchant/types";
 import {
   ALL_TABS,
+  OWNER_WORKSPACE_TABS,
   PRODUCT_DEFAULT_TAB,
   TAB_HREF,
   TAB_LABELS,
@@ -44,19 +54,68 @@ import { MerchantNotificationsDrawer } from "./notifications-drawer";
 import { OnboardingPrompt } from "./onboarding-prompt";
 import { ProductRail } from "./product-rail";
 import { MerchantProfileEditScreen } from "./profile-edit-screen";
-import { MerchantQrDrawer } from "./qr-drawer";
-import { RedeemDrawer } from "./redeem-drawer";
 import { MerchantWorkspaceProvider, type MerchantWorkspaceValue } from "./merchant-workspace-context";
 import { BranchSwitcher } from "./branch-switcher";
-import { BranchesTeamDrawer } from "./branches-team-drawer";
-import { OnboardingWizard } from "./onboarding/onboarding-wizard";
-import { ProductPurchaseDrawer } from "./product-purchase-drawer";
 import {
+  hasUsedTrial,
   isProductEnabled,
+  isTrialActive,
+  isTrialExpired,
   productNeedsOnboarding,
   type Entitlements,
 } from "@/lib/merchant/entitlements";
-import { loyaltyPlanLimits } from "@/lib/merchant/plan-limits";
+import { maxBranchesFor } from "@/lib/merchant/plan-limits";
+import { MerchantGateSplash } from "./skeletons";
+import { ProductLockedGate } from "./product-locked-gate";
+
+function DrawerChunkFallback({ className }: { className?: string }) {
+  return (
+    <div
+      className={`thanks-overlay open${className ? ` ${className}` : ""}`}
+      role="dialog"
+      aria-modal="true"
+      aria-busy="true"
+    >
+      <div className="thanks-sheet">
+        <div className="sheet-handle" />
+      </div>
+    </div>
+  );
+}
+
+const MerchantQrDrawer = dynamic(
+  () => import("./qr-drawer").then((m) => m.MerchantQrDrawer),
+  { ssr: false, loading: () => <DrawerChunkFallback /> },
+);
+
+const RedeemDrawer = dynamic(
+  () => import("./redeem-drawer").then((m) => m.RedeemDrawer),
+  {
+    ssr: false,
+    loading: () => <DrawerChunkFallback className="merchant-theme merchant-redeem-drawer" />,
+  },
+);
+
+const ProductPurchaseDrawer = dynamic(
+  () => import("./product-purchase-drawer").then((m) => m.ProductPurchaseDrawer),
+  {
+    ssr: false,
+    loading: () => <DrawerChunkFallback className="merchant-theme merchant-edit-drawer" />,
+  },
+);
+
+const BranchesTeamDrawer = dynamic(
+  () => import("./branches-team-drawer").then((m) => m.BranchesTeamDrawer),
+  {
+    ssr: false,
+    loading: () => <DrawerChunkFallback className="merchant-theme merchant-edit-drawer" />,
+  },
+);
+
+const OnboardingWizard = dynamic(
+  () => import("./onboarding/onboarding-wizard").then((m) => m.OnboardingWizard),
+  { ssr: false, loading: () => <MerchantGateSplash /> },
+);
 
 interface MerchantWorkspaceProps {
   profile: MerchantProfile;
@@ -95,8 +154,17 @@ export function MerchantExperience({
 }: MerchantWorkspaceProps) {
   const router = useRouter();
   const pathname = usePathname() ?? TAB_HREF.dashboard;
+  const [, startNavTransition] = useTransition();
 
-  const activeTab = tabForPathname(pathname);
+  const pathTab = tabForPathname(pathname);
+  /** Optimistic highlight while the soft navigation settles. */
+  const [pendingTab, setPendingTab] = useState<MerchantTab | null>(null);
+  const activeTab = pendingTab ?? pathTab;
+
+  useEffect(() => {
+    if (pendingTab && pathTab === pendingTab) setPendingTab(null);
+  }, [pathTab, pendingTab]);
+
   // Shared pages (customers / business settings) keep whichever product the
   // merchant last viewed, so the rail + sidebar context doesn't jump around.
   const productFromPath = productForPathname(pathname);
@@ -109,10 +177,18 @@ export function MerchantExperience({
     }
   }, [productFromPath, activeProduct]);
 
-  // Non-owners can't stay on workspace hubs (All customers / All analytics).
+  // Warm the App Router cache so tab switches feel instant.
+  useEffect(() => {
+    for (const tab of ALL_TABS) {
+      if (tab === "scan" || tab === "approvals") continue;
+      router.prefetch(TAB_HREF[tab]);
+    }
+  }, [router]);
+
+  // Non-owners can't stay on owner-only workspace hubs (All customers).
   useEffect(() => {
     if (role === "owner") return;
-    if (activeTab === "customers" || activeTab === "analytics") {
+    if (OWNER_WORKSPACE_TABS.includes(activeTab)) {
       router.replace(TAB_HREF[PRODUCT_DEFAULT_TAB[activeProduct]]);
     }
   }, [role, activeTab, activeProduct, router]);
@@ -128,7 +204,26 @@ export function MerchantExperience({
   const [purchaseProductTarget, setPurchaseProductTarget] = useState<MerchantProduct | null>(null);
   const [manageView, setManageView] = useState<"branches" | "team" | null>(null);
 
+  // Latches: mount heavy drawers after first open so cold load skips their
+  // chunks, while later close/reopen keeps exit animations + internal state.
+  const [qrOpened, setQrOpened] = useState(false);
+  const [redeemOpened, setRedeemOpened] = useState(false);
+  const [purchaseOpened, setPurchaseOpened] = useState(false);
+  const [manageOpened, setManageOpened] = useState(false);
+
   useEffect(() => setProfile(initialProfile), [initialProfile]);
+  useEffect(() => {
+    if (qrOpen) setQrOpened(true);
+  }, [qrOpen]);
+  useEffect(() => {
+    if (redeemOpen) setRedeemOpened(true);
+  }, [redeemOpen]);
+  useEffect(() => {
+    if (purchaseProductTarget) setPurchaseOpened(true);
+  }, [purchaseProductTarget]);
+  useEffect(() => {
+    if (manageView) setManageOpened(true);
+  }, [manageView]);
 
   // Navigate to a tab by pushing its route (URL is the source of truth).
   const goToTab = useCallback(
@@ -137,18 +232,22 @@ export function MerchantExperience({
         setRedeemOpen(true);
         return;
       }
-      if (
-        (tab === "customers" || tab === "analytics") &&
-        role !== "owner"
-      ) {
+      if (OWNER_WORKSPACE_TABS.includes(tab) && role !== "owner") {
         toast.error("Only the owner can open this page.");
+        return;
+      }
+      if (tab === pathTab) {
+        setPendingTab(null);
         return;
       }
       const product = productForTab(tab);
       if (product) setActiveProduct(product);
-      router.push(TAB_HREF[tab]);
+      setPendingTab(tab);
+      startNavTransition(() => {
+        router.push(TAB_HREF[tab]);
+      });
     },
-    [router, role],
+    [router, role, pathTab],
   );
 
   const openQr = useCallback(
@@ -164,10 +263,18 @@ export function MerchantExperience({
   // Switch product from the rail and land on that product's default tab.
   const goToProduct = useCallback(
     (product: MerchantProduct) => {
+      const tab = PRODUCT_DEFAULT_TAB[product];
       setActiveProduct(product);
-      router.push(TAB_HREF[PRODUCT_DEFAULT_TAB[product]]);
+      if (tab === pathTab) {
+        setPendingTab(null);
+        return;
+      }
+      setPendingTab(tab);
+      startNavTransition(() => {
+        router.push(TAB_HREF[tab]);
+      });
     },
-    [router],
+    [router, pathTab],
   );
 
   // After a successful in-dashboard purchase: refresh entitlements and route to
@@ -339,6 +446,49 @@ export function MerchantExperience({
     [run],
   );
 
+  const handleSaveQueueHours = useCallback(
+    async (hours: {
+      openTime: string;
+      closeTime: string;
+      openDays: number[];
+      autoSessions: boolean;
+    }) => {
+      const patch = {
+        queueOpenTime: hours.openTime,
+        queueCloseTime: hours.closeTime,
+        queueHoursTimezone: "Asia/Kolkata" as const,
+        queueOpenDays: hours.openDays,
+        queueAutoStart: hours.autoSessions,
+        queueAutoClose: hours.autoSessions,
+      };
+      setProfile((prev) => ({ ...prev, ...patch }));
+      await run(() => updateMerchantProfile(patch), "Store timings saved");
+    },
+    [run],
+  );
+
+  const handleSaveReservationSettings = useCallback(
+    async (patch: Partial<MerchantProfile>) => {
+      setProfile((prev) => ({ ...prev, ...patch }));
+      await run(() => updateMerchantProfile(patch), "Reservation settings saved");
+    },
+    [run],
+  );
+
+  const handleSetReservationPaused = useCallback(
+    async (paused: boolean) => {
+      setProfile((prev) => ({ ...prev, reservationPaused: paused }));
+      const ok = await run(
+        () => updateMerchantProfile({ reservationPaused: paused }),
+        paused ? "Bookings stopped" : "Bookings open again",
+      );
+      // The optimistic flip has to come back if the write failed, otherwise the
+      // dashboard claims bookings are closed while the form is still live.
+      if (!ok) setProfile((prev) => ({ ...prev, reservationPaused: !paused }));
+    },
+    [run],
+  );
+
   const onCreateBranch = useCallback(
     async (input: { name: string; address?: string }): Promise<string | null> => {
       const res = await createBranch(input);
@@ -456,6 +606,9 @@ export function MerchantExperience({
       onConfirmOfferStamp: handleConfirmOfferStamp,
       onEditSection: setEditSection,
       onSaveQueueBanner: handleSaveQueueBanner,
+      onSaveQueueHours: handleSaveQueueHours,
+      onSaveReservationSettings: handleSaveReservationSettings,
+      onSetReservationPaused: handleSetReservationPaused,
       onDeleteAccount: () => setDeleteOpen(true),
       onLogout,
     }),
@@ -487,10 +640,22 @@ export function MerchantExperience({
       handleRequestOfferStampOtp,
       handleConfirmOfferStamp,
       handleSaveQueueBanner,
+      handleSaveQueueHours,
+      handleSaveReservationSettings,
+      handleSetReservationPaused,
       onRefresh,
       onLogout,
     ],
   );
+
+  // Product paywall: the product's own screens are replaced by a pitch card over
+  // a blurred page. The plan pages stay reachable — that's where the CTA lands.
+  const lockedProduct =
+    productFromPath &&
+    !isProductEnabled(entitlements, productFromPath) &&
+    !pathname.endsWith("/plan")
+      ? productFromPath
+      : null;
 
   // Per-product onboarding gate: a purchased product whose setup isn't finished
   // takes over the screen (full-screen wizard) until completed.
@@ -584,7 +749,21 @@ export function MerchantExperience({
 
         <main className="merchant-content">
           <MerchantWorkspaceProvider value={workspaceValue}>
-            {children}
+            {lockedProduct ? (
+              <ProductLockedGate
+                product={lockedProduct}
+                tab={activeTab}
+                canPurchase={role === "owner"}
+                canStartTrial={
+                  (lockedProduct === "queue" || lockedProduct === "reservation") &&
+                  !hasUsedTrial(entitlements[lockedProduct])
+                }
+                trialExpired={isTrialExpired(entitlements[lockedProduct])}
+                onTrialStarted={onRefresh}
+              />
+            ) : (
+              children
+            )}
           </MerchantWorkspaceProvider>
         </main>
       </div>
@@ -613,6 +792,7 @@ export function MerchantExperience({
         role={role}
         entitlements={entitlements}
         canPurchase={role === "owner"}
+        userName={sidebarUserName}
         onTabChange={goToTab}
         onProductChange={goToProduct}
         onUpgrade={(product) => {
@@ -622,46 +802,60 @@ export function MerchantExperience({
           }
           setPurchaseProductTarget(product);
         }}
+        onOpenAccount={() => setEditSection("account")}
         onLogout={onLogout}
         onClose={() => setMenuOpen(false)}
       />
 
-      <MerchantQrDrawer
-        open={qrOpen}
-        profile={profile}
-        product={qrProduct}
-        enabled={isProductEnabled(entitlements, qrProduct)}
-        branchSlug={activeBranch && !activeBranch.isDefault ? activeBranch.slug : null}
-        branchName={activeBranch && !activeBranch.isDefault ? activeBranch.name : null}
-        onClose={() => setQrOpen(false)}
-      />
+      {qrOpened && (
+        <MerchantQrDrawer
+          open={qrOpen}
+          profile={profile}
+          product={qrProduct}
+          enabled={isProductEnabled(entitlements, qrProduct)}
+          branchSlug={activeBranch && !activeBranch.isDefault ? activeBranch.slug : null}
+          branchName={activeBranch && !activeBranch.isDefault ? activeBranch.name : null}
+          onClose={() => setQrOpen(false)}
+        />
+      )}
 
-      <RedeemDrawer
-        open={redeemOpen}
-        onClose={() => setRedeemOpen(false)}
-        onRedeem={handleRedeem}
-      />
+      {redeemOpened && (
+        <RedeemDrawer
+          open={redeemOpen}
+          onClose={() => setRedeemOpen(false)}
+          onRedeem={handleRedeem}
+        />
+      )}
 
-      <ProductPurchaseDrawer
-        product={purchaseProductTarget}
-        onClose={() => setPurchaseProductTarget(null)}
-        onPurchased={handlePurchased}
-      />
+      {purchaseOpened && (
+        <ProductPurchaseDrawer
+          product={purchaseProductTarget}
+          onClose={() => setPurchaseProductTarget(null)}
+          onPurchased={handlePurchased}
+        />
+      )}
 
-      <BranchesTeamDrawer
-        view={manageView}
-        branches={branches}
-        members={members}
-        role={role}
-        maxBranches={loyaltyPlanLimits(entitlements.loyalty?.planId).maxBranches}
-        onCreateBranch={onCreateBranch}
-        onUpdateBranch={onUpdateBranch}
-        onDeleteBranch={onDeleteBranch}
-        onInviteMember={onInviteMember}
-        onUpdateMemberRole={onUpdateMemberRole}
-        onRemoveMember={onRemoveMember}
-        onClose={() => setManageView(null)}
-      />
+      {manageOpened && (
+        <BranchesTeamDrawer
+          view={manageView}
+          branches={branches}
+          members={members}
+          role={role}
+          maxBranches={maxBranchesFor({
+            loyaltyPlanId: entitlements.loyalty?.planId,
+            queuePlanId: entitlements.queue?.planId,
+            queueEnabled: isProductEnabled(entitlements, "queue"),
+            queueTrialActive: isTrialActive(entitlements.queue),
+          })}
+          onCreateBranch={onCreateBranch}
+          onUpdateBranch={onUpdateBranch}
+          onDeleteBranch={onDeleteBranch}
+          onInviteMember={onInviteMember}
+          onUpdateMemberRole={onUpdateMemberRole}
+          onRemoveMember={onRemoveMember}
+          onClose={() => setManageView(null)}
+        />
+      )}
 
       <MerchantNotificationsDrawer
         open={notifOpen}

@@ -1,6 +1,6 @@
 import type { RewardCooldownUnit } from "@/lib/loyalty/rules";
 
-export type MerchantProduct = "loyalty" | "queue";
+export type MerchantProduct = "loyalty" | "queue" | "reservation";
 
 export type MemberRole = "owner" | "manager" | "staff";
 
@@ -29,20 +29,30 @@ export interface MerchantMember {
 /** Loyalty product-scoped tabs. */
 export type LoyaltyTab =
   | "dashboard"
-  | "loyalty-analytics"
+  | "loyalty-history"
   | "scan"
   | "approvals"
   | "loyalty-customers"
   | "loyalty-settings";
 
 /** Queue product-scoped tabs. */
-export type QueueTab = "queue-home" | "queue-history" | "queue-settings";
+export type QueueTab =
+  | "queue-home"
+  | "queue-customers"
+  | "queue-history"
+  | "queue-settings";
+
+/** Reservations product-scoped tabs. */
+export type ReservationTab =
+  | "reservations-home"
+  | "reservations-history"
+  | "reservations-settings";
 
 /** Workspace tabs shared across every product. */
 export type WorkspaceTab = "customers" | "analytics" | "profile";
 
 /** Every routable tab in the merchant app. */
-export type MerchantTab = LoyaltyTab | QueueTab | WorkspaceTab;
+export type MerchantTab = LoyaltyTab | QueueTab | ReservationTab | WorkspaceTab;
 
 export type MerchantEditSection =
   | "business"
@@ -84,6 +94,30 @@ export interface MerchantProfile {
   marketingEmails: boolean;
   queueBanner?: string;
   queueBannerLink?: string;
+  /** Local open time HH:MM for queue auto sessions. */
+  queueOpenTime: string;
+  /** Local close time HH:MM for queue auto sessions. */
+  queueCloseTime: string;
+  queueHoursTimezone: string;
+  /** 0=Sun … 6=Sat. */
+  queueOpenDays: number[];
+  queueAutoStart: boolean;
+  /** Recommended — end the live session at closing time. */
+  queueAutoClose: boolean;
+  /** Short line shown above the public reservation form. */
+  reservationDescription: string;
+  reservationMaxPartySize: number;
+  /** Minutes between bookable slots (15 / 30 / 60). */
+  reservationIntervalMinutes: number;
+  reservationOpenTime: string;
+  reservationCloseTime: string;
+  reservationAllowSameDay: boolean;
+  reservationAllowNotes: boolean;
+  /** 0 = never auto decline (future automation). */
+  reservationAutoDeclineHours: number;
+  reservationWhatsappEnabled: boolean;
+  /** Bookings stopped by the merchant — the public form is closed. */
+  reservationPaused: boolean;
 }
 
 export interface MerchantStats {
@@ -137,6 +171,12 @@ export interface DashboardFilteredStats {
   pendingApprovals: number;
   rewardsInRange: number;
   rewardsRedeemedAllTime: number;
+  /**
+   * True when merchant_loyalty_range_stats failed. Stamps-in-range,
+   * rewards-in-range (non-all), and the chart must show an error — not zeros
+   * or truncated fallbacks.
+   */
+  rangeStatsError: boolean;
   avgVisitsPerCustomer: number;
   avgStampsPerCustomer: number;
   customersNearReward: number;

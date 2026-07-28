@@ -24,7 +24,12 @@ export function joinUrlFor(
   const base =
     process.env.NEXT_PUBLIC_SITE_URL ||
     (typeof window !== "undefined" ? window.location.origin : "https://froq.io");
-  const path = product === "queue" ? `/queue/${slug}` : `/join/${slug}`;
+  const path =
+    product === "queue"
+      ? `/queue/${slug}`
+      : product === "reservation"
+        ? `/r/${slug}`
+        : `/join/${slug}`;
   const query = branchSlug ? `?b=${encodeURIComponent(branchSlug)}` : "";
   return `${base.replace(/\/$/, "")}${path}${query}`;
 }
@@ -59,7 +64,12 @@ export function useMerchantQr(
     if (!qrUrl) return;
     const link = document.createElement("a");
     link.href = qrUrl;
-    const suffix = product === "queue" ? "queue-qr" : "loyalty-qr";
+    const suffix =
+      product === "queue"
+        ? "queue-qr"
+        : product === "reservation"
+          ? "reservation-qr"
+          : "loyalty-qr";
     link.download = `${slugify(profile.businessName || "froq") || "froq"}-${suffix}.png`;
     link.click();
   }, [qrUrl, profile.businessName, product]);

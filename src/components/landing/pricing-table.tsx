@@ -18,12 +18,12 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
-  PRICING_PLANS,
-  YEARLY_PRICING_PLANS,
   ENTERPRISE_CONTACT,
+  plansForProduct,
   type BillingCycle,
   type PricingPlan,
 } from "@/lib/merchant/pricing";
+import type { MerchantProduct } from "@/lib/merchant/types";
 import { FeatureText } from "@/components/landing/feature-text";
 
 const FEATURE_ICONS: LucideIcon[] = [
@@ -45,11 +45,9 @@ function featureIcon(index: number): LucideIcon {
   return FEATURE_ICONS[index % FEATURE_ICONS.length];
 }
 
-function plansForCycle(cycle: BillingCycle): PricingPlan[] {
-  return cycle === "yearly" ? YEARLY_PRICING_PLANS : PRICING_PLANS;
-}
-
 export interface PricingTableProps {
+  /** Which product's catalog to show. Defaults to loyalty. */
+  product?: MerchantProduct;
   /** Landing CTAs vs in-dashboard plan management. */
   variant?: "landing" | "manage";
   currentPlanId?: string | null;
@@ -64,6 +62,7 @@ export interface PricingTableProps {
 }
 
 export function PricingTable({
+  product = "loyalty",
   variant = "landing",
   currentPlanId = null,
   initialBilling = "monthly",
@@ -76,7 +75,7 @@ export function PricingTable({
 }: PricingTableProps) {
   const [billing, setBilling] = useState<BillingCycle>(initialBilling);
   const toggleId = useId();
-  const plans = plansForCycle(billing);
+  const plans = plansForProduct(product, billing);
   const isManage = variant === "manage";
 
   useEffect(() => {

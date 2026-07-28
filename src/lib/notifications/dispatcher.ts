@@ -22,6 +22,7 @@ import {
 import {
   buildSmsBody,
   isQueueNotificationTemplate,
+  isReservationNotificationTemplate,
   shouldSendWhatsApp,
   smsTemplateIdFor,
   type CustomerNotificationDataMap,
@@ -138,18 +139,25 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
       });
       return;
     }
-    case "reservation_confirmed": {
+    // Reservation Meta body: {{1}} name, {{2}} restaurant, {{3}} date,
+    // {{4}} time, {{5}} party size. URL button {{1}} is the rsv_… token.
+    case "reservation_request_received":
+    case "reservation_confirmed":
+    case "reservation_updated":
+    case "reservation_reminder":
+    case "reservation_declined": {
       const d = data as CustomerNotificationDataMap["reservation_confirmed"];
       await sendWhatsAppTemplate({
-        templateName: "reservation_confirmed",
+        templateName: template,
         mobile: customer.phone,
         bodyParams: [
           customer.name,
           d.businessName,
-          d.when,
+          d.date,
+          d.time,
           d.partySize != null ? String(d.partySize) : "1",
         ],
-        publicToken: customer.publicToken,
+        reservationToken: d.reservationToken,
       });
       return;
     }
@@ -243,8 +251,8 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
  * Single entry point for all customer notifications.
  *
  * - Loyalty / general: WhatsApp only when whatsappAvailable + preferred WhatsApp.
- * - Queue templates: always try WhatsApp first (Meta templates; no prior OTP required).
- * - SMS fallback only when transactional SMS env is configured.
+ * - Queue templates: WhatsApp only (Meta templates; no SMS fallback).
+ * - Other templates: SMS fallback when transactional SMS env is configured.
  */
 export async function sendCustomerNotification<T extends CustomerNotificationTemplate>(input: {
   customer: NotifiableCustomer;
@@ -253,7 +261,12 @@ export async function sendCustomerNotification<T extends CustomerNotificationTem
 }): Promise<SendCustomerNotificationResult> {
   const { customer, template, data } = input;
   const queueTemplate = isQueueNotificationTemplate(template);
-  const useWhatsApp = shouldSendWhatsApp(customer) || queueTemplate;
+  // Reservation guests are messaged on WhatsApp by default (that is the product
+  // promise), but unlike queue they keep the SMS fallback.
+  const useWhatsApp =
+    shouldSendWhatsApp(customer) ||
+    queueTemplate ||
+    isReservationNotificationTemplate(template);
   const channel: NotificationChannel = useWhatsApp ? "whatsapp" : "sms";
 
   notifLog("info", "dispatch", {
@@ -283,6 +296,10 @@ export async function sendCustomerNotification<T extends CustomerNotificationTem
       } catch (waError) {
         const waReason = waError instanceof Error ? waError.message : "whatsapp_failed";
         notifLog("warn", "whatsapp_dispatch_failed", { template, error: waReason });
+
+        if (queueTemplate) {
+          return { ok: false, channel: "whatsapp", error: waReason };
+        }
 
         if (!isTransactionalSmsConfigured()) {
           return { ok: false, channel: "whatsapp", error: waReason };

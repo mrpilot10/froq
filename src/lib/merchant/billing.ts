@@ -13,7 +13,12 @@ const TIER_RANK: Record<string, number> = {
   starter: 1,
   growth: 2,
   pro: 3,
-  queue: 1,
+  // Queue tiers are product-prefixed so they don't collide with loyalty.
+  "queue-starter": 1,
+  "queue-growth": 2,
+  "queue-pro": 3,
+  /** Legacy single-tier queue id → Growth. */
+  queue: 2,
 };
 
 /** Public billing policy shown in manage-plan UI and FAQ. */

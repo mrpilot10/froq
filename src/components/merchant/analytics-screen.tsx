@@ -1,25 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ArrowDownWideNarrow,
-  ChevronDown,
-  Clock,
-  Gift,
-  Lightbulb,
-  Stamp,
-  UserPlus,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowDownWideNarrow, ChevronDown, UserRound } from "lucide-react";
 import { getDashboardStats } from "@/app/merchant/actions";
+import { getQueueAnalytics } from "@/app/merchant/queue-actions";
+import { getReservationAnalytics } from "@/app/merchant/reservation-actions";
+import { isProductEnabled } from "@/lib/merchant/entitlements";
+import type { QueueAnalyticsStats, QueueStaffOption } from "@/lib/merchant/queue-analytics";
+import type { ReservationAnalytics } from "@/lib/reservations/stats";
+import { PRODUCTS } from "@/lib/merchant/nav";
 import type {
-  AnalyticsFunnelStage,
-  AnalyticsInsight,
-  AnalyticsTopCustomer,
-  DashboardChartBucket,
   DashboardDateRange,
   DashboardFilteredStats,
+  MerchantProduct,
   MerchantProfile,
 } from "@/lib/merchant/types";
+import { useMerchantWorkspace } from "./merchant-workspace-context";
+import {
+  LoyaltyAnalyticsView,
+  type ChartSort,
+} from "./analytics/loyalty-analytics-view";
+import { QueueAnalyticsView } from "./analytics/queue-analytics-view";
+import { ReservationAnalyticsView } from "./analytics/reservation-analytics-view";
+import { AnalyticsSkeleton } from "./analytics/analytics-skeleton";
 
 interface AnalyticsScreenProps {
   profile: MerchantProfile;
@@ -35,23 +38,30 @@ const DATE_RANGES: { value: DashboardDateRange; label: string }[] = [
   { value: "all", label: "All Time" },
 ];
 
-type ChartSort = "chronological" | "highest";
-
 const CHART_SORTS: { value: ChartSort; label: string }[] = [
   { value: "chronological", label: "Time order" },
   { value: "highest", label: "Highest first" },
 ];
 
-function getInitials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+const ALL_STAFF = "__all_staff__";
+
+interface LoyaltySnapshot {
+  key: string;
+  stats: DashboardFilteredStats;
 }
 
-function formatMetric(value: number | null | undefined) {
-  if (value === null || value === undefined) return "—";
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+interface QueueSnapshot {
+  key: string;
+  stats: QueueAnalyticsStats | null;
+  staffOptions: QueueStaffOption[];
+  truncated: boolean;
+  error?: string;
+}
+
+interface ReservationSnapshot {
+  key: string;
+  analytics: ReservationAnalytics | null;
+  error?: string;
 }
 
 export function AnalyticsScreen({
@@ -59,81 +69,147 @@ export function AnalyticsScreen({
   initialStats,
   activeBranchId = null,
 }: AnalyticsScreenProps) {
+  const { entitlements } = useMerchantWorkspace();
+
+  // Every product stays switchable here even when it isn't subscribed — merchants
+  // run the queue before upgrading, and those numbers are real. The tab you land
+  // on is the first product you actually own.
+  const [product, setProduct] = useState<MerchantProduct>(
+    () => PRODUCTS.find((item) => isProductEnabled(entitlements, item.id))?.id ?? PRODUCTS[0].id,
+  );
   const [range, setRange] = useState<DashboardDateRange>("7d");
   const [sort, setSort] = useState<ChartSort>("chronological");
-  const [stats, setStats] = useState<DashboardFilteredStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const businessName = profile.businessName;
 
-  const loadStats = useCallback(
-    async (nextRange: DashboardDateRange) => {
-      setLoading(true);
-      const next = await getDashboardStats(nextRange, activeBranchId);
-      if (next) setStats(next);
-      setLoading(false);
-    },
-    [activeBranchId],
-  );
+  // Name is remembered alongside the id so the picker can still show whoever is
+  // selected after a range change drops them out of the roster.
+  const [staff, setStaff] = useState<{ id: string; name: string } | null>(null);
 
-  useEffect(() => {
-    void loadStats(range);
-  }, [range, loadStats]);
+  // Branch scope follows the header switcher — analytics has no picker of its own.
+  const branchId = activeBranchId;
+  const loyaltyKey = `${branchId ?? "all"}:${range}`;
+  const queueKey = `${loyaltyKey}:${staff?.id ?? "all"}`;
+  // The workspace bundle already ships 7d / all-branches loyalty stats.
+  const preloadedLoyalty = range === "7d" && branchId === null;
+
+  const [loyalty, setLoyalty] = useState<LoyaltySnapshot | null>(null);
+  const [queue, setQueue] = useState<QueueSnapshot | null>(null);
+  const [reservation, setReservation] = useState<ReservationSnapshot | null>(null);
 
   useEffect(() => {
-    if (!stats && initialStats) setStats(initialStats);
-  }, [initialStats, stats]);
+    if (product !== "loyalty" || preloadedLoyalty) return;
+    let cancelled = false;
+    void (async () => {
+      const next = await getDashboardStats(range, branchId);
+      if (cancelled || !next) return;
+      setLoyalty({ key: loyaltyKey, stats: next });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [product, preloadedLoyalty, range, branchId, loyaltyKey]);
 
-  const display = stats ?? initialStats;
-  const chartBuckets = useMemo(() => {
-    const buckets = display.chartBuckets;
-    if (sort === "highest") {
-      return [...buckets].sort((a, b) => b.value - a.value);
-    }
-    return buckets;
-  }, [display.chartBuckets, sort]);
+  useEffect(() => {
+    if (product !== "queue") return;
+    let cancelled = false;
+    void (async () => {
+      const result = await getQueueAnalytics({ range, branchId, staffId: staff?.id ?? null });
+      if (cancelled) return;
+      setQueue({
+        key: queueKey,
+        stats: result.stats,
+        staffOptions: result.staffOptions,
+        truncated: result.truncated,
+        error: result.ok ? undefined : result.error,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [product, range, branchId, staff, queueKey]);
 
-  const maxVisits = Math.max(...chartBuckets.map((bucket) => bucket.value), 1);
-  const empty = !display.hasActivity;
+  useEffect(() => {
+    if (product !== "reservation") return;
+    let cancelled = false;
+    void (async () => {
+      const result = await getReservationAnalytics({ range, branchId });
+      if (cancelled) return;
+      setReservation({
+        key: loyaltyKey,
+        analytics: result.analytics ?? null,
+        error: result.ok ? undefined : result.error,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [product, range, branchId, loyaltyKey]);
 
-  const periodCards = [
-    { Icon: Stamp, value: display.stampsInRange, label: "Stamps in period" },
-    {
-      Icon: Gift,
-      value: display.range === "all" ? display.rewardsRedeemedAllTime : display.rewardsInRange,
-      label: "Rewards redeemed",
-      accent: true,
-    },
-    { Icon: UserPlus, value: display.newCustomersInRange, label: "New customers" },
-    { Icon: Clock, value: display.pendingApprovals, label: "Pending approvals" },
-  ];
+  const freshLoyalty = preloadedLoyalty
+    ? initialStats
+    : loyalty?.key === loyaltyKey
+      ? loyalty.stats
+      : null;
+  const freshQueue = queue?.key === queueKey ? queue : null;
+  const freshReservation = reservation?.key === loyaltyKey ? reservation : null;
 
-  const detailRows = [
-    { label: "Customers near reward", value: display.customersNearReward },
-    { label: "Returning customers", value: display.returningCustomers },
-    { label: "Inactive (30+ days)", value: display.inactiveCustomers },
-    { label: "Repeat visit rate", value: `${display.repeatVisitRate}%` },
-    { label: "Redemption rate", value: `${display.redemptionRate}%` },
-    { label: "Avg days between visits", value: formatMetric(display.avgDaysBetweenVisits) },
-    { label: "Stamps today", value: display.stampsToday },
-    { label: "Stamps this month", value: display.stampsThisMonth },
-    { label: "Most active day", value: display.mostActiveDay ?? "—" },
-    { label: "Most active hour", value: display.mostActiveHour ?? "—" },
-  ];
+  const pending =
+    product === "loyalty" ? freshLoyalty : product === "queue" ? freshQueue : freshReservation;
+  const cached = product === "loyalty" ? loyalty : product === "queue" ? queue : reservation;
+
+  const loading = pending === null;
+  // Only the very first load gets a skeleton. Refetches keep the previous
+  // numbers on screen (dimmed) so changing range doesn't blank the page.
+  const showSkeleton = loading && cached === null;
+
+  // Held over from the last response so the picker doesn't blank out mid-fetch.
+  const staffOptions = queue?.staffOptions ?? [];
+  const showStaffPicker = product === "queue" && (staffOptions.length > 1 || staff !== null);
+  const staffChoices =
+    staff && !staffOptions.some((option) => option.id === staff.id)
+      ? [...staffOptions, { id: staff.id, name: staff.name, role: null }]
+      : staffOptions;
 
   return (
     <div className="tab-screen merchant-dashboard">
       <div className="tab-head merchant-dashboard-head">
         <div>
           <h2 className="tab-title">Analytics</h2>
-          <p className="tab-sub">{businessName}</p>
+          <p className="tab-sub">{profile.businessName}</p>
         </div>
         <div className="merchant-analytics-toolbar">
+          {showStaffPicker ? (
+            <div className="merchant-date-select">
+              <UserRound
+                size={15}
+                strokeWidth={2.2}
+                className="merchant-analytics-sort-lead"
+                aria-hidden="true"
+              />
+              <select
+                className="merchant-date-select-input"
+                aria-label="Team member"
+                value={staff?.id ?? ALL_STAFF}
+                onChange={(event) => {
+                  const id = event.target.value;
+                  const picked = staffChoices.find((option) => option.id === id);
+                  setStaff(id === ALL_STAFF || !picked ? null : { id, name: picked.name });
+                }}
+              >
+                <option value={ALL_STAFF}>All team</option>
+                {staffChoices.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={16} strokeWidth={2.4} className="merchant-date-select-icon" />
+            </div>
+          ) : null}
           <div className="merchant-date-select">
             <select
               className="merchant-date-select-input"
               aria-label="Date range"
               value={range}
-              disabled={loading}
               onChange={(event) => setRange(event.target.value as DashboardDateRange)}
             >
               {DATE_RANGES.map((item) => (
@@ -155,7 +231,6 @@ export function AnalyticsScreen({
               className="merchant-date-select-input"
               aria-label="Sort activity"
               value={sort}
-              disabled={loading}
               onChange={(event) => setSort(event.target.value as ChartSort)}
             >
               {CHART_SORTS.map((item) => (
@@ -169,225 +244,46 @@ export function AnalyticsScreen({
         </div>
       </div>
 
-      {empty ? (
-        <div className="panel-card merchant-empty merchant-analytics-empty">
-          <p className="merchant-empty-title">
-            Analytics will appear once customers start collecting stamps
-          </p>
-          <p className="merchant-empty-sub">
-            Complete your first loyalty transaction to unlock insights.
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className={`merchant-ltv-card${loading ? " merchant-ltv-card--loading" : ""}`}>
-            <div className="merchant-ltv-head">
-              <span className="merchant-ltv-eyebrow">Loyalty Performance</span>
-            </div>
-            <div className="merchant-ltv-value">{display.activeCustomers}</div>
-            <p className="merchant-analytics-hero-label">Active customers</p>
-            <div className="merchant-ltv-metrics">
-              <HeroTile label="Total customers" value={display.totalCustomers} />
-              <HeroTile label="Total stamps" value={display.totalStampsAllTime} />
-              <HeroTile label="Rewards redeemed" value={display.rewardsRedeemedAllTime} />
-              <HeroTile label="Avg visits" value={formatMetric(display.avgVisitsPerCustomer)} />
-            </div>
-          </div>
-
-          <section className="merchant-section">
-            <div className="merchant-section-head">
-              <h3 className="merchant-section-label">This period</h3>
-              <span className="merchant-section-meta">{display.rangeLabel}</span>
-            </div>
-            <div className={`merchant-stat-grid${loading ? " merchant-stat-grid--loading" : ""}`}>
-              {periodCards.map(({ Icon, value, label, accent }) => (
-                <div key={label} className="merchant-stat-card">
-                  <div
-                    className={`merchant-stat-icon${accent ? " merchant-stat-icon--accent" : ""}`}
-                  >
-                    <Icon size={18} strokeWidth={2.2} />
-                  </div>
-                  <div className="merchant-stat-value">{value}</div>
-                  <div className="merchant-stat-label">{label}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="merchant-section">
-            <div className="merchant-section-head">
-              <h3 className="merchant-section-label">Customer Visits</h3>
-              <span className="merchant-section-meta">{display.stampsInRange} stamps</span>
-            </div>
-            <div
-              className={`panel-card merchant-chart-card${loading ? " merchant-chart-card--loading" : ""}`}
-            >
-              <div className="merchant-chart-head">
-                <div>
-                  <div className="merchant-chart-title">{display.chartTitle}</div>
-                  <div className="merchant-chart-sub">{display.chartSub}</div>
-                </div>
-              </div>
-              <ActivityChart buckets={chartBuckets} maxVisits={maxVisits} />
-            </div>
-          </section>
-
-          <TopCustomersSection customers={display.topCustomers} />
-          <FunnelSection stages={display.funnel} />
-          <InsightsSection insights={display.insights} />
-
-          <section className="merchant-section">
-            <div className="merchant-section-head">
-              <h3 className="merchant-section-label">More details</h3>
-            </div>
-            <div className="panel-card merchant-summary-card">
-              {detailRows.map((row, index) => (
-                <div key={row.label}>
-                  {index > 0 ? <div className="merchant-summary-divider" /> : null}
-                  <div className="merchant-summary-row">
-                    <span className="merchant-summary-label">{row.label}</span>
-                    <span className="merchant-summary-value">{row.value}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        </>
-      )}
-    </div>
-  );
-}
-
-function HeroTile({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="merchant-ltv-tile">
-      <span className="merchant-ltv-tile-label">{label}</span>
-      <span className="merchant-ltv-tile-value">{value}</span>
-    </div>
-  );
-}
-
-function TopCustomersSection({ customers }: { customers: AnalyticsTopCustomer[] }) {
-  return (
-    <section className="merchant-section">
-      <div className="merchant-section-head">
-        <h3 className="merchant-section-label">Top Customers</h3>
-        <span className="merchant-section-meta">By visits</span>
-      </div>
-      {customers.length === 0 ? (
-        <div className="panel-card merchant-empty">
-          <p className="merchant-empty-title">No customer activity yet</p>
-          <p className="merchant-empty-sub">
-            Your most active loyalty members will show up here once stamps start rolling in.
-          </p>
-        </div>
-      ) : (
-        <div className="panel-card merchant-progress-list">
-          {customers.map((customer, index) => (
-            <div key={customer.id} className="merchant-progress-row">
-              <div className="merchant-top-rank" aria-hidden>
-                {index + 1}
-              </div>
-              <div className="merchant-avatar">{getInitials(customer.name)}</div>
-              <div className="merchant-progress-copy">
-                <div className="merchant-list-title">{customer.name}</div>
-                <div className="merchant-list-sub">
-                  {customer.lifetimeVisits} visit{customer.lifetimeVisits === 1 ? "" : "s"} ·{" "}
-                  {customer.stamps}/{customer.totalStamps} stamps · {customer.rewardsClaimed}{" "}
-                  reward{customer.rewardsClaimed === 1 ? "" : "s"}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function FunnelSection({ stages }: { stages: AnalyticsFunnelStage[] }) {
-  const max = Math.max(...stages.map((s) => s.count), 1);
-  return (
-    <section className="merchant-section">
-      <div className="merchant-section-head">
-        <h3 className="merchant-section-label">Loyalty Funnel</h3>
-      </div>
-      <div className="panel-card merchant-funnel">
-        {stages.map((stage, index) => (
-          <div key={stage.id} className="merchant-funnel-stage">
-            <div className="merchant-funnel-row">
-              <div className="merchant-funnel-copy">
-                <span className="merchant-funnel-label">{stage.label}</span>
-                <span className="merchant-funnel-count">{stage.count}</span>
-              </div>
-              <div className="merchant-funnel-bar" aria-hidden>
-                <span style={{ width: `${Math.max(8, (stage.count / max) * 100)}%` }} />
-              </div>
-            </div>
-            {index < stages.length - 1 ? (
-              <div className="merchant-funnel-bridge">
-                <span className="merchant-funnel-arrow" aria-hidden>
-                  ↓
-                </span>
-                <span className="merchant-funnel-conv">
-                  {stages[index + 1].conversionFromPrevious ?? 0}% convert
-                </span>
-              </div>
-            ) : null}
-          </div>
+      <div className="queue-tabs merchant-analytics-tabs" role="tablist" aria-label="Product">
+        {PRODUCTS.map(({ id, name, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={product === id}
+            className={`queue-tab${product === id ? " active" : ""}`}
+            onClick={() => setProduct(id)}
+          >
+            <Icon size={15} strokeWidth={2.3} aria-hidden="true" />
+            <span>{name}</span>
+          </button>
         ))}
       </div>
-    </section>
-  );
-}
 
-function InsightsSection({ insights }: { insights: AnalyticsInsight[] }) {
-  return (
-    <section className="merchant-section">
-      <div className="merchant-section-head">
-        <h3 className="merchant-section-label">Smart Insights</h3>
-      </div>
-      {insights.length === 0 ? (
-        <div className="panel-card merchant-empty">
-          <p className="merchant-empty-title">Insights unlock with more activity</p>
-          <p className="merchant-empty-sub">
-            Keep collecting stamps and we&apos;ll surface patterns worth acting on.
-          </p>
-        </div>
+      {showSkeleton ? (
+        <AnalyticsSkeleton />
+      ) : product === "queue" ? (
+        <QueueAnalyticsView
+          stats={freshQueue?.stats ?? queue?.stats ?? null}
+          sort={sort}
+          loading={loading}
+          truncated={freshQueue?.truncated ?? false}
+          error={freshQueue?.error}
+        />
+      ) : product === "reservation" ? (
+        <ReservationAnalyticsView
+          analytics={freshReservation?.analytics ?? reservation?.analytics ?? null}
+          sort={sort}
+          loading={loading}
+          error={freshReservation?.error}
+        />
       ) : (
-        <div className="merchant-insights-grid">
-          {insights.map((insight) => (
-            <div key={insight.id} className="merchant-insight-card">
-              <span className="merchant-insight-icon" aria-hidden>
-                <Lightbulb size={16} strokeWidth={2.2} />
-              </span>
-              <p className="merchant-insight-text">{insight.text}</p>
-            </div>
-          ))}
-        </div>
+        <LoyaltyAnalyticsView
+          stats={freshLoyalty ?? loyalty?.stats ?? initialStats}
+          sort={sort}
+          loading={loading}
+        />
       )}
-    </section>
-  );
-}
-
-function ActivityChart({
-  buckets,
-  maxVisits,
-}: {
-  buckets: DashboardChartBucket[];
-  maxVisits: number;
-}) {
-  return (
-    <div className="merchant-chart-bars">
-      {buckets.map((bucket, index) => (
-        <div key={`${bucket.label}-${index}`} className="merchant-chart-bar-col">
-          <div
-            className="merchant-chart-bar"
-            style={{ height: `${(bucket.value / maxVisits) * 100}%` }}
-          />
-          <span className="merchant-chart-bar-label">{bucket.label}</span>
-        </div>
-      ))}
     </div>
   );
 }

@@ -1,11 +1,17 @@
 "use client";
 
+import Link from "next/link";
 import { ArrowUpRight, ChevronRight } from "lucide-react";
-import { MERCHANT_PLANS } from "@/lib/merchant/constants";
-import { PRODUCT_NAV, PRODUCTS, type NavItem } from "@/lib/merchant/nav";
+import { PRODUCT_NAV, PRODUCTS, TAB_HREF, type NavItem } from "@/lib/merchant/nav";
 import { ROLE_LABELS } from "@/lib/merchant/roles";
+import { planUpgradeSummary } from "@/lib/merchant/plan-summary";
 import type { MemberRole, MerchantProduct, MerchantTab } from "@/lib/merchant/types";
-import { isProductEnabled, type Entitlements } from "@/lib/merchant/entitlements";
+import {
+  isProductEnabled,
+  isTrialActive,
+  trialDaysLeft,
+  type Entitlements,
+} from "@/lib/merchant/entitlements";
 
 function getInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -40,9 +46,18 @@ export function MerchantSidebar({
   pendingCount = 0,
 }: MerchantSidebarProps) {
   const product = PRODUCTS.find((p) => p.id === activeProduct) ?? PRODUCTS[0];
-  const catalog = MERCHANT_PLANS[activeProduct];
+  const entitlement = entitlements[activeProduct];
   const enabled = isProductEnabled(entitlements, activeProduct);
-  const plan = { ...catalog, enabled };
+  const onTrial = isTrialActive(entitlement);
+  const summary = planUpgradeSummary({
+    product: activeProduct,
+    planId: entitlement?.planId,
+  });
+  const statusLabel = onTrial
+    ? `${trialDaysLeft(entitlement)}d trial left`
+    : enabled
+      ? "Active"
+      : "Not enabled";
   const ProductIcon = product.Icon;
   const displayName = userName.trim() || "Team member";
   const initials = getInitials(displayName);
@@ -51,13 +66,17 @@ export function MerchantSidebar({
     const isActive = activeTab === id;
     const showBadge = id === "dashboard" && pendingCount > 0;
     return (
-      <button
+      <Link
         key={id}
-        type="button"
+        href={TAB_HREF[id]}
+        prefetch
         className={`merchant-side-item${isActive ? " active" : ""}`}
         aria-current={isActive ? "page" : undefined}
         title={label}
-        onClick={() => onTabChange(id)}
+        onClick={(event) => {
+          event.preventDefault();
+          onTabChange(id);
+        }}
       >
         <span className="merchant-side-icon">
           <Icon size={19} strokeWidth={isActive ? 2.4 : 2} />
@@ -68,7 +87,7 @@ export function MerchantSidebar({
           ) : null}
         </span>
         <span className="merchant-side-label">{label}</span>
-      </button>
+      </Link>
     );
   };
 
@@ -91,27 +110,45 @@ export function MerchantSidebar({
       </nav>
 
       <div className="merchant-sidebar-footer">
-        <div className={`merchant-side-plan${plan.enabled ? "" : " is-locked"}`}>
+        <div className={`merchant-side-plan${enabled ? "" : " is-locked"}`}>
           <div className="merchant-side-plan-top">
             <span className="merchant-side-plan-name">
               {product.name}
-              <span className="merchant-side-plan-tier">{plan.name}</span>
+              {summary.currentTier ? (
+                <span className="merchant-side-plan-tier">{summary.currentTier}</span>
+              ) : null}
             </span>
-            <span className={`merchant-side-plan-status${plan.enabled ? " is-active" : ""}`}>
-              {plan.status}
+            <span className={`merchant-side-plan-status${enabled ? " is-active" : ""}`}>
+              {statusLabel}
             </span>
           </div>
-          <div className="merchant-side-plan-price">
-            {plan.price}
-            <span>{plan.cycle}</span>
-          </div>
-          {canPurchase ? (
+
+          {/* No plan in force means no current price — the CTA carries one. */}
+          {summary.currentPriceLabel ? (
+            <div className="merchant-side-plan-price">
+              {summary.currentPriceLabel}
+              <span>{summary.currentCycleLabel}</span>
+            </div>
+          ) : null}
+
+          {summary.nextPlan && summary.nextHighlights.length > 0 ? (
+            <p className="merchant-side-plan-gain">
+              {summary.currentTier ? `${summary.nextPlan.name}: ` : null}
+              {summary.nextHighlights.join(" · ")}
+            </p>
+          ) : null}
+
+          {canPurchase && summary.nextPlan ? (
             <button
               type="button"
               className="merchant-side-plan-cta"
               onClick={() => onGetStarted?.(activeProduct)}
             >
-              Upgrade
+              <span>{summary.currentTier ? "Upgrade" : "Get started"}</span>
+              <span className="merchant-side-plan-cta-price">
+                {summary.nextPlan.priceLabel}
+                {summary.currentCycleLabel}
+              </span>
               <ArrowUpRight size={14} strokeWidth={2.4} />
             </button>
           ) : null}

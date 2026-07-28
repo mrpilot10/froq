@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
+import { resolveQueuePage } from "@/app/queue/actions";
 import { QueueJoinScreen } from "@/components/queue/queue-join-screen";
 import { FroqFooter } from "@/components/shared/froq-footer";
 
@@ -10,22 +10,9 @@ export const metadata: Metadata = {
 
 export default async function QueueJoinPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const resolved = await resolveQueuePage(slug);
 
-  const merchant = await (async () => {
-    try {
-      const supabase = await createClient();
-      const { data } = await supabase
-        .from("merchants")
-        .select("business_name, brand_color, logo_url, slug, queue_banner, queue_banner_link")
-        .eq("slug", slug)
-        .maybeSingle();
-      return data;
-    } catch {
-      return null;
-    }
-  })();
-
-  if (!merchant) {
+  if (!resolved.ok) {
     return (
       <div className="loyalty-page">
         <div className="loyalty-screen auth-screen">
@@ -41,14 +28,17 @@ export default async function QueueJoinPage({ params }: { params: Promise<{ slug
     );
   }
 
+  const { merchant, initialTicket } = resolved;
+
   return (
     <QueueJoinScreen
       slug={merchant.slug}
-      businessName={merchant.business_name}
-      brandColor={merchant.brand_color}
-      logoUrl={merchant.logo_url}
-      banner={merchant.queue_banner ?? ""}
-      bannerLink={merchant.queue_banner_link ?? ""}
+      businessName={merchant.businessName}
+      brandColor={merchant.brandColor}
+      logoUrl={merchant.logoUrl}
+      banner={merchant.banner}
+      bannerLink={merchant.bannerLink}
+      initialTicket={initialTicket}
     />
   );
 }

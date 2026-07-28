@@ -6,6 +6,7 @@ import { deleteCustomerAccount, getCustomerHome, type CustomerHome } from "@/app
 import { customerHubPath } from "@/lib/customer/hub";
 import { createClient } from "@/lib/supabase/client";
 import { LoyaltyExperience } from "@/components/loyalty/loyalty-experience";
+import { LoyaltyCardSkeleton } from "@/components/loyalty/loyalty-card-skeleton";
 
 interface ShopCardGateProps {
   slug: string;
@@ -55,12 +56,9 @@ export function ShopCardGate({ slug }: ShopCardGateProps) {
   }, [home, supabase, slug, router]);
 
   // Prefer hub redirect; briefly render loyalty only if token missing (shouldn't happen post-migration).
-  if (!home || home.status !== "ready") {
-    return null;
-  }
-
-  if (home.publicToken) {
-    return null;
+  // The skeleton also covers the hand-off to /c/{token} so the page never blanks.
+  if (!home || home.status !== "ready" || home.publicToken) {
+    return <LoyaltyCardSkeleton />;
   }
 
   return (

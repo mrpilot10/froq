@@ -1,9 +1,5 @@
 "use client";
 
-import { FROQ_LOGO_SRC } from "@/lib/brand";
-
-import Image from "next/image";
-import Link from "next/link";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -23,7 +19,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { FroqFooter } from "@/components/shared/froq-footer";
+import { SiteShell } from "./site-shell";
 import { PricingTable } from "./pricing-table";
 import { Reveal } from "./reveal";
 import { HowItWorks } from "./how-it-works";
@@ -60,29 +56,8 @@ const FEATURES = [
 
 export function LandingPage() {
   return (
-    <div className="lp merchant-theme">
-      <header className="lp-nav">
-        <div className="lp-nav-inner">
-          <div className="lp-nav-brand">
-            <Image src={FROQ_LOGO_SRC} alt="Froq" width={32} height={32} priority />
-            <span>Froq</span>
-          </div>
-          <nav className="lp-nav-links">
-            <a href="#how" className="lp-nav-link">How it works</a>
-            <a href="#features" className="lp-nav-link">Features</a>
-            <a href="#pricing" className="lp-nav-link">Pricing</a>
-            <a href="https://froq.tawk.help/" target="_blank" rel="noopener noreferrer" className="lp-nav-link">
-              Help
-            </a>
-          </nav>
-          <div className="lp-nav-actions">
-            <Link href="/merchant" className="lp-nav-login">Log in</Link>
-            <a href="#pricing" className="lp-btn lp-btn--accent lp-nav-cta">Get Started</a>
-          </div>
-        </div>
-      </header>
-
-      <main className="lp-main">
+    <SiteShell>
+      <>
         {/* ── HERO ───────────────────────────────────────────────────── */}
         <section className="lp-hero">
           <div className="lp-hero-copy">
@@ -397,9 +372,7 @@ export function LandingPage() {
             <p className="lp-final-note">7-Day Money Back Guarantee</p>
           </Reveal>
         </section>
-
-        <FroqFooter className="lp-footer" />
-      </main>
-    </div>
+      </>
+    </SiteShell>
   );
 }

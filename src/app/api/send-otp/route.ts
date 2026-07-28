@@ -17,6 +17,7 @@ import {
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { maskPhone, toCanonicalPhone } from "@/lib/auth/otp/phone";
 import { otpLog } from "@/lib/auth/otp/logger";
+import { verifyTurnstileToken } from "@/lib/turnstile/verify";
 import type { SendOtpResult } from "@/lib/auth/otp/types";
 
 export const runtime = "nodejs";
@@ -24,6 +25,7 @@ export const maxDuration = 30;
 
 const bodySchema = z.object({
   phone: z.string().min(8).max(20),
+  captchaToken: z.string().optional(),
 });
 
 function json(body: SendOtpResult, status: number) {
@@ -52,7 +54,7 @@ function userFacingError(error: unknown): string {
 
 export async function POST(request: Request) {
   try {
-    let parsed: { phone: string };
+    let parsed: { phone: string; captchaToken?: string };
     try {
       parsed = bodySchema.parse(await request.json());
     } catch {
@@ -62,6 +64,16 @@ export async function POST(request: Request) {
     const phone = toCanonicalPhone(parsed.phone);
     if (!phone) {
       return json({ ok: false, message: "Enter a valid mobile number." }, 400);
+    }
+
+    // Every accepted request sends a billable WhatsApp/SMS message, and the
+    // throttles below are keyed per phone — so a bot rotating numbers could burn
+    // the messaging budget unchecked. No GoTrue endpoint is involved here (the
+    // OTP is ours), so the token is verified against Cloudflare directly.
+    const captcha = await verifyTurnstileToken(parsed.captchaToken);
+    if (!captcha.ok) {
+      otpLog.warn("captcha_rejected", { phone: maskPhone(phone) });
+      return json({ ok: false, message: captcha.error }, 403);
     }
 
     if (!isSupabaseConfigured()) {

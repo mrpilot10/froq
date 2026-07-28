@@ -1,4 +1,48 @@
 const CHECKOUT_KEY = "froq-merchant-checkout";
+const CHECKOUT_DRAFT_KEY = "froq-merchant-checkout-draft";
+
+/**
+ * Account-step input kept across the Google OAuth round-trip.
+ * Signing up with Google reloads the page, which would otherwise wipe the
+ * business name, mobile number and city the merchant had already typed.
+ */
+export interface CheckoutDraft {
+  businessName: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  city: string;
+  state: string;
+}
+
+export function writeCheckoutDraft(draft: CheckoutDraft) {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(CHECKOUT_DRAFT_KEY, JSON.stringify(draft));
+}
+
+export function readCheckoutDraft(): CheckoutDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(CHECKOUT_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<CheckoutDraft>;
+    return {
+      businessName: parsed.businessName ?? "",
+      firstName: parsed.firstName ?? "",
+      lastName: parsed.lastName ?? "",
+      phone: parsed.phone ?? "",
+      city: parsed.city ?? "",
+      state: parsed.state ?? "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearCheckoutDraft() {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(CHECKOUT_DRAFT_KEY);
+}
 
 export interface CheckoutAccount {
   planId: string;
@@ -61,4 +105,5 @@ export function writeCheckoutAccount(account: CheckoutAccount) {
 export function clearCheckoutAccount() {
   if (typeof window === "undefined") return;
   window.sessionStorage.removeItem(CHECKOUT_KEY);
+  window.sessionStorage.removeItem(CHECKOUT_DRAFT_KEY);
 }

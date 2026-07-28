@@ -5,6 +5,12 @@ import type {
   MerchantRow,
 } from "@/lib/supabase/database.types";
 import type { Branch, MerchantCustomer, MerchantMember, MerchantProfile } from "./types";
+import {
+  DEFAULT_QUEUE_STORE_HOURS,
+  formatTimeForInput,
+  QUEUE_HOURS_TIMEZONE,
+} from "./queue-hours";
+import { DEFAULT_RESERVATION_SETTINGS } from "./reservations";
 
 export function slugify(value: string) {
   return value
@@ -14,7 +20,16 @@ export function slugify(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-export function toMerchantProfile(row: MerchantRow): MerchantProfile {
+/** Profile fields only — short_name / created_at are unused on the read path. */
+export type MerchantProfileSource = Omit<MerchantRow, "short_name" | "created_at">;
+
+function normalizeOpenDays(raw: number[] | null | undefined): number[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [...DEFAULT_QUEUE_STORE_HOURS.openDays];
+  const cleaned = [...new Set(raw.map((d) => Number(d)).filter((d) => d >= 0 && d <= 6))];
+  return cleaned.length > 0 ? cleaned : [...DEFAULT_QUEUE_STORE_HOURS.openDays];
+}
+
+export function toMerchantProfile(row: MerchantProfileSource): MerchantProfile {
   return {
     id: row.id,
     slug: row.slug,
@@ -45,6 +60,28 @@ export function toMerchantProfile(row: MerchantRow): MerchantProfile {
     marketingEmails: row.marketing_emails,
     queueBanner: row.queue_banner ?? "",
     queueBannerLink: row.queue_banner_link ?? "",
+    queueOpenTime: formatTimeForInput(row.queue_open_time),
+    queueCloseTime: formatTimeForInput(row.queue_close_time),
+    queueHoursTimezone: row.queue_hours_timezone || QUEUE_HOURS_TIMEZONE,
+    queueOpenDays: normalizeOpenDays(row.queue_open_days),
+    queueAutoStart: row.queue_auto_start === true || row.queue_auto_close === true,
+    queueAutoClose: row.queue_auto_start === true || row.queue_auto_close === true,
+    reservationDescription: row.reservation_description ?? "",
+    reservationMaxPartySize:
+      row.reservation_max_party_size ?? DEFAULT_RESERVATION_SETTINGS.maxPartySize,
+    reservationIntervalMinutes:
+      row.reservation_interval_minutes ?? DEFAULT_RESERVATION_SETTINGS.intervalMinutes,
+    reservationOpenTime: formatTimeForInput(
+      row.reservation_open_time || DEFAULT_RESERVATION_SETTINGS.openTime,
+    ),
+    reservationCloseTime: formatTimeForInput(
+      row.reservation_close_time || DEFAULT_RESERVATION_SETTINGS.closeTime,
+    ),
+    reservationAllowSameDay: row.reservation_allow_same_day !== false,
+    reservationAllowNotes: row.reservation_allow_notes !== false,
+    reservationAutoDeclineHours: row.reservation_auto_decline_hours ?? 0,
+    reservationWhatsappEnabled: row.reservation_whatsapp_enabled !== false,
+    reservationPaused: row.reservation_paused === true,
   };
 }
 
@@ -90,6 +127,41 @@ export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<Mer
   if (patch.queueBanner !== undefined) row.queue_banner = patch.queueBanner || null;
   if (patch.queueBannerLink !== undefined)
     row.queue_banner_link = patch.queueBannerLink || null;
+  if (patch.queueOpenTime !== undefined) row.queue_open_time = patch.queueOpenTime;
+  if (patch.queueCloseTime !== undefined) row.queue_close_time = patch.queueCloseTime;
+  if (patch.queueHoursTimezone !== undefined)
+    row.queue_hours_timezone = patch.queueHoursTimezone;
+  if (patch.queueOpenDays !== undefined) row.queue_open_days = normalizeOpenDays(patch.queueOpenDays);
+  if (patch.queueAutoStart !== undefined) row.queue_auto_start = patch.queueAutoStart;
+  if (patch.queueAutoClose !== undefined) row.queue_auto_close = patch.queueAutoClose;
+  if (patch.reservationDescription !== undefined)
+    row.reservation_description = patch.reservationDescription || null;
+  if (patch.reservationMaxPartySize !== undefined)
+    row.reservation_max_party_size = Math.min(
+      50,
+      Math.max(1, Math.floor(patch.reservationMaxPartySize) || 1),
+    );
+  if (patch.reservationIntervalMinutes !== undefined)
+    row.reservation_interval_minutes = Math.min(
+      120,
+      Math.max(5, Math.floor(patch.reservationIntervalMinutes) || 30),
+    );
+  if (patch.reservationOpenTime !== undefined)
+    row.reservation_open_time = patch.reservationOpenTime;
+  if (patch.reservationCloseTime !== undefined)
+    row.reservation_close_time = patch.reservationCloseTime;
+  if (patch.reservationAllowSameDay !== undefined)
+    row.reservation_allow_same_day = patch.reservationAllowSameDay;
+  if (patch.reservationAllowNotes !== undefined)
+    row.reservation_allow_notes = patch.reservationAllowNotes;
+  if (patch.reservationAutoDeclineHours !== undefined)
+    row.reservation_auto_decline_hours = Math.max(
+      0,
+      Math.floor(patch.reservationAutoDeclineHours) || 0,
+    );
+  if (patch.reservationWhatsappEnabled !== undefined)
+    row.reservation_whatsapp_enabled = patch.reservationWhatsappEnabled;
+  if (patch.reservationPaused !== undefined) row.reservation_paused = patch.reservationPaused;
   return row;
 }
 

@@ -239,6 +239,113 @@ export async function sendTeamInviteEmail(input: {
   return { ok: true };
 }
 
+function supportInbox() {
+  return process.env.SUPPORT_INBOX_EMAIL?.trim() || "hello@froq.io";
+}
+
+/**
+ * Two messages for one ticket: the full detail to our inbox (with reply-to set
+ * to the sender so a reply goes straight back to them), and a short receipt to
+ * the sender carrying the reference.
+ *
+ * The inbox copy is the one that matters — if the receipt fails we still report
+ * success, because the ticket is already recorded.
+ */
+export async function sendSupportTicketEmails(input: {
+  reference: string;
+  name: string;
+  email: string;
+  category: string;
+  subject: string;
+  message: string;
+  businessName?: string | null;
+}): Promise<{ ok: boolean; error?: string }> {
+  const resend = getResend();
+  if (!resend) {
+    return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
+  }
+
+  const rows: Array<[string, string]> = [
+    ["Reference", input.reference],
+    ["From", `${input.name} <${input.email}>`],
+    ["Category", input.category],
+    ["Business", input.businessName?.trim() || "—"],
+  ];
+
+  const { error: inboxError } = await resend.emails.send({
+    from: fromAddress(),
+    to: supportInbox(),
+    replyTo: input.email,
+    subject: `[${input.reference}] ${input.subject}`,
+    html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${BRAND};">
+      <h2 style="margin:0 0 16px;font-size:18px;">${escapeHtml(input.subject)}</h2>
+      <table cellpadding="0" cellspacing="0" style="margin:0 0 20px;font-size:14px;">
+        ${rows
+          .map(
+            ([label, value]) =>
+              `<tr><td style="padding:2px 16px 2px 0;color:#7a9088;">${escapeHtml(label)}</td><td style="padding:2px 0;font-weight:600;">${escapeHtml(value)}</td></tr>`,
+          )
+          .join("")}
+      </table>
+      <div style="padding:16px;background:#f4f5f6;border-radius:8px;font-size:15px;line-height:1.6;white-space:pre-wrap;">${escapeHtml(input.message)}</div>
+    </div>`,
+    text: [
+      input.subject,
+      "",
+      ...rows.map(([label, value]) => `${label}: ${value}`),
+      "",
+      input.message,
+    ].join("\n"),
+  });
+
+  if (inboxError) {
+    return { ok: false, error: inboxError.message };
+  }
+
+  const greeting = input.name.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
+  await resend.emails.send({
+    from: fromAddress(),
+    to: input.email,
+    replyTo: supportInbox(),
+    subject: `We've got your request (${input.reference})`,
+    html: brandedEmailHtml({
+      title: "We've got your request",
+      greeting,
+      bodyHtml: `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#3d5c52;">
+        Thanks for getting in touch. Your reference is
+        <strong style="color:${BRAND};">${escapeHtml(input.reference)}</strong> — quote it if you
+        reply and we'll pick up the thread.
+      </p>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
+        We usually reply within one business day. Here's what you sent us:
+      </p>
+      <div style="margin:0 0 24px;padding:16px;background:#f4f5f6;border-radius:8px;font-size:15px;line-height:1.6;color:#3d5c52;">
+        <strong style="color:${BRAND};">${escapeHtml(input.subject)}</strong><br />
+        <span style="white-space:pre-wrap;">${escapeHtml(input.message)}</span>
+      </div>`,
+      ctaLabel: "Browse help articles",
+      ctaUrl: HELP_URL,
+      footnoteHtml: `<p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#3d5c52;">
+        You can simply reply to this email to add anything you forgot.
+      </p>`,
+    }),
+    text: [
+      greeting,
+      "",
+      `Thanks for getting in touch. Your reference is ${input.reference}.`,
+      "We usually reply within one business day.",
+      "",
+      `Subject: ${input.subject}`,
+      input.message,
+      "",
+      "Cheers,",
+      "The Froq Team",
+    ].join("\n"),
+  });
+
+  return { ok: true };
+}
+
 export async function sendEmailVerificationCode(input: {
   to: string;
   code: string;

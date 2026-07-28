@@ -1,5 +1,6 @@
 import { loyaltyCardUrl } from "@/lib/whatsapp/templates/names";
 import { requireCustomerPublicToken } from "@/lib/customer/hub";
+import { reservationUrl } from "@/lib/reservations/link";
 import { formatBookingSize, formatEstimatedWaitTime } from "@/lib/queue/format";
 
 /** Notification templates routed by sendCustomerNotification. */
@@ -12,7 +13,11 @@ export const CustomerNotificationTemplate = {
   /** @deprecated Prefer RewardClaimed — Meta template is loyaltycard_reward_claimed. */
   RewardRedeemed: "reward_redeemed",
   WaitlistCalled: "waitlist_called",
+  ReservationRequestReceived: "reservation_request_received",
   ReservationConfirmed: "reservation_confirmed",
+  ReservationDeclined: "reservation_declined",
+  ReservationUpdated: "reservation_updated",
+  ReservationReminder: "reservation_reminder",
   QueueJoined: "queue_first_notify",
   QueueFirstNotify: "queue_first_notify",
   QueueCallNow: "queue_call_now",
@@ -85,10 +90,30 @@ export type WaitlistCalledData = {
   position?: number | string;
 };
 
-export type ReservationConfirmedData = {
+/**
+ * Shared shape for every reservation lifecycle template.
+ *
+ * WhatsApp only notifies — the single CTA opens the guest's reservation page,
+ * where all actions live. `reservationToken` is that page's `rsv_…` token.
+ */
+export type ReservationData = {
   businessName: string;
+  /**
+   * Combined absolute date + time for SMS / in-app copy.
+   * WhatsApp Meta templates use `date` + `time` as separate body vars instead.
+   */
   when: string;
+  /** Meta {{3}} — e.g. "15 Aug 2026". */
+  date: string;
+  /** Meta {{4}} — e.g. "7:30 PM". */
+  time: string;
   partySize?: number | string;
+  reservationToken: string;
+};
+
+export type ReservationDeclinedData = ReservationData & {
+  /** Optional merchant reason; falls back to a neutral line. */
+  reason?: string;
 };
 
 /** Shared data for queue call / reminder / skipped / seated templates. */
@@ -109,7 +134,11 @@ export type CustomerNotificationDataMap = {
   reward_ready_wait_time: RewardReadyWaitTimeData;
   reward_redeemed: RewardRedeemedData;
   waitlist_called: WaitlistCalledData;
-  reservation_confirmed: ReservationConfirmedData;
+  reservation_request_received: ReservationData;
+  reservation_confirmed: ReservationData;
+  reservation_declined: ReservationDeclinedData;
+  reservation_updated: ReservationData;
+  reservation_reminder: ReservationData;
   queue_first_notify: QueueJoinedData;
   queue_call_now: QueuePartyData;
   queue_reminders_1: QueuePartyData;
@@ -126,7 +155,7 @@ export function shouldSendWhatsApp(customer: NotifiableCustomer): boolean {
   );
 }
 
-/** Queue Meta templates — send on WhatsApp even before OTP confirmed WhatsApp. */
+/** Queue Meta templates — WhatsApp only (no SMS fallback). */
 export function isQueueNotificationTemplate(
   template: CustomerNotificationTemplate,
 ): boolean {
@@ -139,6 +168,13 @@ export function isQueueNotificationTemplate(
     template === "queue_customer_skipped" ||
     template === "queue_seated"
   );
+}
+
+/** Reservation Meta templates — WhatsApp-first, same as queue. */
+export function isReservationNotificationTemplate(
+  template: CustomerNotificationTemplate,
+): boolean {
+  return template.startsWith("reservation_");
 }
 
 /** Plain-text SMS bodies (include hub URL). Keep short for SMS. */
@@ -177,10 +213,29 @@ export function buildSmsBody(
       const pos = d.position != null ? ` (position ${d.position})` : "";
       return `Hi ${name}, you're up at ${d.businessName}${pos}. Details: ${hub}`;
     }
-    case "reservation_confirmed": {
-      const d = data as ReservationConfirmedData;
+    case "reservation_request_received": {
+      const d = data as ReservationData;
       const party = d.partySize != null ? `, party of ${d.partySize}` : "";
-      return `Hi ${name}, reservation confirmed at ${d.businessName} for ${d.when}${party}. Details: ${hub}`;
+      return `Hi ${name}, we've received your table request at ${d.businessName} for ${d.when}${party}. We'll confirm shortly. View reservation: ${reservationUrl(d.reservationToken)}`;
+    }
+    case "reservation_confirmed": {
+      const d = data as ReservationData;
+      const party = d.partySize != null ? `, party of ${d.partySize}` : "";
+      return `Hi ${name}, reservation confirmed at ${d.businessName} for ${d.when}${party}. View reservation: ${reservationUrl(d.reservationToken)}`;
+    }
+    case "reservation_declined": {
+      const d = data as ReservationDeclinedData;
+      const reason = d.reason?.trim() ? ` ${d.reason.trim()}` : "";
+      return `Hi ${name}, sorry — ${d.businessName} can't take your table for ${d.when}.${reason} View reservation: ${reservationUrl(d.reservationToken)}`;
+    }
+    case "reservation_updated": {
+      const d = data as ReservationData;
+      return `Hi ${name}, ${d.businessName} proposed a new time for your table: ${d.when}. Accept or decline here: ${reservationUrl(d.reservationToken)}`;
+    }
+    case "reservation_reminder": {
+      const d = data as ReservationData;
+      const party = d.partySize != null ? ` for ${d.partySize}` : "";
+      return `Hi ${name}, reminder: your table${party} at ${d.businessName} is booked for ${d.when}. View reservation: ${reservationUrl(d.reservationToken)}`;
     }
     case "queue_first_notify": {
       const d = data as QueueJoinedData;
@@ -204,7 +259,7 @@ export function buildSmsBody(
     case "queue_seated": {
       const d = data as QueuePartyData;
       const size = formatBookingSize(d.bookingSize);
-      return `Hi ${name}, welcome — you're seated at ${d.businessName} (${size}). Details: ${hub}`;
+      return `Hi ${name}, you're seated at ${d.businessName} (${size}). Details: ${hub}`;
     }
     default: {
       const _exhaustive: never = template;
@@ -223,7 +278,11 @@ export function smsTemplateIdFor(
     reward_ready_wait_time: "APITXT_SMS_TEMPLATE_REWARD_READY_WAIT_TIME",
     reward_redeemed: "APITXT_SMS_TEMPLATE_REWARD_REDEEMED",
     waitlist_called: "APITXT_SMS_TEMPLATE_WAITLIST_CALLED",
+    reservation_request_received: "APITXT_SMS_TEMPLATE_RESERVATION_REQUEST_RECEIVED",
     reservation_confirmed: "APITXT_SMS_TEMPLATE_RESERVATION_CONFIRMED",
+    reservation_declined: "APITXT_SMS_TEMPLATE_RESERVATION_DECLINED",
+    reservation_updated: "APITXT_SMS_TEMPLATE_RESERVATION_UPDATED",
+    reservation_reminder: "APITXT_SMS_TEMPLATE_RESERVATION_REMINDER",
     queue_first_notify: "APITXT_SMS_TEMPLATE_QUEUE_FIRST_NOTIFY",
     queue_call_now: "APITXT_SMS_TEMPLATE_QUEUE_CALL_NOW",
     queue_reminders_1: "APITXT_SMS_TEMPLATE_QUEUE_REMINDERS_1",

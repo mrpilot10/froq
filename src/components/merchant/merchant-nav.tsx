@@ -1,16 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import {
-  BarChart3,
   History,
   LayoutGrid,
   ScanLine,
   SlidersHorizontal,
-  User,
   Users,
   type LucideIcon,
 } from "lucide-react";
-import { PRODUCTS } from "@/lib/merchant/nav";
+import { PRODUCT_DEFAULT_TAB, PRODUCTS, TAB_HREF } from "@/lib/merchant/nav";
 import type { MerchantProduct, MerchantTab } from "@/lib/merchant/types";
 
 interface MerchantNavProps {
@@ -35,16 +34,28 @@ const LOYALTY_NAV: MobileNavItem[] = [
   { id: "dashboard", label: "Home", Icon: LayoutGrid },
   { id: "loyalty-customers", label: "Customers", Icon: Users },
   { id: "scan-action", label: "Scan", Icon: ScanLine, primary: true },
-  { id: "loyalty-analytics", label: "Analytics", Icon: BarChart3 },
+  { id: "loyalty-history", label: "History", Icon: History },
   { id: "loyalty-settings", label: "Settings", Icon: SlidersHorizontal },
 ];
 
 const QUEUE_NAV: MobileNavItem[] = [
   { id: "queue-home", label: "Home", Icon: LayoutGrid },
+  { id: "queue-customers", label: "Customers", Icon: Users },
   { id: "queue-history", label: "History", Icon: History },
   { id: "queue-settings", label: "Settings", Icon: SlidersHorizontal },
-  { id: "profile", label: "Profile", Icon: User },
 ];
+
+const RESERVATION_NAV: MobileNavItem[] = [
+  { id: "reservations-home", label: "Home", Icon: LayoutGrid },
+  { id: "reservations-history", label: "History", Icon: History },
+  { id: "reservations-settings", label: "Settings", Icon: SlidersHorizontal },
+];
+
+const PRODUCT_MOBILE_NAV: Record<MerchantProduct, MobileNavItem[]> = {
+  loyalty: LOYALTY_NAV,
+  queue: QUEUE_NAV,
+  reservation: RESERVATION_NAV,
+};
 
 export function MerchantNav({
   activeProduct,
@@ -54,23 +65,27 @@ export function MerchantNav({
   onScan,
   pendingCount = 0,
 }: MerchantNavProps) {
-  const items = activeProduct === "loyalty" ? LOYALTY_NAV : QUEUE_NAV;
+  const items = PRODUCT_MOBILE_NAV[activeProduct] ?? LOYALTY_NAV;
 
   return (
     <div className="nav-dock">
       <div className="merchant-nav-switch" role="tablist" aria-label="Switch product">
         {PRODUCTS.map(({ id, name, Icon }) => (
-          <button
+          <Link
             key={id}
-            type="button"
+            href={TAB_HREF[PRODUCT_DEFAULT_TAB[id]]}
+            prefetch
             role="tab"
             aria-selected={activeProduct === id}
             className={`merchant-nav-switch-btn${activeProduct === id ? " active" : ""}`}
-            onClick={() => onProductChange(id)}
+            onClick={(event) => {
+              event.preventDefault();
+              onProductChange(id);
+            }}
           >
             <Icon size={14} strokeWidth={2.4} />
             <span>{name}</span>
-          </button>
+          </Link>
         ))}
       </div>
 
@@ -93,13 +108,18 @@ export function MerchantNav({
             );
           }
 
+          const tab = id as MerchantTab;
           return (
-            <button
+            <Link
               key={id}
-              type="button"
+              href={TAB_HREF[tab]}
+              prefetch
               className={`nav-item${isActive ? " active" : ""}`}
               aria-current={isActive ? "page" : undefined}
-              onClick={() => onTabChange(id as MerchantTab)}
+              onClick={(event) => {
+                event.preventDefault();
+                onTabChange(tab);
+              }}
             >
               <span className="merchant-nav-icon-wrap">
                 <Icon
@@ -115,7 +135,7 @@ export function MerchantNav({
                 )}
               </span>
               <span>{label}</span>
-            </button>
+            </Link>
           );
         })}
       </nav>

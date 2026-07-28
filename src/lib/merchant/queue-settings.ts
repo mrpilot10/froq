@@ -22,6 +22,11 @@ export function acceptWindowMs(minutes = CALL_ACCEPT_MINUTES) {
   return minutes * 60_000;
 }
 
+/** Absolute deadline for the post-call arrive countdown. */
+export function callAcceptDeadlineMs(calledAtMs: number): number {
+  return calledAtMs + acceptWindowMs(CALL_ACCEPT_MINUTES);
+}
+
 /** Three reminder offsets evenly dividing the accept window (at 1/3, 2/3, 3/3). */
 export function reminderOffsetsMs(windowMs: number) {
   const step = windowMs / REMINDER_COUNT;

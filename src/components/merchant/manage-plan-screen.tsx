@@ -230,6 +230,7 @@ export function ManagePlanScreen({ product, backHref }: ManagePlanScreenProps) {
       </button>
 
       <PricingTable
+        product={product}
         variant="manage"
         currentPlanId={currentPlanId}
         initialBilling={initialBilling}
@@ -243,6 +244,13 @@ export function ManagePlanScreen({ product, backHref }: ManagePlanScreenProps) {
         onSelectPlan={handleSelectPlan}
         onViewPlan={() => setViewPlanOpen(true)}
         planActionLabel={() => "Get started"}
+        title={
+          product === "queue"
+            ? "Manage Queue plan"
+            : product === "reservation"
+              ? "Manage Reservations plan"
+              : undefined
+        }
         subtitle="Plan changes apply at your next renewal. Cancel anytime to stop future renewals."
       />
 

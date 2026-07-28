@@ -5,16 +5,31 @@ import { FROQ_LOGO_SRC } from "@/lib/brand";
 import { useEffect, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
-import { ArrowUpRight, LifeBuoy, LogOut, X } from "lucide-react";
-import { MERCHANT_PLANS } from "@/lib/merchant/constants";
+import Link from "next/link";
+import { ArrowUpRight, ChevronRight, LifeBuoy, LogOut, X } from "lucide-react";
 import {
-  PRODUCT_NAV,
+  PRODUCT_DEFAULT_TAB,
   PRODUCTS,
+  TAB_HREF,
   workspaceNavForRole,
   type NavItem,
 } from "@/lib/merchant/nav";
+import { ROLE_LABELS } from "@/lib/merchant/roles";
+import { planUpgradeSummary } from "@/lib/merchant/plan-summary";
 import type { MemberRole, MerchantProduct, MerchantTab } from "@/lib/merchant/types";
-import { isProductEnabled, type Entitlements } from "@/lib/merchant/entitlements";
+import {
+  isProductEnabled,
+  isTrialActive,
+  trialDaysLeft,
+  type Entitlements,
+} from "@/lib/merchant/entitlements";
+
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
 
 interface MerchantMobileMenuProps {
   open: boolean;
@@ -23,9 +38,11 @@ interface MerchantMobileMenuProps {
   role: MemberRole;
   entitlements: Entitlements;
   canPurchase?: boolean;
+  userName?: string;
   onTabChange: (tab: MerchantTab) => void;
   onProductChange: (product: MerchantProduct) => void;
   onUpgrade?: (product: MerchantProduct) => void;
+  onOpenAccount?: () => void;
   onLogout?: () => void;
   onClose: () => void;
 }
@@ -37,18 +54,31 @@ export function MerchantMobileMenu({
   role,
   entitlements,
   canPurchase = true,
+  userName = "",
   onTabChange,
   onProductChange,
   onUpgrade,
+  onOpenAccount,
   onLogout,
   onClose,
 }: MerchantMobileMenuProps) {
   const [mounted, setMounted] = useState(false);
   const product = PRODUCTS.find((p) => p.id === activeProduct) ?? PRODUCTS[0];
-  const catalog = MERCHANT_PLANS[activeProduct];
+  const entitlement = entitlements[activeProduct];
   const enabled = isProductEnabled(entitlements, activeProduct);
-  const plan = { ...catalog, enabled };
+  const onTrial = isTrialActive(entitlement);
+  const summary = planUpgradeSummary({
+    product: activeProduct,
+    planId: entitlement?.planId,
+  });
+  const statusLabel = onTrial
+    ? `${trialDaysLeft(entitlement)}d trial left`
+    : enabled
+      ? "Active"
+      : "Not enabled";
   const workspaceItems = workspaceNavForRole(role === "owner");
+  const displayName = userName.trim() || "Team member";
+  const initials = getInitials(displayName);
 
   useEffect(() => setMounted(true), []);
 
@@ -82,18 +112,22 @@ export function MerchantMobileMenu({
   const renderNavItem = ({ id, label, Icon }: NavItem) => {
     const isActive = activeTab === id;
     return (
-      <button
+      <Link
         key={id}
-        type="button"
+        href={TAB_HREF[id]}
+        prefetch
         className={`merchant-menu-item${isActive ? " active" : ""}`}
         aria-current={isActive ? "page" : undefined}
-        onClick={() => selectTab(id)}
+        onClick={(event) => {
+          event.preventDefault();
+          selectTab(id);
+        }}
       >
         <span className="merchant-menu-item-icon">
           <Icon size={19} strokeWidth={isActive ? 2.4 : 2} />
         </span>
         <span>{label}</span>
-      </button>
+      </Link>
     );
   };
 
@@ -127,12 +161,16 @@ export function MerchantMobileMenu({
             {PRODUCTS.map(({ id, name, tagline, Icon }) => {
               const isActive = activeProduct === id;
               return (
-                <button
+                <Link
                   key={id}
-                  type="button"
+                  href={TAB_HREF[PRODUCT_DEFAULT_TAB[id]]}
+                  prefetch
                   className={`merchant-menu-item merchant-menu-item--product${isActive ? " active" : ""}`}
                   aria-current={isActive ? "true" : undefined}
-                  onClick={() => selectProduct(id)}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    selectProduct(id);
+                  }}
                 >
                   <span className="merchant-menu-item-icon">
                     <Icon size={19} strokeWidth={isActive ? 2.4 : 2} />
@@ -141,14 +179,9 @@ export function MerchantMobileMenu({
                     <span>{name}</span>
                     <span className="merchant-menu-item-sub">{tagline}</span>
                   </span>
-                </button>
+                </Link>
               );
             })}
-          </nav>
-
-          <nav className="merchant-menu-group" aria-label={product.name}>
-            <span className="merchant-menu-label">{product.name}</span>
-            {PRODUCT_NAV[activeProduct].map(renderNavItem)}
           </nav>
 
           <nav className="merchant-menu-group" aria-label="Workspace">
@@ -158,21 +191,35 @@ export function MerchantMobileMenu({
         </div>
 
         <div className="merchant-menu-foot">
-          <div className={`merchant-side-plan${plan.enabled ? "" : " is-locked"}`}>
+          <div className={`merchant-side-plan${enabled ? "" : " is-locked"}`}>
             <div className="merchant-side-plan-top">
               <span className="merchant-side-plan-name">
                 {product.name}
-                <span className="merchant-side-plan-tier">{plan.name}</span>
+                {summary.currentTier ? (
+                  <span className="merchant-side-plan-tier">{summary.currentTier}</span>
+                ) : null}
               </span>
-              <span className={`merchant-side-plan-status${plan.enabled ? " is-active" : ""}`}>
-                {plan.status}
+              <span className={`merchant-side-plan-status${enabled ? " is-active" : ""}`}>
+                {statusLabel}
               </span>
             </div>
-            <div className="merchant-side-plan-price">
-              {plan.price}
-              <span>{plan.cycle}</span>
-            </div>
-            {canPurchase ? (
+
+            {/* No plan in force means no current price — the CTA carries one. */}
+            {summary.currentPriceLabel ? (
+              <div className="merchant-side-plan-price">
+                {summary.currentPriceLabel}
+                <span>{summary.currentCycleLabel}</span>
+              </div>
+            ) : null}
+
+            {summary.nextPlan && summary.nextHighlights.length > 0 ? (
+              <p className="merchant-side-plan-gain">
+                {summary.currentTier ? `${summary.nextPlan.name}: ` : null}
+                {summary.nextHighlights.join(" · ")}
+              </p>
+            ) : null}
+
+            {canPurchase && summary.nextPlan ? (
               <button
                 type="button"
                 className="merchant-side-plan-cta"
@@ -181,24 +228,46 @@ export function MerchantMobileMenu({
                   onClose();
                 }}
               >
-                Upgrade
+                <span>{summary.currentTier ? "Upgrade" : "Get started"}</span>
+                <span className="merchant-side-plan-cta-price">
+                  {summary.nextPlan.priceLabel}
+                  {summary.currentCycleLabel}
+                </span>
                 <ArrowUpRight size={14} strokeWidth={2.4} />
               </button>
             ) : null}
           </div>
 
-          <a
-            href="https://froq.io/help"
-            target="_blank"
-            rel="noreferrer"
-            className="merchant-menu-item"
-            onClick={onClose}
+          <button
+            type="button"
+            className="merchant-side-user"
+            onClick={() => {
+              onOpenAccount?.();
+              onClose();
+            }}
+            aria-label="Account settings"
           >
+            <span className="merchant-avatar merchant-side-user-avatar" aria-hidden="true">
+              {initials}
+            </span>
+            <span className="merchant-side-user-copy">
+              <span className="merchant-side-user-name">{displayName}</span>
+              <span className="merchant-side-user-role">{ROLE_LABELS[role]}</span>
+            </span>
+            <ChevronRight
+              size={15}
+              strokeWidth={2.4}
+              className="merchant-side-user-chevron"
+              aria-hidden="true"
+            />
+          </button>
+
+          <Link href="/help" className="merchant-menu-item" onClick={onClose}>
             <span className="merchant-menu-item-icon">
               <LifeBuoy size={19} strokeWidth={2} />
             </span>
             <span>Help</span>
-          </a>
+          </Link>
 
           {onLogout ? (
             <button

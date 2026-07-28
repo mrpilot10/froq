@@ -11,6 +11,7 @@ import { establishPhoneSession } from "@/lib/auth/otp/session";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { maskPhone, toCanonicalPhone } from "@/lib/auth/otp/phone";
 import { otpLog } from "@/lib/auth/otp/logger";
+import { TURNSTILE_REJECTED_MESSAGE, isCaptchaAuthError } from "@/lib/turnstile/config";
 import type { VerifyOtpResult } from "@/lib/auth/otp/types";
 
 export const runtime = "nodejs";
@@ -19,6 +20,7 @@ export const maxDuration = 30;
 const bodySchema = z.object({
   phone: z.string().min(8).max(20),
   otp: z.string().regex(new RegExp(`^\\d{4,6}$`)),
+  captchaToken: z.string().optional(),
 });
 
 function json(body: VerifyOtpResult, status: number) {
@@ -27,7 +29,7 @@ function json(body: VerifyOtpResult, status: number) {
 
 export async function POST(request: Request) {
   try {
-    let parsed: { phone: string; otp: string };
+    let parsed: { phone: string; otp: string; captchaToken?: string };
     try {
       parsed = bodySchema.parse(await request.json());
     } catch {
@@ -62,18 +64,23 @@ export async function POST(request: Request) {
 
     const deliveryChannel = record.channel === "whatsapp" ? "whatsapp" : "sms";
 
-    const session = await establishPhoneSession(phone);
+    // The session is minted with a phone+password grant, which GoTrue guards
+    // with its CAPTCHA check — hence a second token here, distinct from the one
+    // spent on /api/send-otp. It also rate-limits code-guessing at the last step.
+    const session = await establishPhoneSession(phone, parsed.captchaToken);
     if (!session.ok) {
       const err = session.error ?? "";
       otpLog.error("verify_session_failed", { phone: maskPhone(phone), reason: err });
       const errLower = err.toLowerCase();
-      const message = err.includes("auth_user_id_by_phone")
-        ? "Database migration missing. Run supabase/migrations/0004_otp.sql in Supabase SQL editor."
-        : errLower.includes("phone logins are disabled") || errLower.includes("phone provider")
-          ? "Phone auth is disabled in Supabase. Go to Authentication → Providers → Phone, enable it, and allow phone + password sign-in. You do not need a Supabase SMS provider — APITxT sends the OTP."
-          : errLower.includes("password")
-            ? "Enable phone + password sign-in in Supabase → Authentication → Providers → Phone."
-            : err || "Could not complete sign in. Please try again.";
+      const message = isCaptchaAuthError(err)
+        ? TURNSTILE_REJECTED_MESSAGE
+        : err.includes("auth_user_id_by_phone")
+          ? "Database migration missing. Run supabase/migrations/0004_otp.sql in Supabase SQL editor."
+          : errLower.includes("phone logins are disabled") || errLower.includes("phone provider")
+            ? "Phone auth is disabled in Supabase. Go to Authentication → Providers → Phone, enable it, and allow phone + password sign-in. You do not need a Supabase SMS provider — APITxT sends the OTP."
+            : errLower.includes("password")
+              ? "Enable phone + password sign-in in Supabase → Authentication → Providers → Phone."
+              : err || "Could not complete sign in. Please try again.";
       return json({ ok: false, message }, 500);
     }
 

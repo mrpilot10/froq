@@ -20,11 +20,23 @@ import {
   toMerchantProfile,
   toMerchantRowPatch,
 } from "@/lib/merchant/mappers";
-import { computeLoyaltyAnalytics } from "@/lib/merchant/analytics";
-import type { AnalyticsCustomerRow } from "@/lib/merchant/analytics";
+import {
+  computeLoyaltyAnalytics,
+  rangeRpcArgsForPreset,
+} from "@/lib/merchant/analytics";
+import type {
+  AnalyticsCustomerRow,
+  LoyaltyLifetimeStats,
+  LoyaltyRangeBucket,
+  LoyaltyRangeStats,
+} from "@/lib/merchant/analytics";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   EMPTY_ENTITLEMENTS,
   entitlementsFromRows,
+  isProductEnabled,
+  isTrialActive,
+  TRIAL_DAYS,
   type Entitlements,
 } from "@/lib/merchant/entitlements";
 import {
@@ -32,9 +44,12 @@ import {
   defaultPeriodEnd,
 } from "@/lib/merchant/billing";
 import { FREE_PLAN } from "@/lib/merchant/pricing";
+import { userIsMerchantAccount } from "@/lib/merchant/account";
+import { verifyTurnstileToken } from "@/lib/turnstile/verify";
+import { TURNSTILE_REJECTED_MESSAGE, isCaptchaAuthError } from "@/lib/turnstile/config";
 import type { MerchantProduct } from "@/lib/merchant/types";
 import { parseRedeemCode } from "@/lib/merchant/parse-redeem-code";
-import { toCanonicalPhone } from "@/lib/auth/otp/phone";
+import { digitsOnly, toCanonicalPhone } from "@/lib/auth/otp/phone";
 import {
   isValidEmail,
   isValidPassword,
@@ -48,31 +63,150 @@ import {
   canViewCustomerData,
   normalizeMemberRole,
 } from "@/lib/merchant/roles";
+import { resolveBranchFilterForUser } from "@/lib/merchant/branch-access";
+import { mergeUnifiedCustomers } from "@/lib/merchant/unified-customers";
+import type { UnifiedCustomer } from "@/lib/merchant/unified-customers";
 
-export interface MerchantStatsData {
-  totalCustomers: number;
-  activeCards: number;
-  stampsToday: number;
-  pendingApprovals: number;
-  rewardsRedeemed: number;
-  avgLifetimeVisits: number;
-  weeklyVisits: number[];
+const EMPTY_LIFETIME_STATS: LoyaltyLifetimeStats = {
+  total_visits: 0,
+  total_redemptions: 0,
+  avg_days_between_visits: null,
+  most_active_dow: null,
+  most_active_hour: null,
+};
+
+function startOfPreviousCalendarMonth(): Date {
+  const start = new Date();
+  start.setDate(1);
+  start.setMonth(start.getMonth() - 1);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function normalizeLifetimeStats(row: {
+  total_visits: number | string | null;
+  total_redemptions: number | string | null;
+  avg_days_between_visits: number | string | null;
+  most_active_dow: number | string | null;
+  most_active_hour: number | string | null;
+} | null): LoyaltyLifetimeStats {
+  if (!row) return { ...EMPTY_LIFETIME_STATS };
+  const toNum = (v: number | string | null) =>
+    v === null || v === undefined || v === "" ? null : Number(v);
+  const visits = toNum(row.total_visits);
+  const redemptions = toNum(row.total_redemptions);
+  const avg = toNum(row.avg_days_between_visits);
+  const dow = toNum(row.most_active_dow);
+  const hour = toNum(row.most_active_hour);
+  return {
+    total_visits: visits ?? 0,
+    total_redemptions: redemptions ?? 0,
+    avg_days_between_visits: avg,
+    most_active_dow: dow,
+    most_active_hour: hour,
+  };
 }
 
 function buildDashboardStats(
   range: DashboardDateRange,
   customers: AnalyticsCustomerRow[],
   visits: { created_at: string; customer_id: string | null }[],
-  redemptions: { customer_id: string | null; redeemed_at: string }[],
   pendingApprovals: number,
+  lifetime: LoyaltyLifetimeStats,
+  rangeStats: LoyaltyRangeStats | null,
 ): DashboardFilteredStats {
   return computeLoyaltyAnalytics({
     range,
     customers,
     visits,
-    redemptions,
     pendingApprovals,
+    lifetime,
+    rangeStats,
   });
+}
+
+function normalizeRangeStats(row: {
+  stamps_in_range: number | string | null;
+  rewards_in_range: number | string | null;
+  chart_granularity: string | null;
+  chart_buckets: unknown;
+} | null): LoyaltyRangeStats | null {
+  if (!row) return null;
+  const toNum = (v: number | string | null) =>
+    v === null || v === undefined || v === "" ? 0 : Number(v);
+  const rawBuckets = Array.isArray(row.chart_buckets) ? row.chart_buckets : [];
+  const chart_buckets: LoyaltyRangeBucket[] = rawBuckets.map((b, i) => {
+    const item = b as Record<string, unknown>;
+    return {
+      bucket_index: toNum(item.bucket_index as number | string | null) || i,
+      bucket_start: String(item.bucket_start ?? ""),
+      visit_count: toNum(item.visit_count as number | string | null),
+    };
+  });
+  return {
+    stamps_in_range: toNum(row.stamps_in_range),
+    rewards_in_range: toNum(row.rewards_in_range),
+    chart_granularity: row.chart_granularity ?? "",
+    chart_buckets,
+  };
+}
+
+/**
+ * merchant_loyalty_range_stats for stamps/rewards-in-range + chart buckets.
+ * On error returns null → rangeStatsError UI (no truncated-array substitute).
+ */
+async function fetchLoyaltyRangeStats(
+  supabase: SupabaseClient,
+  merchantId: string,
+  branchId: string | null,
+  range: DashboardDateRange,
+): Promise<LoyaltyRangeStats | null> {
+  const args = rangeRpcArgsForPreset(range);
+  const { data, error } = await supabase.rpc("merchant_loyalty_range_stats", {
+    p_merchant_id: merchantId,
+    p_branch_id: branchId,
+    p_start: args.p_start,
+    p_end: args.p_end,
+    p_granularity: args.p_granularity,
+    p_timezone: args.p_timezone,
+  });
+  if (error) {
+    console.error(
+      "[merchant_loyalty_range_stats]",
+      error.message ?? error,
+    );
+    return null;
+  }
+  // .rpc() returns a set-of-rows array; take the single stats row explicitly.
+  const row = Array.isArray(data) ? data[0] ?? null : data;
+  return normalizeRangeStats(row);
+}
+
+/** Intentional fetch ceilings — PostgREST silently defaults to 1000; make that loud. */
+const CUSTOMERS_FETCH_LIMIT = 1000;
+/** Pending approvals UI list; rare to exceed this; badge uses exact count separately. */
+const APPROVALS_FETCH_LIMIT = 500;
+/**
+ * Visits row fetch for stampsToday / stampsThisMonth / insights (range chart
+ * uses merchant_loyalty_range_stats). Matches former PostgREST default.
+ */
+const EVENT_FETCH_LIMIT = 1000;
+
+function warnIfTruncated(
+  query: string,
+  merchantId: string,
+  count: number | null,
+  limit: number,
+) {
+  if (count != null && count > limit) {
+    console.error("[postgrest-truncation]", {
+      query,
+      merchantId,
+      count,
+      limit,
+      returned: limit,
+    });
+  }
 }
 
 export type MerchantBundle =
@@ -83,7 +217,6 @@ export type MerchantBundle =
   | {
       status: "ready";
       profile: MerchantProfile;
-      stats: MerchantStatsData;
       dashboardStats: DashboardFilteredStats;
       customers: MerchantCustomer[];
       approvals: PendingApproval[];
@@ -103,20 +236,6 @@ function hasMerchantOnboarding(user: { app_metadata?: Record<string, unknown> })
 
 function onboardingProduct(user: { app_metadata?: Record<string, unknown> }): MerchantProduct {
   return user.app_metadata?.onboarding_product === "queue" ? "queue" : "loyalty";
-}
-
-// Visits over the trailing 7 days bucketed Mon..Sun for the dashboard chart.
-function weeklyBuckets(rows: { created_at: string }[]): number[] {
-  const buckets = [0, 0, 0, 0, 0, 0, 0];
-  const cutoff = Date.now() - 7 * 86_400_000;
-  for (const row of rows) {
-    const date = new Date(row.created_at);
-    if (date.getTime() < cutoff) continue;
-    const jsDay = date.getDay(); // 0 Sun .. 6 Sat
-    const monIndex = (jsDay + 6) % 7; // 0 Mon .. 6 Sun
-    buckets[monIndex] += 1;
-  }
-  return buckets;
 }
 
 export async function getDashboardStats(
@@ -179,51 +298,194 @@ export async function getDashboardStats(
       .from("customer_overview")
       .select(
         "id, name, banned, status, stamps, total_stamps, lifetime_visits, rewards_claimed, created_at, last_visit",
+        { count: "exact" },
       )
-      .eq("merchant_id", merchantId);
-    let approvalsQuery = supabase
+      .eq("merchant_id", merchantId)
+      .order("created_at", { ascending: false })
+      .range(0, CUSTOMERS_FETCH_LIMIT - 1);
+    let pendingApprovalsQuery = supabase
       .from("approvals")
-      .select("id")
+      .select("id", { count: "exact", head: true })
       .eq("merchant_id", merchantId)
       .eq("status", "pending");
     let visitsQuery = supabase
       .from("visits")
-      .select("created_at, customer_id")
-      .eq("merchant_id", merchantId);
-    let redemptionsQuery = supabase
-      .from("redemptions")
-      .select("customer_id, redeemed_at")
-      .eq("merchant_id", merchantId);
+      .select("created_at, customer_id", { count: "exact" })
+      .eq("merchant_id", merchantId)
+      .order("created_at", { ascending: false })
+      .range(0, EVENT_FETCH_LIMIT - 1);
 
     if (branchFilter) {
       customersQuery = customersQuery.eq("branch_id", branchFilter);
-      approvalsQuery = approvalsQuery.eq("branch_id", branchFilter);
+      pendingApprovalsQuery = pendingApprovalsQuery.eq("branch_id", branchFilter);
       visitsQuery = visitsQuery.eq("branch_id", branchFilter);
-      redemptionsQuery = redemptionsQuery.eq("branch_id", branchFilter);
     }
 
-    const [customersRes, approvalsRes, visitsRes, redemptionsRes] = await Promise.all([
-      customersQuery,
-      approvalsQuery,
-      visitsQuery,
-      redemptionsQuery,
-    ]);
+    const [customersRes, pendingApprovalsRes, visitsRes, lifetimeRes, rangeStats] =
+      await Promise.all([
+        customersQuery,
+        pendingApprovalsQuery,
+        visitsQuery,
+        supabase.rpc("merchant_loyalty_lifetime_stats", {
+          p_merchant_id: merchantId,
+          p_branch_id: branchFilter ?? null,
+        }),
+        fetchLoyaltyRangeStats(supabase, merchantId, branchFilter, range),
+      ]);
+
+    warnIfTruncated(
+      "getDashboardStats.customer_overview",
+      merchantId,
+      customersRes.count,
+      CUSTOMERS_FETCH_LIMIT,
+    );
+    warnIfTruncated(
+      "getDashboardStats.visits",
+      merchantId,
+      visitsRes.count,
+      EVENT_FETCH_LIMIT,
+    );
+
+    let lifetime = { ...EMPTY_LIFETIME_STATS };
+    if (lifetimeRes.error) {
+      console.error(
+        "[merchant_loyalty_lifetime_stats]",
+        lifetimeRes.error.message ?? lifetimeRes.error,
+      );
+    } else {
+      const row = Array.isArray(lifetimeRes.data)
+        ? lifetimeRes.data[0] ?? null
+        : lifetimeRes.data;
+      lifetime = normalizeLifetimeStats(row);
+    }
 
     return buildDashboardStats(
       range,
       (customersRes.data ?? []) as AnalyticsCustomerRow[],
       visitsRes.data ?? [],
-      redemptionsRes.data ?? [],
-      (approvalsRes.data ?? []).length,
+      pendingApprovalsRes.count ?? 0,
+      lifetime,
+      rangeStats,
     );
   } catch {
     return null;
   }
 }
 
+export type MerchantSessionResult =
+  | { status: "unauthenticated" }
+  | { status: "error" }
+  | { status: "not_registered" }
+  | { status: "needs_setup"; product: MerchantProduct }
+  | {
+      status: "ready";
+      profile: MerchantProfile;
+      entitlements: Entitlements;
+      branches: Branch[];
+      members: MerchantMember[];
+      role: MemberRole;
+      activeBranchId: string | null;
+      canViewAllBranches: boolean;
+      justJoined: boolean;
+    };
+
+export type MerchantWorkspaceDataResult =
+  | { status: "unauthenticated" }
+  | { status: "error" }
+  | { status: "not_registered" }
+  | { status: "needs_setup"; product: MerchantProduct }
+  | {
+      status: "ready";
+      dashboardStats: DashboardFilteredStats;
+      customers: MerchantCustomer[];
+      approvals: PendingApproval[];
+    };
+
+/**
+ * Opaque access handle created only by {@link establishMerchantAccess}.
+ * Callers must not construct this — it is how workspace data receives a
+ * verified merchant identity without accepting a client-supplied merchantId.
+ */
+type VerifiedMerchantAccess = {
+  readonly __brand: "VerifiedMerchantAccess";
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  userId: string;
+  merchantId: string;
+  profile: MerchantProfile;
+  members: MerchantMember[];
+  role: MemberRole;
+  branches: Branch[];
+  branchFilter: string | null;
+  canViewAllBranches: boolean;
+  /** Raw product rows before {@link applyDueBillingChanges}. */
+  productRowsRaw: ProductBillingRow[];
+  isOwner: boolean;
+  me: MerchantMember | undefined;
+};
+
+type MerchantAccessResult =
+  | { status: "unauthenticated" }
+  /** A merchant lookup failed. Never conflated with "no store yet". */
+  | { status: "error" }
+  | { status: "not_registered" }
+  | { status: "needs_setup"; product: MerchantProduct }
+  | { status: "ready"; access: VerifiedMerchantAccess };
+
+/**
+ * Session half of the merchant bundle (auth → entitlements / branch ACL).
+ * Owns applyDueBillingChanges + justJoined accepted_at write.
+ */
+export async function getMerchantSession(
+  activeBranchId?: string | null,
+): Promise<MerchantSessionResult> {
+  const accessResult = await establishMerchantAccess(activeBranchId ?? null);
+  if (accessResult.status !== "ready") return accessResult;
+  return finalizeMerchantSession(accessResult.access);
+}
+
+/**
+ * Workspace half of the merchant bundle (customers / approvals / analytics).
+ * Re-establishes merchant identity via {@link establishMerchantAccess} when
+ * called alone — never trusts a caller-supplied merchantId.
+ */
+export async function getMerchantWorkspaceData(
+  activeBranchId?: string | null,
+): Promise<MerchantWorkspaceDataResult> {
+  const accessResult = await establishMerchantAccess(activeBranchId ?? null);
+  if (accessResult.status !== "ready") return accessResult;
+  return loadMerchantWorkspaceData(accessResult.access);
+}
+
 export async function getMerchantBundle(activeBranchId?: string | null): Promise<MerchantBundle> {
   try {
-    return await loadMerchantBundle(activeBranchId ?? null);
+    // Shared identity once, then session side-effects ∥ workspace fan-out.
+    const accessResult = await establishMerchantAccess(activeBranchId ?? null);
+    if (accessResult.status !== "ready") return accessResult;
+
+    const [session, workspace] = await Promise.all([
+      finalizeMerchantSession(accessResult.access),
+      loadMerchantWorkspaceData(accessResult.access),
+    ]);
+
+    if (session.status !== "ready" || workspace.status !== "ready") {
+      // Both paths share the same access; ready is the only expected outcome.
+      return { status: "error" };
+    }
+
+    return {
+      status: "ready",
+      profile: session.profile,
+      dashboardStats: workspace.dashboardStats,
+      customers: workspace.customers,
+      approvals: workspace.approvals,
+      entitlements: session.entitlements,
+      branches: session.branches,
+      members: session.members,
+      role: session.role,
+      activeBranchId: session.activeBranchId,
+      canViewAllBranches: session.canViewAllBranches,
+      justJoined: session.justJoined,
+    };
   } catch {
     // Transient network/query errors must NOT look like a sign-out, otherwise a
     // single failed realtime refresh would bounce the merchant to the login
@@ -232,49 +494,400 @@ export async function getMerchantBundle(activeBranchId?: string | null): Promise
   }
 }
 
-/** Resolve the merchant this user can access — as owner or as a team member. */
+/**
+ * Columns consumed by establishMerchantAccess / toMerchantProfile.
+ * Intentionally omits short_name and created_at (unused on this path).
+ */
+const MERCHANT_ACCESS_COLUMNS =
+  "id, owner_user_id, slug, business_name, owner_first_name, owner_last_name, email, phone, address, brand_color, logo_url, website_url, google_business_url, instagram_url, facebook_url, x_url, reward_title, reward_name, reward_image_url, total_stamps, avg_order_value, restart_after_reward, reward_cooldown_value, reward_cooldown_unit, min_purchase_amount, stamp_notifications, approval_notifications, marketing_emails, queue_banner, queue_banner_link, queue_open_time, queue_close_time, queue_hours_timezone, queue_open_days, queue_auto_start, queue_auto_close, reservation_description, reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes, reservation_auto_decline_hours, reservation_whatsapp_enabled, reservation_paused";
+
+/**
+ * Resolve the merchant this user can access — as owner or as a team member.
+ * Ownership and membership lookups run in parallel; owned wins if both exist.
+ * Owner path returns the full access row in one round-trip; membership path
+ * follows up with one merchants select (same column shape).
+ *
+ * "failed" is deliberately distinct from "none": a query that errored says
+ * nothing about whether this user has a store, and callers must not read it as
+ * "no store yet" — that would drop an established merchant into the setup
+ * wizard and let them create a second store on top of their real one.
+ */
+type ResolvedMerchant =
+  | { status: "found"; row: NonNullable<Awaited<ReturnType<typeof selectMerchantById>>["data"]> }
+  | { status: "none" }
+  | { status: "failed" };
+
+function selectMerchantById(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  merchantId: string,
+) {
+  return supabase
+    .from("merchants")
+    .select(MERCHANT_ACCESS_COLUMNS)
+    .eq("id", merchantId)
+    .maybeSingle();
+}
+
+async function resolveMerchantRow(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+): Promise<ResolvedMerchant> {
+  const [ownedRes, membershipRes] = await Promise.all([
+    // limit(1) rather than a bare maybeSingle(): an account that somehow owns
+    // two stores resolves to its oldest one instead of failing every load.
+    supabase
+      .from("merchants")
+      .select(MERCHANT_ACCESS_COLUMNS)
+      .eq("owner_user_id", userId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("merchant_members")
+      .select("merchant_id")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (ownedRes.error || membershipRes.error) {
+    console.error("[merchant-access]", {
+      userId,
+      owned: ownedRes.error?.message ?? null,
+      membership: membershipRes.error?.message ?? null,
+    });
+    return { status: "failed" };
+  }
+
+  if (ownedRes.data) return { status: "found", row: ownedRes.data };
+
+  const memberMerchantId = membershipRes.data?.merchant_id;
+  if (!memberMerchantId) return { status: "none" };
+
+  const memberRes = await selectMerchantById(supabase, memberMerchantId);
+  if (memberRes.error) {
+    console.error("[merchant-access]", { userId, member: memberRes.error.message });
+    return { status: "failed" };
+  }
+  return memberRes.data ? { status: "found", row: memberRes.data } : { status: "none" };
+}
+
+export type LoyaltyHistoryEventType = "stamp" | "reward";
+
+export interface LoyaltyHistoryEvent {
+  id: string;
+  type: LoyaltyHistoryEventType;
+  customerId: string | null;
+  customerName: string;
+  customerPhone: string;
+  atMs: number;
+  /** Teammate who performed it; null for rows written before attribution. */
+  staffName: string | null;
+  staffRole: MemberRole | null;
+  /** Stamp events only — purchase amount in ₹ (0 when not captured). */
+  amount?: number;
+  /** Reward events only — the redeem code that was used. */
+  code?: string;
+}
+
+export interface LoyaltyHistoryResult {
+  events: LoyaltyHistoryEvent[];
+  /** True when either source hit LOYALTY_HISTORY_FETCH_LIMIT. */
+  truncated: boolean;
+}
+
+/** Per-source row ceiling; the UI warns when a range exceeds it. */
+const LOYALTY_HISTORY_FETCH_LIMIT = 500;
+
+/**
+ * Loyalty activity log: stamps issued + rewards redeemed, newest first.
+ * `days` is a lookback window; null/undefined means all time.
+ */
+export async function getLoyaltyHistory(input?: {
+  branchId?: string | null;
+  days?: number | null;
+}): Promise<LoyaltyHistoryResult> {
+  const empty: LoyaltyHistoryResult = { events: [], truncated: false };
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return empty;
+
+    const merchantId = await resolveMerchantId(supabase, user.id);
+    if (!merchantId) return empty;
+
+    const branchFilter = await resolveBranchFilterForUser(
+      supabase,
+      merchantId,
+      user.id,
+      input?.branchId ?? null,
+    );
+
+    const days = input?.days ?? null;
+    const sinceIso =
+      days === null ? null : new Date(Date.now() - days * 86_400_000).toISOString();
+
+    let visitsQuery = supabase
+      .from("visits")
+      .select(
+        "id, customer_id, amount, created_at, performed_by_name, performed_by_role",
+        { count: "exact" },
+      )
+      .eq("merchant_id", merchantId)
+      .order("created_at", { ascending: false })
+      .range(0, LOYALTY_HISTORY_FETCH_LIMIT - 1);
+    let redemptionsQuery = supabase
+      .from("redemptions")
+      .select(
+        "id, customer_id, code, redeemed_at, performed_by_name, performed_by_role",
+        { count: "exact" },
+      )
+      .eq("merchant_id", merchantId)
+      .order("redeemed_at", { ascending: false })
+      .range(0, LOYALTY_HISTORY_FETCH_LIMIT - 1);
+
+    if (branchFilter) {
+      visitsQuery = visitsQuery.eq("branch_id", branchFilter);
+      redemptionsQuery = redemptionsQuery.eq("branch_id", branchFilter);
+    }
+    if (sinceIso) {
+      visitsQuery = visitsQuery.gte("created_at", sinceIso);
+      redemptionsQuery = redemptionsQuery.gte("redeemed_at", sinceIso);
+    }
+
+    const [visitsRes, redemptionsRes] = await Promise.all([
+      visitsQuery,
+      redemptionsQuery,
+    ]);
+
+    warnIfTruncated(
+      "getLoyaltyHistory.visits",
+      merchantId,
+      visitsRes.count,
+      LOYALTY_HISTORY_FETCH_LIMIT,
+    );
+    warnIfTruncated(
+      "getLoyaltyHistory.redemptions",
+      merchantId,
+      redemptionsRes.count,
+      LOYALTY_HISTORY_FETCH_LIMIT,
+    );
+
+    const visits = visitsRes.data ?? [];
+    const redemptions = redemptionsRes.data ?? [];
+
+    const customerIds = [
+      ...new Set(
+        [...visits, ...redemptions]
+          .map((row) => row.customer_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+
+    const nameById = new Map<string, { name: string; phone: string }>();
+    if (customerIds.length > 0) {
+      const { data: customerRows } = await supabase
+        .from("customers")
+        .select("id, name, phone")
+        .eq("merchant_id", merchantId)
+        .in("id", customerIds);
+      for (const row of customerRows ?? []) {
+        nameById.set(row.id, { name: row.name, phone: row.phone });
+      }
+    }
+
+    const resolve = (customerId: string | null) => {
+      const found = customerId ? nameById.get(customerId) : undefined;
+      return {
+        customerName: found?.name?.trim() || "Deleted customer",
+        customerPhone: found?.phone ?? "",
+      };
+    };
+
+    const staffOf = (row: { performed_by_name: string | null; performed_by_role: string | null }) => ({
+      staffName: row.performed_by_name?.trim() || null,
+      staffRole: row.performed_by_role ? normalizeMemberRole(row.performed_by_role) : null,
+    });
+
+    const events: LoyaltyHistoryEvent[] = [
+      ...visits.map((row) => ({
+        id: `stamp:${row.id}`,
+        type: "stamp" as const,
+        customerId: row.customer_id,
+        ...resolve(row.customer_id),
+        ...staffOf(row),
+        atMs: new Date(row.created_at).getTime(),
+        amount: Number(row.amount ?? 0),
+      })),
+      ...redemptions.map((row) => ({
+        id: `reward:${row.id}`,
+        type: "reward" as const,
+        customerId: row.customer_id,
+        ...resolve(row.customer_id),
+        ...staffOf(row),
+        atMs: new Date(row.redeemed_at).getTime(),
+        code: row.code,
+      })),
+    ].sort((a, b) => b.atMs - a.atMs);
+
+    const truncated =
+      (visitsRes.count ?? 0) > LOYALTY_HISTORY_FETCH_LIMIT ||
+      (redemptionsRes.count ?? 0) > LOYALTY_HISTORY_FETCH_LIMIT;
+
+    return { events, truncated };
+  } catch (error) {
+    console.error("getLoyaltyHistory exception", error);
+    return empty;
+  }
+}
+
+export interface UnifiedCustomersResult {
+  customers: UnifiedCustomer[];
+  /** True when either source hit its fetch ceiling. */
+  truncated: boolean;
+}
+
+/** Ceilings for the unified customers page. */
+const UNIFIED_QUEUE_FETCH_LIMIT = 5000;
+
+/**
+ * Every person the merchant knows, across loyalty and queue, in one list.
+ * Owner/manager only — the payload is entirely contact PII.
+ */
+export async function getUnifiedCustomers(input?: {
+  branchId?: string | null;
+}): Promise<UnifiedCustomersResult> {
+  const empty: UnifiedCustomersResult = { customers: [], truncated: false };
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return empty;
+
+    const merchant = await currentMerchant(supabase, user.id);
+    if (!merchant || !canViewCustomerData(merchant.role)) return empty;
+
+    const branchFilter = await resolveBranchFilterForUser(
+      supabase,
+      merchant.id,
+      user.id,
+      input?.branchId ?? null,
+    );
+
+    let loyaltyQuery = supabase
+      .from("customer_overview")
+      .select(
+        "id, name, phone, email, banned, member_since, stamps, total_stamps, status, lifetime_visits, rewards_claimed, last_visit",
+        { count: "exact" },
+      )
+      .eq("merchant_id", merchant.id)
+      .order("created_at", { ascending: false })
+      .range(0, CUSTOMERS_FETCH_LIMIT - 1);
+
+    let queueQuery = supabase
+      .from("queue_entries")
+      .select(
+        "customer_id, name, phone, email, party_size, status, joined_at, seated_at",
+        { count: "exact" },
+      )
+      .eq("merchant_id", merchant.id)
+      .order("joined_at", { ascending: false })
+      .range(0, UNIFIED_QUEUE_FETCH_LIMIT - 1);
+
+    if (branchFilter) {
+      loyaltyQuery = loyaltyQuery.eq("branch_id", branchFilter);
+      queueQuery = queueQuery.eq("branch_id", branchFilter);
+    }
+
+    const [loyaltyRes, queueRes] = await Promise.all([loyaltyQuery, queueQuery]);
+
+    if (loyaltyRes.error) {
+      console.error("getUnifiedCustomers loyalty", loyaltyRes.error);
+      return empty;
+    }
+    if (queueRes.error) console.error("getUnifiedCustomers queue", queueRes.error);
+
+    warnIfTruncated(
+      "getUnifiedCustomers.loyalty",
+      merchant.id,
+      loyaltyRes.count,
+      CUSTOMERS_FETCH_LIMIT,
+    );
+    warnIfTruncated(
+      "getUnifiedCustomers.queue",
+      merchant.id,
+      queueRes.count,
+      UNIFIED_QUEUE_FETCH_LIMIT,
+    );
+
+    const customers = mergeUnifiedCustomers({
+      loyalty: loyaltyRes.data ?? [],
+      queue: queueRes.data ?? [],
+    });
+
+    return {
+      customers,
+      truncated:
+        (loyaltyRes.count ?? 0) > CUSTOMERS_FETCH_LIMIT ||
+        (queueRes.count ?? 0) > UNIFIED_QUEUE_FETCH_LIMIT,
+    };
+  } catch (error) {
+    console.error("getUnifiedCustomers exception", error);
+    return empty;
+  }
+}
+
 async function resolveMerchantId(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
 ): Promise<string | null> {
-  const { data: owned } = await supabase
-    .from("merchants")
-    .select("id")
-    .eq("owner_user_id", userId)
-    .maybeSingle();
-  if (owned) return owned.id;
-
-  const { data: membership } = await supabase
-    .from("merchant_members")
-    .select("merchant_id")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  return membership?.merchant_id ?? null;
+  const [ownedRes, membershipRes] = await Promise.all([
+    supabase
+      .from("merchants")
+      .select("id")
+      .eq("owner_user_id", userId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("merchant_members")
+      .select("merchant_id")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  if (ownedRes.data) return ownedRes.data.id;
+  return membershipRes.data?.merchant_id ?? null;
 }
 
-async function loadMerchantBundle(activeBranchId: string | null): Promise<MerchantBundle> {
+/**
+ * Auth + merchant resolve + profile + role + branches + branch ACL.
+ * Does NOT run billing writes or justJoined — those stay in finalizeMerchantSession.
+ */
+async function establishMerchantAccess(
+  activeBranchId: string | null,
+): Promise<MerchantAccessResult> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { status: "unauthenticated" };
 
-  const merchantId = await resolveMerchantId(supabase, user.id);
-  if (!merchantId) {
+  const resolved = await resolveMerchantRow(supabase, user.id);
+  if (resolved.status === "failed") return { status: "error" };
+  if (resolved.status === "none") {
     return hasMerchantOnboarding(user)
       ? { status: "needs_setup", product: onboardingProduct(user) }
       : { status: "not_registered" };
   }
 
-  const { data: merchantRow } = await supabase
-    .from("merchants")
-    .select("*")
-    .eq("id", merchantId)
-    .maybeSingle();
-  if (!merchantRow) return { status: "not_registered" };
-
+  const merchantRow = resolved.row;
+  const merchantId = merchantRow.id;
   const profile = toMerchantProfile(merchantRow);
 
   const [branchesRes, membersRes, productsRes] = await Promise.all([
@@ -292,7 +905,7 @@ async function loadMerchantBundle(activeBranchId: string | null): Promise<Mercha
     supabase
       .from("merchant_products")
       .select(
-        "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at",
+        "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at, trial_started_at, trial_ends_at",
       )
       .eq("merchant_id", merchantId),
   ]);
@@ -306,12 +919,6 @@ async function loadMerchantBundle(activeBranchId: string | null): Promise<Mercha
   const me = members.find((m) => m.userId === user.id);
   const role: MemberRole = isOwner ? "owner" : normalizeMemberRole(me?.role);
 
-  // Apply due downgrades / cancellations → Free before building entitlements.
-  const productRows = await applyDueBillingChanges(
-    merchantId,
-    productsRes.data ?? [],
-  );
-
   // Members with explicit branch_ids may only see those branches. Empty array =
   // all-branch access (account owners, co-owners, or teammates granted full access).
   const hasOwnerPowers = isOwner || role === "owner";
@@ -320,22 +927,6 @@ async function loadMerchantBundle(activeBranchId: string | null): Promise<Mercha
   const branches = allowedBranchIds
     ? allBranches.filter((b) => allowedBranchIds.has(b.id))
     : allBranches;
-
-  // First time an invited teammate loads the dashboard → mark them as joined.
-  let justJoined = false;
-  if (!isOwner && me && !me.joined) {
-    justJoined = true;
-    me.joined = true;
-    try {
-      const admin = createAdminClient();
-      await admin
-        .from("merchant_members")
-        .update({ accepted_at: new Date().toISOString() })
-        .eq("id", me.id);
-    } catch {
-      /* non-fatal: they still get access */
-    }
-  }
 
   // Resolve the active branch. Restricted staff can never use the combined
   // "all branches" view — force them onto one of their allowed branches.
@@ -350,77 +941,162 @@ async function loadMerchantBundle(activeBranchId: string | null): Promise<Mercha
     branchFilter = activeBranchId;
   }
 
+  const access: VerifiedMerchantAccess = {
+    __brand: "VerifiedMerchantAccess",
+    supabase,
+    userId: user.id,
+    merchantId,
+    profile,
+    members,
+    role,
+    branches,
+    branchFilter,
+    canViewAllBranches: allowedBranchIds === null,
+    productRowsRaw: (productsRes.data ?? []) as ProductBillingRow[],
+    isOwner,
+    me,
+  };
+  return { status: "ready", access };
+}
+
+/**
+ * Session-only side effects + entitlements. Runs once per getMerchantBundle /
+ * getMerchantSession call (never from the workspace path).
+ */
+async function finalizeMerchantSession(
+  access: VerifiedMerchantAccess,
+): Promise<Extract<MerchantSessionResult, { status: "ready" }>> {
+  const productRows = await applyDueBillingChanges(
+    access.merchantId,
+    access.productRowsRaw,
+  );
+
+  // First time an invited teammate loads the dashboard → mark them as joined.
+  let justJoined = false;
+  const me = access.me;
+  if (!access.isOwner && me && !me.joined) {
+    justJoined = true;
+    me.joined = true;
+    try {
+      const admin = createAdminClient();
+      await admin
+        .from("merchant_members")
+        .update({ accepted_at: new Date().toISOString() })
+        .eq("id", me.id);
+    } catch {
+      /* non-fatal: they still get access */
+    }
+  }
+
+  return {
+    status: "ready",
+    profile: access.profile,
+    entitlements: entitlementsFromRows(productRows),
+    branches: access.branches,
+    members: access.members,
+    role: access.role,
+    activeBranchId: access.branchFilter,
+    canViewAllBranches: access.canViewAllBranches,
+    justJoined,
+  };
+}
+
+/**
+ * Heavy fan-out. Uses VerifiedMerchantAccess only (from establishMerchantAccess)
+ * so branch ACL + role-based PII stripping match today's authz.
+ */
+async function loadMerchantWorkspaceData(
+  access: VerifiedMerchantAccess,
+): Promise<Extract<MerchantWorkspaceDataResult, { status: "ready" }>> {
+  const { supabase, merchantId, branchFilter, role, profile } = access;
+  const historyStartIso = startOfPreviousCalendarMonth().toISOString();
+
   let customersQuery = supabase
     .from("customer_overview")
-    .select("*")
+    .select("*", { count: "exact" })
     .eq("merchant_id", merchantId)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .range(0, CUSTOMERS_FETCH_LIMIT - 1);
   let approvalsQuery = supabase
     .from("approvals")
-    .select("id, customer_id, stamps_before, requested_at")
+    .select("id, customer_id, stamps_before, requested_at", { count: "exact" })
     .eq("merchant_id", merchantId)
     .eq("status", "pending")
-    .order("requested_at", { ascending: true });
+    .order("requested_at", { ascending: true })
+    .range(0, APPROVALS_FETCH_LIMIT - 1);
   let visitsQuery = supabase
     .from("visits")
-    .select("created_at, customer_id")
-    .eq("merchant_id", merchantId);
-  let redemptionsQuery = supabase
-    .from("redemptions")
-    .select("customer_id, redeemed_at")
-    .eq("merchant_id", merchantId);
+    .select("created_at, customer_id", { count: "exact" })
+    .eq("merchant_id", merchantId)
+    .gte("created_at", historyStartIso)
+    .order("created_at", { ascending: false })
+    .range(0, EVENT_FETCH_LIMIT - 1);
 
   if (branchFilter) {
     customersQuery = customersQuery.eq("branch_id", branchFilter);
     approvalsQuery = approvalsQuery.eq("branch_id", branchFilter);
     visitsQuery = visitsQuery.eq("branch_id", branchFilter);
-    redemptionsQuery = redemptionsQuery.eq("branch_id", branchFilter);
   }
 
-  const [customersRes, approvalsRes, visitsRes, redemptionsRes] = await Promise.all([
-    customersQuery,
-    approvalsQuery,
-    visitsQuery,
-    redemptionsQuery,
-  ]);
+  const workspaceRange: DashboardDateRange = "7d";
+  const [customersRes, approvalsRes, visitsRes, lifetimeRes, rangeStats] =
+    await Promise.all([
+      customersQuery,
+      approvalsQuery,
+      visitsQuery,
+      supabase.rpc("merchant_loyalty_lifetime_stats", {
+        p_merchant_id: merchantId,
+        p_branch_id: branchFilter ?? null,
+      }),
+      fetchLoyaltyRangeStats(supabase, merchantId, branchFilter, workspaceRange),
+    ]);
+
+  warnIfTruncated(
+    "getMerchantWorkspaceData.customer_overview",
+    merchantId,
+    customersRes.count,
+    CUSTOMERS_FETCH_LIMIT,
+  );
+  warnIfTruncated(
+    "getMerchantWorkspaceData.approvals_pending",
+    merchantId,
+    approvalsRes.count,
+    APPROVALS_FETCH_LIMIT,
+  );
+  warnIfTruncated(
+    "getMerchantWorkspaceData.visits",
+    merchantId,
+    visitsRes.count,
+    EVENT_FETCH_LIMIT,
+  );
 
   const visits = visitsRes.data ?? [];
-  const redemptions = redemptionsRes.data ?? [];
   const overviewRows = customersRes.data ?? [];
   const customers = overviewRows.map(toCustomer);
   const customerById = new Map(customers.map((c) => [c.id, c]));
 
-  // Branch-scoped counts computed from the filtered rows (the merchant_stats
-  // view is not branch aware).
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const stampsToday = visits.filter((v) => new Date(v.created_at) >= todayStart).length;
-  const visitsByCustomer = new Map<string, number>();
-  for (const v of visits) {
-    if (!v.customer_id) continue;
-    visitsByCustomer.set(v.customer_id, (visitsByCustomer.get(v.customer_id) ?? 0) + 1);
+  let lifetime = { ...EMPTY_LIFETIME_STATS };
+  if (lifetimeRes.error) {
+    console.error(
+      "[merchant_loyalty_lifetime_stats]",
+      lifetimeRes.error.message ?? lifetimeRes.error,
+    );
+  } else {
+    const row = Array.isArray(lifetimeRes.data)
+      ? lifetimeRes.data[0] ?? null
+      : lifetimeRes.data;
+    lifetime = normalizeLifetimeStats(row);
   }
-  const avgLifetimeVisits =
-    visitsByCustomer.size > 0
-      ? [...visitsByCustomer.values()].reduce((a, b) => a + b, 0) / visitsByCustomer.size
-      : 0;
 
-  const pendingApprovals = (approvalsRes.data ?? []).length;
-  const stats: MerchantStatsData = {
-    totalCustomers: customers.filter((c) => !c.banned).length,
-    activeCards: customers.filter((c) => c.status === "active").length,
-    stampsToday,
-    pendingApprovals,
-    rewardsRedeemed: redemptions.length,
-    avgLifetimeVisits,
-    weeklyVisits: weeklyBuckets(visits),
-  };
+  // Exact pending count (not truncated list length) for badge / analytics.
+  const pendingApprovals = approvalsRes.count ?? (approvalsRes.data ?? []).length;
   const dashboardStats = buildDashboardStats(
-    "7d",
+    workspaceRange,
     overviewRows as AnalyticsCustomerRow[],
     visits,
-    redemptions,
     pendingApprovals,
+    lifetime,
+    rangeStats,
   );
 
   const approvals: PendingApproval[] = (approvalsRes.data ?? []).map((row) => {
@@ -444,22 +1120,11 @@ async function loadMerchantBundle(activeBranchId: string | null): Promise<Mercha
     ? customers
     : customers.map((c) => ({ ...c, phone: "", email: undefined }));
 
-  const entitlements = entitlementsFromRows(productRows);
-
   return {
     status: "ready",
-    profile,
-    stats,
     dashboardStats,
     customers: customersForRole,
     approvals,
-    entitlements,
-    branches,
-    members,
-    role,
-    activeBranchId: branchFilter,
-    canViewAllBranches: allowedBranchIds === null,
-    justJoined,
   };
 }
 
@@ -483,6 +1148,7 @@ export async function merchantExistsForPhone(
       .from("merchants")
       .select("id")
       .eq("owner_user_id", userId)
+      .limit(1)
       .maybeSingle();
     if (merchant) return { exists: true };
 
@@ -497,27 +1163,19 @@ export async function merchantExistsForPhone(
   }
 }
 
-async function userIsMerchantAccount(userId: string): Promise<boolean> {
-  const admin = createAdminClient();
-  const { data: merchant } = await admin
-    .from("merchants")
-    .select("id")
-    .eq("owner_user_id", userId)
-    .maybeSingle();
-  if (merchant) return true;
-
-  const { data: userRes } = await admin.auth.admin.getUserById(userId);
-  return userRes?.user?.app_metadata?.merchant_onboarding === true;
-}
-
 /**
  * Merchant dashboard login — email + password only.
  * Rejects sessions that aren't tied to a merchant store / onboarding flag so a
  * loyalty customer can't enter the merchant area with the same auth pool.
+ *
+ * The Turnstile token goes to GoTrue rather than being checked here: password
+ * grant is a CAPTCHA-enforced endpoint, so Supabase validates it for us and the
+ * single-use token is spent exactly once.
  */
 export async function signInMerchantWithPassword(
   email: string,
   password: string,
+  captchaToken?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const normalized = normalizeEmail(email);
@@ -532,8 +1190,12 @@ export async function signInMerchantWithPassword(
     const { data, error } = await supabase.auth.signInWithPassword({
       email: normalized,
       password,
+      options: { captchaToken },
     });
     if (error || !data.user) {
+      if (isCaptchaAuthError(error?.message)) {
+        return { ok: false, error: TURNSTILE_REJECTED_MESSAGE };
+      }
       return { ok: false, error: "Invalid email or password." };
     }
 
@@ -559,6 +1221,11 @@ export async function signInMerchantWithPassword(
 /**
  * Creates (or signs into) a merchant email/password account during checkout.
  * Phone stays as contact metadata — customers keep SMS OTP separately.
+ *
+ * Turnstile: the account is created with the service-role key, which skips
+ * GoTrue's CAPTCHA middleware, so the token is forwarded to the sign-in that
+ * always follows instead. Either branch below spends it exactly once, and
+ * neither can produce a usable session without a valid challenge.
  */
 export async function signUpMerchantWithPassword(input: {
   email: string;
@@ -568,6 +1235,7 @@ export async function signUpMerchantWithPassword(input: {
   phone: string;
   city: string;
   state: string;
+  captchaToken?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     const email = normalizeEmail(input.email);
@@ -623,8 +1291,12 @@ export async function signUpMerchantWithPassword(input: {
       const { data: signedIn, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
+        options: { captchaToken: input.captchaToken },
       });
       if (signInError || !signedIn.user) {
+        if (isCaptchaAuthError(signInError?.message)) {
+          return { ok: false, error: TURNSTILE_REJECTED_MESSAGE };
+        }
         return {
           ok: false,
           error: "An account with this email already exists. Sign in with the correct password.",
@@ -649,10 +1321,147 @@ export async function signUpMerchantWithPassword(input: {
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
+      options: { captchaToken: input.captchaToken },
     });
     if (signInError) {
-      return { ok: false, error: signInError.message };
+      return {
+        ok: false,
+        error: isCaptchaAuthError(signInError.message)
+          ? TURNSTILE_REJECTED_MESSAGE
+          : signInError.message,
+      };
     }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not create your account.",
+    };
+  }
+}
+
+/**
+ * Applies the merchant gate to a session created by Google One Tap or the
+ * rendered Google button.
+ *
+ * Those flows call `signInWithIdToken` in the browser, so they never pass
+ * through /auth/callback where redirect sign-ins are vetted. Without this the
+ * ID-token path would be a way around that check, since merchants and loyalty
+ * customers share one auth pool. The session is read from the cookie, never
+ * from the caller.
+ */
+export async function authorizeGoogleIdentitySession(
+  flow: "signin" | "signup",
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, reason: "exchange" };
+
+    // Signing up from checkout: the merchant record only exists after checkout
+    // completes, so there is nothing to vet yet.
+    if (flow === "signup") return { ok: true };
+
+    if (!(await userIsMerchantAccount(user.id))) {
+      await supabase.auth.signOut();
+      return { ok: false, reason: "not_registered" };
+    }
+
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "exchange" };
+  }
+}
+
+export interface GoogleCheckoutIdentity {
+  email: string;
+  firstName: string;
+  lastName: string;
+}
+
+/**
+ * The signed-in Google account, when checkout is resumed after the OAuth hop.
+ * Returns null for password sessions so checkout keeps asking for a password.
+ */
+export async function getGoogleCheckoutIdentity(): Promise<GoogleCheckoutIdentity | null> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user?.email) return null;
+
+    const viaGoogle = (user.identities ?? []).some((identity) => identity.provider === "google");
+    if (!viaGoogle) return null;
+
+    const meta = user.user_metadata ?? {};
+    const fullName = typeof meta.full_name === "string" ? meta.full_name : "";
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    const firstName =
+      (typeof meta.given_name === "string" ? meta.given_name : "") || parts[0] || "";
+    const lastName =
+      (typeof meta.family_name === "string" ? meta.family_name : "") ||
+      parts.slice(1).join(" ") ||
+      "";
+
+    return { email: user.email, firstName, lastName };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Finishes checkout account creation for a merchant who signed up with Google.
+ *
+ * Google already created (or matched) the auth user and the session, so this
+ * only validates and stores the contact details the OAuth profile can't give us.
+ * The email always comes from the verified session, never from the client.
+ */
+export async function signUpMerchantWithGoogle(input: {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  city: string;
+  state: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const firstName = input.firstName.trim();
+    const lastName = input.lastName.trim();
+    const city = input.city.trim();
+    const state = input.state.trim();
+    const phoneDigits = input.phone.replace(/\D/g, "");
+
+    if (!firstName) return { ok: false, error: "Enter your first name." };
+    if (!lastName) return { ok: false, error: "Enter your last name." };
+    if (!isValidPhone(phoneDigits)) {
+      return { ok: false, error: "Enter a valid 10-digit mobile number." };
+    }
+    if (!city || !state) return { ok: false, error: "Select your city." };
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      return { ok: false, error: "Your Google sign-in expired. Continue with Google again." };
+    }
+
+    const admin = createAdminClient();
+    const { error } = await admin.auth.admin.updateUserById(user.id, {
+      user_metadata: {
+        ...user.user_metadata,
+        full_name: [firstName, lastName].filter(Boolean).join(" "),
+        first_name: firstName,
+        last_name: lastName,
+        phone: `+91${phoneDigits}`,
+        city,
+        state,
+      },
+    });
+    if (error) return { ok: false, error: error.message };
 
     return { ok: true };
   } catch (error) {
@@ -999,6 +1808,7 @@ function siteOrigin() {
  */
 export async function requestMerchantPasswordReset(
   email: string,
+  captchaToken?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const normalized = normalizeEmail(email);
@@ -1006,8 +1816,14 @@ export async function requestMerchantPasswordReset(
       return { ok: false, error: "Enter a valid email address." };
     }
 
+    // Recovery links are minted with the service-role key and delivered through
+    // Resend, so GoTrue's built-in CAPTCHA never sees this request — we verify
+    // the token ourselves before spending an email on it.
+    const captcha = await verifyTurnstileToken(captchaToken);
+    if (!captcha.ok) return { ok: false, error: captcha.error };
+
     const admin = createAdminClient();
-    const redirectTo = `${siteOrigin()}/auth/callback?next=${encodeURIComponent("/merchant/reset-password")}`;
+    const redirectTo = `${siteOrigin()}/auth/confirm?next=${encodeURIComponent("/merchant/reset-password")}`;
 
     const { data, error } = await admin.auth.admin.generateLink({
       type: "recovery",
@@ -1076,10 +1892,18 @@ export async function updateMerchantPassword(
   }
 }
 
-/** Change password while signed in — verifies the current password first. */
+/**
+ * Change password while signed in — verifies the current password first.
+ *
+ * Protected despite being an authenticated action: re-authenticating with a
+ * password grant is a credential-stuffing surface (a hijacked session could be
+ * used to guess the real password and lock the owner out), and GoTrue enforces
+ * its CAPTCHA on that endpoint regardless of who is calling it.
+ */
 export async function changeMerchantPassword(
   currentPassword: string,
   newPassword: string,
+  captchaToken?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     if (!currentPassword) return { ok: false, error: "Enter your current password." };
@@ -1099,8 +1923,12 @@ export async function changeMerchantPassword(
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: user.email,
       password: currentPassword,
+      options: { captchaToken },
     });
     if (signInError) {
+      if (isCaptchaAuthError(signInError.message)) {
+        return { ok: false, error: TURNSTILE_REJECTED_MESSAGE };
+      }
       return { ok: false, error: "Current password is incorrect." };
     }
 
@@ -1377,6 +2205,75 @@ export async function purchaseProduct(
   }
 }
 
+/**
+ * Starts the free trial for a product. One per merchant per product, forever —
+ * `trial_started_at` survives the trial lapsing, so a merchant can't restart it
+ * by letting it expire.
+ *
+ * The row is left with plan_id null and onboarded_at null: access is granted by
+ * `trial_ends_at` alone, and the merchant drops into the product's setup wizard
+ * on their way in.
+ */
+export async function startProductTrial(
+  product: MerchantProduct,
+): Promise<{ ok: boolean; error?: string; trialEndsAt?: string }> {
+  try {
+    if (product !== "queue" && product !== "reservation") {
+      return { ok: false, error: "A free trial isn't available for this product." };
+    }
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated" };
+
+    const { data: merchant } = await supabase
+      .from("merchants")
+      .select("id")
+      .eq("owner_user_id", user.id)
+      .maybeSingle();
+    if (!merchant) return { ok: false, error: "Only the owner can start a free trial." };
+
+    const { data: existing } = await supabase
+      .from("merchant_products")
+      .select("id, plan_id, trial_started_at")
+      .eq("merchant_id", merchant.id)
+      .eq("product", product)
+      .maybeSingle();
+
+    if (existing?.plan_id) {
+      return { ok: false, error: "You already have a plan for this product." };
+    }
+    if (existing?.trial_started_at) {
+      return { ok: false, error: "You've already used your free trial." };
+    }
+
+    const startedAt = new Date();
+    const endsAt = new Date(startedAt.getTime() + TRIAL_DAYS * 86_400_000);
+    const patch = {
+      status: "active" as const,
+      plan_id: null,
+      trial_started_at: startedAt.toISOString(),
+      trial_ends_at: endsAt.toISOString(),
+    };
+
+    const { error } = existing
+      ? await supabase.from("merchant_products").update(patch).eq("id", existing.id)
+      : await supabase
+          .from("merchant_products")
+          .insert({ merchant_id: merchant.id, product, ...patch });
+
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, trialEndsAt: endsAt.toISOString() };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not start the free trial.",
+    };
+  }
+}
+
 type ProductBillingRow = {
   id: string;
   product: MerchantProduct;
@@ -1387,6 +2284,8 @@ type ProductBillingRow = {
   cancel_at_period_end: boolean;
   current_period_end: string | null;
   purchased_at: string;
+  trial_started_at: string | null;
+  trial_ends_at: string | null;
 };
 
 /** Applies due downgrades / cancellations when the paid period has ended. */
@@ -1417,9 +2316,7 @@ async function applyDueBillingChanges(
         })
         .eq("id", current.id)
         .eq("merchant_id", merchantId)
-        .select(
-          "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at",
-        )
+        .select(PRODUCT_BILLING_COLUMNS)
         .maybeSingle();
       if (data) current = data as ProductBillingRow;
     } else if (due && current.pending_plan_id) {
@@ -1435,9 +2332,7 @@ async function applyDueBillingChanges(
         })
         .eq("id", current.id)
         .eq("merchant_id", merchantId)
-        .select(
-          "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at",
-        )
+        .select(PRODUCT_BILLING_COLUMNS)
         .maybeSingle();
       if (data) current = data as ProductBillingRow;
     }
@@ -1448,7 +2343,18 @@ async function applyDueBillingChanges(
   return next;
 }
 
-async function requireOwnedProduct(product: MerchantProduct) {
+const PRODUCT_BILLING_COLUMNS =
+  "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at, trial_started_at, trial_ends_at";
+
+/**
+ * Resolves the merchant's billing row for a product. `createIfMissing` is for
+ * first-time purchases made from the plan page, where the merchant is buying a
+ * product they don't own yet.
+ */
+async function requireOwnedProduct(
+  product: MerchantProduct,
+  opts?: { createIfMissing?: boolean },
+) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -1462,14 +2368,23 @@ async function requireOwnedProduct(product: MerchantProduct) {
     .maybeSingle();
   if (!merchant) return { ok: false as const, error: "Merchant account not found." };
 
-  const { data: existing } = await supabase
+  let { data: existing } = await supabase
     .from("merchant_products")
-    .select(
-      "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at",
-    )
+    .select(PRODUCT_BILLING_COLUMNS)
     .eq("merchant_id", merchant.id)
     .eq("product", product)
     .maybeSingle();
+
+  if (!existing && opts?.createIfMissing) {
+    const { data: created, error: createError } = await supabase
+      .from("merchant_products")
+      .insert({ merchant_id: merchant.id, product, status: "active" })
+      .select(PRODUCT_BILLING_COLUMNS)
+      .maybeSingle();
+    if (createError) return { ok: false as const, error: createError.message };
+    existing = created;
+  }
+
   if (!existing) {
     return { ok: false as const, error: "This product is not active on your account." };
   }
@@ -1491,7 +2406,7 @@ export async function updateProductPlan(
   planId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    const ctx = await requireOwnedProduct(product);
+    const ctx = await requireOwnedProduct(product, { createIfMissing: true });
     if (!ctx.ok) return { ok: false, error: ctx.error };
 
     const periodEnd = defaultPeriodEnd(planId).toISOString();
@@ -1729,6 +2644,17 @@ export async function createMerchant(input: {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return { ok: false, error: "Not authenticated. Please log in again." };
+
+    // One store per owner (extra locations are branches). Finishing the wizard
+    // twice — a double submit, or a stale wizard reached because a merchant read
+    // failed — must not fork the account into two stores.
+    const { data: existing } = await supabase
+      .from("merchants")
+      .select("id")
+      .eq("owner_user_id", user.id)
+      .limit(1)
+      .maybeSingle();
+    if (existing) return { ok: true };
 
     const businessName = input.businessName.trim();
     if (!businessName) return { ok: false, error: "Business name is required." };
@@ -2411,18 +3337,117 @@ export async function setCustomerBanned(customerId: string, banned: boolean) {
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 
-export async function deleteCustomer(customerId: string) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated." };
-  const ctx = await currentMerchant(supabase, user.id);
-  if (!ctx) return { ok: false, error: "Merchant account not found." };
-  if (ctx.role !== "owner") return { ok: false, error: "Only the owner can delete customers." };
+/**
+ * Permanently remove a person across every product (loyalty + queue).
+ * Queue rows only SET NULL their customer_id on customer delete, so they
+ * must be wiped explicitly. Owner-only.
+ */
+export async function deleteUnifiedCustomer(input: {
+  customerId?: string | null;
+  phone?: string | null;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
 
-  const { error } = await supabase.from("customers").delete().eq("id", customerId);
-  return error ? { ok: false, error: error.message } : { ok: true };
+    const ctx = await currentMerchant(supabase, user.id);
+    if (!ctx) return { ok: false, error: "Merchant account not found." };
+    if (ctx.role !== "owner") {
+      return { ok: false, error: "Only the owner can delete customers." };
+    }
+
+    const customerId = input.customerId?.trim() || null;
+    const phone = input.phone?.trim() || "";
+    if (!customerId && !phone) {
+      return { ok: false, error: "Customer not found." };
+    }
+
+    // Resolve phone variants so queue history written under +91… / 91… / bare
+    // national formats is removed together with the loyalty record.
+    let phoneVariants: string[] = [];
+    if (phone) {
+      const canonical = toCanonicalPhone(phone);
+      const national = digitsOnly(phone).slice(-10);
+      phoneVariants = [
+        ...new Set(
+          [
+            phone,
+            canonical,
+            canonical ? `+${canonical}` : null,
+            national.length === 10 ? national : null,
+            national.length === 10 ? `91${national}` : null,
+            national.length === 10 ? `+91${national}` : null,
+          ].filter((value): value is string => Boolean(value)),
+        ),
+      ];
+    }
+
+    // queue_entries / queue_call_jobs have no merchant DELETE RLS — use admin
+    // after the owner check above.
+    const admin = createAdminClient();
+
+    if (customerId) {
+      const { error: entriesByIdError } = await admin
+        .from("queue_entries")
+        .delete()
+        .eq("merchant_id", ctx.id)
+        .eq("customer_id", customerId);
+      if (entriesByIdError) {
+        return { ok: false, error: entriesByIdError.message };
+      }
+
+      const { error: jobsByIdError } = await admin
+        .from("queue_call_jobs")
+        .delete()
+        .eq("merchant_id", ctx.id)
+        .eq("customer_id", customerId);
+      if (jobsByIdError) {
+        return { ok: false, error: jobsByIdError.message };
+      }
+    }
+
+    if (phoneVariants.length > 0) {
+      const { error: entriesByPhoneError } = await admin
+        .from("queue_entries")
+        .delete()
+        .eq("merchant_id", ctx.id)
+        .in("phone", phoneVariants);
+      if (entriesByPhoneError) {
+        return { ok: false, error: entriesByPhoneError.message };
+      }
+
+      const { error: jobsByPhoneError } = await admin
+        .from("queue_call_jobs")
+        .delete()
+        .eq("merchant_id", ctx.id)
+        .in("customer_phone", phoneVariants);
+      if (jobsByPhoneError) {
+        return { ok: false, error: jobsByPhoneError.message };
+      }
+    }
+
+    if (customerId) {
+      const { error } = await admin
+        .from("customers")
+        .delete()
+        .eq("merchant_id", ctx.id)
+        .eq("id", customerId);
+      if (error) return { ok: false, error: error.message };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    console.error("deleteUnifiedCustomer exception", error);
+    return { ok: false, error: "Could not delete customer." };
+  }
+}
+
+/** @deprecated Prefer deleteUnifiedCustomer — kept for loyalty CRM callers. */
+export async function deleteCustomer(customerId: string) {
+  return deleteUnifiedCustomer({ customerId });
 }
 
 export async function deleteMerchantAccount(): Promise<{ ok: boolean; error?: string }> {
@@ -2509,24 +3534,33 @@ export async function createBranch(input: {
     const name = input.name.trim();
     if (!name) return { ok: false, error: "Branch name is required." };
 
-    const { data: loyaltyProduct } = await supabase
+    // Branches are shared by both products, so the merchant gets whichever
+    // allowance is larger — including the Queue trial's.
+    const { data: productRows } = await supabase
       .from("merchant_products")
-      .select("plan_id")
-      .eq("merchant_id", ctx.id)
-      .eq("product", "loyalty")
-      .maybeSingle();
+      .select(
+        "product, plan_id, status, onboarded_at, trial_started_at, trial_ends_at",
+      )
+      .eq("merchant_id", ctx.id);
 
-    const { loyaltyPlanLimits, branchLimitError } = await import(
+    const entitlements = entitlementsFromRows(productRows ?? []);
+    const { maxBranchesFor, branchLimitError } = await import(
       "@/lib/merchant/plan-limits"
     );
-    const limits = loyaltyPlanLimits(loyaltyProduct?.plan_id);
+    const maxBranches = maxBranchesFor({
+      loyaltyPlanId: entitlements.loyalty?.planId,
+      queuePlanId: entitlements.queue?.planId,
+      queueEnabled: isProductEnabled(entitlements, "queue"),
+      queueTrialActive: isTrialActive(entitlements.queue),
+    });
+
     const { count: branchCount, error: countError } = await supabase
       .from("branches")
       .select("id", { count: "exact", head: true })
       .eq("merchant_id", ctx.id);
     if (countError) return { ok: false, error: countError.message };
-    if ((branchCount ?? 0) >= limits.maxBranches) {
-      return { ok: false, error: branchLimitError(limits.maxBranches) };
+    if ((branchCount ?? 0) >= maxBranches) {
+      return { ok: false, error: branchLimitError(maxBranches) };
     }
 
     const base = `${ctx.slug}-${slugify(name) || "branch"}`;
@@ -2795,6 +3829,7 @@ export async function completeTeamInvite(input: {
   lastName: string;
   phone: string;
   password: string;
+  captchaToken?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     const token = input.token.trim();
@@ -2856,16 +3891,20 @@ export async function completeTeamInvite(input: {
       .eq("id", member.id);
     if (memberError) return { ok: false, error: memberError.message };
 
-    // Sign them into the dashboard.
+    // Sign them into the dashboard. The invite page is public (anyone holding
+    // the link can post to this action), so the token rides along to GoTrue.
     const supabase = await createClient();
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: member.email,
       password: input.password,
+      options: { captchaToken: input.captchaToken },
     });
     if (signInError) {
       return {
         ok: false,
-        error: "Account created — sign in with your email and password to continue.",
+        error: isCaptchaAuthError(signInError.message)
+          ? TURNSTILE_REJECTED_MESSAGE
+          : "Account created — sign in with your email and password to continue.",
       };
     }
 

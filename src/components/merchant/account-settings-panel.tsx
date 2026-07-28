@@ -13,6 +13,8 @@ import { OTP_LENGTH, RESEND_SECONDS } from "@/lib/auth/otp/client";
 import { useResendCooldown } from "@/lib/auth/otp/use-resend-cooldown";
 import { createClient } from "@/lib/supabase/client";
 import { OtpInput } from "@/components/auth/otp-input";
+import { TurnstileField } from "@/components/turnstile/turnstile-field";
+import { useTurnstile } from "@/lib/turnstile/use-turnstile";
 
 type Panel = "idle" | "password" | "phone";
 type PhoneStep = "edit" | "otp";
@@ -131,6 +133,9 @@ function ChangePasswordForm({ onCancel }: { onCancel: () => void }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // The only dashboard form with a challenge: it re-checks the current password
+  // through Supabase's captcha-protected password grant.
+  const captcha = useTurnstile({ action: "merchant-change-password" });
 
   const handleSubmit = useCallback(async () => {
     setError("");
@@ -146,9 +151,18 @@ function ChangePasswordForm({ onCancel }: { onCancel: () => void }) {
       setError("Passwords don’t match.");
       return;
     }
+    if (!captcha.ready) {
+      setError(captcha.blockedMessage);
+      return;
+    }
 
     setBusy(true);
-    const res = await changeMerchantPassword(currentPassword, password);
+    const res = await changeMerchantPassword(
+      currentPassword,
+      password,
+      captcha.token ?? undefined,
+    );
+    captcha.reset();
     setBusy(false);
     if (!res.ok) {
       setError(res.error ?? "Could not update password.");
@@ -156,7 +170,7 @@ function ChangePasswordForm({ onCancel }: { onCancel: () => void }) {
     }
     toast.success("Password updated");
     onCancel();
-  }, [currentPassword, password, confirm, onCancel]);
+  }, [currentPassword, password, confirm, onCancel, captcha]);
 
   return (
     <div className="merchant-account-form">
@@ -224,6 +238,8 @@ function ChangePasswordForm({ onCancel }: { onCancel: () => void }) {
         />
       </label>
 
+      <TurnstileField {...captcha.fieldProps} />
+
       {error ? (
         <p className="auth-error" role="alert">
           {error}
@@ -237,7 +253,7 @@ function ChangePasswordForm({ onCancel }: { onCancel: () => void }) {
         <button
           type="button"
           className="cta-btn merchant-cta-accent"
-          disabled={busy}
+          disabled={busy || !captcha.ready}
           onClick={() => void handleSubmit()}
         >
           {busy ? "Updating…" : "Update password"}

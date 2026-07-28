@@ -1,12 +1,30 @@
 "use server";
 
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { toCanonicalPhone, toSupabaseAuthPhone } from "@/lib/auth/otp/phone";
-import { isValidPhone } from "@/lib/auth/format";
-import { normalizeMemberRole } from "@/lib/merchant/roles";
-import type { MemberRole } from "@/lib/merchant/types";
+import {
+  ensureGuestCustomer,
+  normalizeGuestPhone,
+} from "@/lib/merchant/guest-customer";
+import {
+  requireMerchantContext,
+  resolveMerchantId,
+} from "@/lib/merchant/server-context";
+import { resolveBranchFilterForUser } from "@/lib/merchant/branch-access";
+import { dashboardRangeStart } from "@/lib/merchant/analytics";
+import {
+  computeQueueAnalytics,
+  filterQueueDataByStaff,
+  queueStaffOptions,
+  type QueueAnalyticsEntryRow,
+  type QueueAnalyticsSessionRow,
+  type QueueAnalyticsStats,
+  type QueueStaffOption,
+} from "@/lib/merchant/queue-analytics";
+import type { DashboardDateRange, MemberRole } from "@/lib/merchant/types";
 import { buildReminderSchedule } from "@/lib/queue/call-reminders";
+import { checkQueueCapacity } from "@/lib/queue/capacity";
 import {
   getOpenQueueSession,
   listSessionEntries,
@@ -15,152 +33,9 @@ import {
   type LiveQueueEntry,
   type LiveQueueSession,
 } from "@/lib/queue/live-board";
-import { acceptWindowMs, CALL_ACCEPT_MINUTES } from "@/lib/merchant/queue-settings";
+import { callAcceptDeadlineMs } from "@/lib/merchant/queue-settings";
 
 type QueueCallResolveStatus = "seated" | "skipped" | "left";
-
-async function resolveMerchantId(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-): Promise<string | null> {
-  const { data: owned } = await supabase
-    .from("merchants")
-    .select("id")
-    .eq("owner_user_id", userId)
-    .maybeSingle();
-  if (owned?.id) return owned.id;
-
-  const { data: membership } = await supabase
-    .from("merchant_members")
-    .select("merchant_id")
-    .eq("user_id", userId)
-    .maybeSingle();
-  return membership?.merchant_id ?? null;
-}
-
-async function requireMerchantContext(): Promise<{
-  ok: true;
-  merchantId: string;
-  role: MemberRole;
-  userId: string;
-} | { ok: false; error: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not authenticated." };
-
-  const merchantId = await resolveMerchantId(supabase, user.id);
-  if (!merchantId) return { ok: false, error: "Merchant account not found." };
-
-  const { data: merchant } = await supabase
-    .from("merchants")
-    .select("owner_user_id")
-    .eq("id", merchantId)
-    .maybeSingle();
-
-  let role: MemberRole = "staff";
-  if (merchant?.owner_user_id === user.id) {
-    role = "owner";
-  } else {
-    const { data: mem } = await supabase
-      .from("merchant_members")
-      .select("role")
-      .eq("merchant_id", merchantId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    role = normalizeMemberRole(mem?.role);
-  }
-
-  return { ok: true, merchantId, role, userId: user.id };
-}
-
-function normalizeGuestPhone(raw: string): string | null {
-  const digits = raw.replace(/\D/g, "").slice(-10);
-  if (!isValidPhone(digits)) return null;
-  const canonical = toCanonicalPhone(digits);
-  return canonical ? toSupabaseAuthPhone(canonical) : null;
-}
-
-/**
- * Find or create a customers row for this merchant + phone so we can reuse
- * the existing public_token for WhatsApp URL buttons.
- */
-async function ensureQueueCustomer(input: {
-  merchantId: string;
-  branchId?: string | null;
-  name: string;
-  phone: string;
-}): Promise<{ id: string; publicToken: string; phone: string; name: string; whatsappAvailable: boolean; preferred: "sms" | "whatsapp" } | null> {
-  const phoneE164 = normalizeGuestPhone(input.phone);
-  if (!phoneE164) return null;
-
-  const admin = createAdminClient();
-  const national = phoneE164.replace(/\D/g, "").slice(-10);
-  const variants = [phoneE164, national, `91${national}`, `+91${national}`];
-
-  const { data: existing } = await admin
-    .from("customers")
-    .select(
-      "id, name, phone, public_token, whatsapp_available, preferred_notification_channel",
-    )
-    .eq("merchant_id", input.merchantId)
-    .in("phone", variants)
-    .limit(1)
-    .maybeSingle();
-
-  if (existing?.public_token) {
-    return {
-      id: existing.id,
-      publicToken: existing.public_token,
-      phone: existing.phone,
-      name: existing.name || input.name,
-      whatsappAvailable: existing.whatsapp_available === true,
-      preferred:
-        existing.preferred_notification_channel === "whatsapp" ? "whatsapp" : "sms",
-    };
-  }
-
-  const { data: inserted, error } = await admin
-    .from("customers")
-    .insert({
-      merchant_id: input.merchantId,
-      branch_id: input.branchId ?? null,
-      name: input.name.trim() || "Guest",
-      phone: phoneE164,
-    })
-    .select(
-      "id, name, phone, public_token, whatsapp_available, preferred_notification_channel",
-    )
-    .single();
-
-  if (error || !inserted?.public_token) {
-    console.error("ensureQueueCustomer insert failed", error?.message);
-    return null;
-  }
-
-  // Seed an empty loyalty card so the customer hub stays consistent.
-  await admin.from("loyalty_cards").upsert(
-    {
-      customer_id: inserted.id,
-      merchant_id: input.merchantId,
-      branch_id: input.branchId ?? null,
-      stamps: 0,
-      status: "active",
-    },
-    { onConflict: "customer_id", ignoreDuplicates: true },
-  );
-
-  return {
-    id: inserted.id,
-    publicToken: inserted.public_token,
-    phone: inserted.phone,
-    name: inserted.name,
-    whatsappAvailable: inserted.whatsapp_available === true,
-    preferred:
-      inserted.preferred_notification_channel === "whatsapp" ? "whatsapp" : "sms",
-  };
-}
 
 type QueueNotifiableCustomer = {
   phone: string;
@@ -180,24 +55,58 @@ function toNotifiable(customer: QueueNotifiableCustomer) {
   };
 }
 
+type QueueNotifyTemplate =
+  | "queue_first_notify"
+  | "queue_call_now"
+  | "queue_seated"
+  | "queue_customer_skipped";
+
+type QueueNotifyData =
+  | {
+      businessName: string;
+      bookingSize: number;
+      queuePosition: number;
+      estimatedWaitMinutes: number;
+    }
+  | {
+      businessName: string;
+      bookingSize: number;
+    };
+
+/** All values needed for a background send — never re-query inside `after()`. */
+type CapturedQueueNotify = {
+  customer: QueueNotifiableCustomer;
+  template: QueueNotifyTemplate;
+  data: QueueNotifyData;
+  /** Persist delivery via deliverQueueCallNow. */
+  callJobId?: string;
+  /** queue_call_jobs.called_at this send belongs to — gates every write. */
+  callEventAt?: string;
+  /** Set `notified_joined_at` after a successful join notify. */
+  markJoinedEntryId?: string;
+};
+
+function logQueueAfter(
+  level: "error" | "warn" | "info",
+  event: string,
+  fields: Record<string, unknown>,
+) {
+  const line = JSON.stringify({
+    scope: "queue_whatsapp_after",
+    level,
+    event,
+    ...fields,
+    at: new Date().toISOString(),
+  });
+  if (level === "error") console.error(line);
+  else if (level === "warn") console.warn(line);
+  else console.info(line);
+}
+
 async function notifyQueueTemplate(input: {
   customer: QueueNotifiableCustomer;
-  template:
-    | "queue_first_notify"
-    | "queue_call_now"
-    | "queue_seated"
-    | "queue_customer_skipped";
-  data:
-    | {
-        businessName: string;
-        bookingSize: number;
-        queuePosition: number;
-        estimatedWaitMinutes: number;
-      }
-    | {
-        businessName: string;
-        bookingSize: number;
-      };
+  template: QueueNotifyTemplate;
+  data: QueueNotifyData;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     const { sendCustomerNotification } = await import("@/lib/notifications");
@@ -221,6 +130,76 @@ async function notifyQueueTemplate(input: {
     console.error(`Failed to send ${input.template}`, err);
     return { ok: false, error: message };
   }
+}
+
+/** Runs inside `after()` — queue_call_now uses deliverQueueCallNow; others send directly. */
+async function runCapturedQueueNotify(captured: CapturedQueueNotify): Promise<void> {
+  const admin = createAdminClient();
+
+  if (captured.callJobId && captured.callEventAt && captured.template === "queue_call_now") {
+    const partyData = captured.data as { businessName: string; bookingSize: number };
+    const { deliverQueueCallNow } = await import("@/lib/notifications/queue-call-now");
+    const result = await deliverQueueCallNow({
+      jobId: captured.callJobId,
+      calledAt: captured.callEventAt,
+      customer: {
+        ...toNotifiable(captured.customer),
+        whatsappAvailable: true,
+        preferredNotificationChannel: "whatsapp",
+      },
+      businessName: partyData.businessName,
+      bookingSize: partyData.bookingSize,
+    });
+    if (!result.ok) {
+      logQueueAfter("error", "call_send_failed", {
+        jobId: captured.callJobId,
+        template: captured.template,
+        error: result.error,
+      });
+    } else if (result.skipped) {
+      logQueueAfter("info", "call_send_skipped", {
+        jobId: captured.callJobId,
+        template: captured.template,
+        reason: result.reason,
+      });
+    }
+    return;
+  }
+
+  const notified = await notifyQueueTemplate({
+    customer: captured.customer,
+    template: captured.template,
+    data: captured.data,
+  });
+  if (!notified.ok) {
+    logQueueAfter("error", "send_failed", {
+      template: captured.template,
+      error: notified.error,
+      markJoinedEntryId: captured.markJoinedEntryId ?? null,
+    });
+    return;
+  }
+  if (captured.markJoinedEntryId) {
+    await admin
+      .from("queue_entries")
+      .update({ notified_joined_at: new Date().toISOString() })
+      .eq("id", captured.markJoinedEntryId);
+  }
+}
+
+function scheduleQueueNotifyAfter(captured: CapturedQueueNotify): void {
+  after(async () => {
+    try {
+      await runCapturedQueueNotify(captured);
+    } catch (err) {
+      logQueueAfter("error", "after_unhandled", {
+        template: captured.template,
+        callJobId: captured.callJobId ?? null,
+        markJoinedEntryId: captured.markJoinedEntryId ?? null,
+        error: err instanceof Error ? err.message : "unknown",
+      });
+    }
+  });
 }
 
 /**
@@ -249,7 +228,7 @@ export async function registerQueueJoin(input: {
       return { ok: false, error: "Queue entry id is required." };
     }
 
-    const customer = await ensureQueueCustomer({
+    const customer = await ensureGuestCustomer({
       merchantId: ctx.merchantId,
       branchId: input.branchId,
       name,
@@ -268,7 +247,7 @@ export async function registerQueueJoin(input: {
     const businessName =
       (merchant?.business_name ?? "the store").trim() || "the store";
 
-    const notified = await notifyQueueTemplate({
+    scheduleQueueNotifyAfter({
       customer,
       template: "queue_first_notify",
       data: {
@@ -278,9 +257,6 @@ export async function registerQueueJoin(input: {
         estimatedWaitMinutes,
       },
     });
-    if (!notified.ok) {
-      return { ok: false, error: notified.error ?? "Couldn't send WhatsApp notification." };
-    }
 
     return { ok: true };
   } catch (error) {
@@ -301,6 +277,10 @@ export async function registerQueueCall(input: {
   phone: string;
   partySize: number;
   branchId?: string | null;
+  /** queue_entries.called_at for this call event — used for idempotency. */
+  entryCalledAt: string;
+  /** Explicit re-call while still marked called (future UI). */
+  forceRecall?: boolean;
 }): Promise<{ ok: boolean; error?: string; jobId?: string }> {
   try {
     const ctx = await requireMerchantContext();
@@ -313,7 +293,7 @@ export async function registerQueueCall(input: {
       return { ok: false, error: "Queue entry id is required." };
     }
 
-    const customer = await ensureQueueCustomer({
+    const customer = await ensureGuestCustomer({
       merchantId: ctx.merchantId,
       branchId: input.branchId,
       name,
@@ -332,25 +312,60 @@ export async function registerQueueCall(input: {
     const businessName =
       (merchant?.business_name ?? "the store").trim() || "the store";
 
-    const nowIso = new Date().toISOString();
-    const schedule = buildReminderSchedule(nowIso);
+    const entryCalledAt = input.entryCalledAt.trim();
+    if (!entryCalledAt) {
+      return { ok: false, error: "Call timestamp is required." };
+    }
+
+    const clientEntryId = input.clientEntryId.trim();
+    const schedule = buildReminderSchedule(entryCalledAt);
     const admin = createAdminClient();
 
-    // Upsert keeps re-calls idempotent for the same client entry.
+    const { data: existing } = await admin
+      .from("queue_call_jobs")
+      .select("id, status, called_at, called_notified_at")
+      .eq("merchant_id", ctx.merchantId)
+      .eq("client_entry_id", clientEntryId)
+      .maybeSingle();
+
+    const isNewCallEvent =
+      input.forceRecall === true ||
+      !existing ||
+      existing.status !== "called" ||
+      existing.called_at !== entryCalledAt;
+
+    if (!isNewCallEvent) {
+      if (existing.called_notified_at) {
+        return { ok: true, jobId: existing.id };
+      }
+      scheduleQueueNotifyAfter({
+        customer,
+        template: "queue_call_now",
+        data: {
+          businessName,
+          bookingSize: partySize,
+        },
+        callJobId: existing.id,
+        callEventAt: existing.called_at,
+      });
+      return { ok: true, jobId: existing.id };
+    }
+
     const { data: job, error } = await admin
       .from("queue_call_jobs")
       .upsert(
         {
           merchant_id: ctx.merchantId,
           branch_id: input.branchId ?? null,
-          client_entry_id: input.clientEntryId.trim(),
+          client_entry_id: clientEntryId,
           customer_id: customer.id,
           customer_name: name,
           customer_phone: customer.phone,
           party_size: partySize,
           status: "called",
-          called_at: nowIso,
+          called_at: entryCalledAt,
           called_notified_at: null,
+          call_notify_processing_at: null,
           ...schedule,
           reminder_1_sent_at: null,
           reminder_2_sent_at: null,
@@ -359,45 +374,23 @@ export async function registerQueueCall(input: {
         },
         { onConflict: "merchant_id,client_entry_id" },
       )
-      .select("id, called_notified_at")
+      .select("id, called_at")
       .single();
 
     if (error || !job) {
       return { ok: false, error: error?.message ?? "Could not register the call." };
     }
 
-    // Claim the immediate notification so retries don't double-send.
-    const { data: claimed } = await admin
-      .from("queue_call_jobs")
-      .update({ called_notified_at: nowIso })
-      .eq("id", job.id)
-      .eq("status", "called")
-      .is("called_notified_at", null)
-      .select("id")
-      .maybeSingle();
-
-    if (claimed) {
-      const notified = await notifyQueueTemplate({
-        customer,
-        template: "queue_call_now",
-        data: {
-          businessName,
-          bookingSize: partySize,
-        },
-      });
-      if (!notified.ok) {
-        // Release the claim so a retry can send again.
-        await admin
-          .from("queue_call_jobs")
-          .update({ called_notified_at: null })
-          .eq("id", job.id);
-        return {
-          ok: false,
-          error: notified.error ?? "Couldn't send call WhatsApp notification.",
-          jobId: job.id,
-        };
-      }
-    }
+    scheduleQueueNotifyAfter({
+      customer,
+      template: "queue_call_now",
+      data: {
+        businessName,
+        bookingSize: partySize,
+      },
+      callJobId: job.id,
+      callEventAt: job.called_at,
+    });
 
     return { ok: true, jobId: job.id };
   } catch (error) {
@@ -477,10 +470,38 @@ export async function fetchLiveQueueBoard(input?: {
     if (!open) return { ok: true, session: null, entries: [] };
 
     const rows = await listSessionEntries(open.id);
+    const entries = rows.map(mapQueueEntryRow);
+
+    // Attach reminder progress for called guests (from queue_call_jobs).
+    const calledIds = entries.filter((e) => e.status === "called").map((e) => e.id);
+    if (calledIds.length > 0) {
+      const admin = createAdminClient();
+      const { data: jobs } = await admin
+        .from("queue_call_jobs")
+        .select(
+          "client_entry_id, reminder_1_sent_at, reminder_2_sent_at, reminder_3_sent_at",
+        )
+        .eq("merchant_id", ctx.merchantId)
+        .in("client_entry_id", calledIds);
+
+      const remindersById = new Map<string, number>();
+      for (const job of jobs ?? []) {
+        const sent =
+          (job.reminder_1_sent_at ? 1 : 0) +
+          (job.reminder_2_sent_at ? 1 : 0) +
+          (job.reminder_3_sent_at ? 1 : 0);
+        remindersById.set(job.client_entry_id, sent);
+      }
+      for (const entry of entries) {
+        const sent = remindersById.get(entry.id);
+        if (sent != null) entry.remindersSent = sent;
+      }
+    }
+
     return {
       ok: true,
       session: mapQueueSessionRow(open),
-      entries: rows.map(mapQueueEntryRow),
+      entries,
     };
   } catch (error) {
     return {
@@ -522,6 +543,9 @@ export async function startLiveQueueSession(input?: {
         branch_id: branchId,
         number,
         status: "live",
+        started_by_user_id: ctx.userId,
+        started_by_name: ctx.actorName,
+        started_by_role: ctx.role,
       })
       .select("*")
       .single();
@@ -549,6 +573,8 @@ export async function setLiveQueueSessionStatus(input: {
   left: number;
   avgWait: number;
   longestWait: number;
+  startedByName?: string;
+  startedByRole?: MemberRole;
 } }> {
   try {
     const ctx = await requireMerchantContext();
@@ -618,6 +644,8 @@ export async function setLiveQueueSessionStatus(input: {
           left: leftNow.length,
           avgWait,
           longestWait,
+          startedByName: open.started_by_name ?? undefined,
+          startedByRole: open.started_by_role ?? undefined,
         },
       };
     }
@@ -666,7 +694,10 @@ export async function addLiveQueueEntry(input: {
       return { ok: false, error: "Start the queue before adding guests." };
     }
 
-    const customer = await ensureQueueCustomer({
+    const capacity = await checkQueueCapacity(ctx.merchantId);
+    if (!capacity.ok) return { ok: false, error: capacity.error };
+
+    const customer = await ensureGuestCustomer({
       merchantId: ctx.merchantId,
       branchId: input.branchId,
       name,
@@ -708,7 +739,7 @@ export async function addLiveQueueEntry(input: {
     const queuePosition = waiting.data?.length ?? 1;
     const businessName = await businessNameFor(ctx.merchantId);
 
-    const notify = await notifyQueueTemplate({
+    scheduleQueueNotifyAfter({
       customer,
       template: "queue_first_notify",
       data: {
@@ -717,21 +748,8 @@ export async function addLiveQueueEntry(input: {
         queuePosition,
         estimatedWaitMinutes: Math.max(0, Math.round(input.estimatedWaitMinutes)),
       },
+      markJoinedEntryId: entry.id,
     });
-
-    if (notify.ok) {
-      await admin
-        .from("queue_entries")
-        .update({ notified_joined_at: new Date().toISOString() })
-        .eq("id", entry.id);
-    } else {
-      // Guest is on the board; surface the WA failure so it isn't silent.
-      return {
-        ok: true,
-        entry: mapQueueEntryRow(entry),
-        error: notify.error ?? "Guest added, but WhatsApp failed.",
-      };
-    }
 
     return { ok: true, entry: mapQueueEntryRow(entry) };
   } catch (error) {
@@ -761,14 +779,58 @@ export async function updateLiveQueueEntryStatus(input: {
     if (!existing) return { ok: false, error: "Guest not found." };
 
     const nowIso = new Date().toISOString();
-    const patch: Record<string, unknown> = { status: input.status };
+
     if (input.status === "called") {
-      const calledAt = Date.now();
-      patch.called_at = nowIso;
-      patch.accept_by = new Date(
-        calledAt + acceptWindowMs(CALL_ACCEPT_MINUTES),
-      ).toISOString();
-    } else if (input.status === "seated") {
+      // Atomic claim: `neq('called')` makes the transition itself the lock, so
+      // two overlapping taps can't both mint a call event (and therefore two
+      // queue_call_now sends). A read-then-write guard loses that race.
+      const { data: claimed, error: claimError } = await admin
+        .from("queue_entries")
+        .update({
+          status: "called",
+          called_at: nowIso,
+          accept_by: new Date(callAcceptDeadlineMs(Date.parse(nowIso))).toISOString(),
+        })
+        .eq("id", input.entryId)
+        .eq("merchant_id", ctx.merchantId)
+        .neq("status", "called")
+        .select("*")
+        .maybeSingle();
+
+      if (claimError) {
+        return { ok: false, error: claimError.message };
+      }
+      if (!claimed) {
+        // Lost the race — someone already called this guest. Report the current
+        // row and send nothing.
+        const { data: current } = await admin
+          .from("queue_entries")
+          .select("*")
+          .eq("id", input.entryId)
+          .eq("merchant_id", ctx.merchantId)
+          .maybeSingle();
+        return { ok: true, entry: mapQueueEntryRow(current ?? existing) };
+      }
+
+      const called = await registerQueueCall({
+        clientEntryId: claimed.id,
+        name: claimed.name,
+        phone: claimed.phone,
+        partySize: claimed.party_size,
+        branchId: input.branchId,
+        entryCalledAt: claimed.called_at as string,
+      });
+      return {
+        ok: true,
+        entry: mapQueueEntryRow(claimed),
+        error: called.ok
+          ? undefined
+          : called.error ?? "Called, but couldn't register the notify job.",
+      };
+    }
+
+    const patch: Record<string, unknown> = { status: input.status };
+    if (input.status === "seated") {
       patch.seated_at = nowIso;
     } else if (input.status === "left") {
       patch.left_at = nowIso;
@@ -784,52 +846,28 @@ export async function updateLiveQueueEntryStatus(input: {
       return { ok: false, error: error?.message ?? "Could not update guest." };
     }
 
-    if (input.status === "called") {
-      const called = await registerQueueCall({
-        clientEntryId: updated.id,
-        name: updated.name,
-        phone: updated.phone,
-        partySize: updated.party_size,
-        branchId: input.branchId,
-      });
-      if (!called.ok) {
-        return {
-          ok: true,
-          entry: mapQueueEntryRow(updated),
-          error: called.error ?? "Called, but WhatsApp failed.",
-        };
-      }
-    } else {
-      await resolveQueueCall({
-        clientEntryId: updated.id,
-        status: input.status === "seated" ? "seated" : "left",
-      });
+    await resolveQueueCall({
+      clientEntryId: updated.id,
+      status: input.status === "seated" ? "seated" : "left",
+    });
 
-      const customer = await ensureQueueCustomer({
-        merchantId: ctx.merchantId,
-        branchId: input.branchId,
-        name: updated.name,
-        phone: updated.phone,
+    const customer = await ensureGuestCustomer({
+      merchantId: ctx.merchantId,
+      branchId: input.branchId,
+      name: updated.name,
+      phone: updated.phone,
+    });
+    if (customer) {
+      const businessName = await businessNameFor(ctx.merchantId);
+      scheduleQueueNotifyAfter({
+        customer,
+        template:
+          input.status === "seated" ? "queue_seated" : "queue_customer_skipped",
+        data: {
+          businessName,
+          bookingSize: updated.party_size,
+        },
       });
-      if (customer) {
-        const businessName = await businessNameFor(ctx.merchantId);
-        const notified = await notifyQueueTemplate({
-          customer,
-          template:
-            input.status === "seated" ? "queue_seated" : "queue_customer_skipped",
-          data: {
-            businessName,
-            bookingSize: updated.party_size,
-          },
-        });
-        if (!notified.ok) {
-          return {
-            ok: true,
-            entry: mapQueueEntryRow(updated),
-            error: notified.error ?? "Status updated, but WhatsApp failed.",
-          };
-        }
-      }
     }
 
     return { ok: true, entry: mapQueueEntryRow(updated) };
@@ -837,6 +875,111 @@ export async function updateLiveQueueEntryStatus(input: {
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Could not update guest.",
+    };
+  }
+}
+
+/** Row ceiling per query; the UI warns when a range exceeds it. */
+const QUEUE_ANALYTICS_FETCH_LIMIT = 5000;
+
+export interface QueueAnalyticsResult {
+  ok: boolean;
+  error?: string;
+  stats: QueueAnalyticsStats | null;
+  /** Everyone who ran a session in this range/branch, regardless of `staffId`. */
+  staffOptions: QueueStaffOption[];
+  /** True when the range hit QUEUE_ANALYTICS_FETCH_LIMIT and numbers are partial. */
+  truncated: boolean;
+}
+
+const EMPTY_QUEUE_ANALYTICS: Omit<QueueAnalyticsResult, "ok" | "error"> = {
+  stats: null,
+  staffOptions: [],
+  truncated: false,
+};
+
+/**
+ * Queue performance for a date range, scoped to one branch or all branches.
+ * `branchId` null means all branches (clamped for staff with branch limits).
+ * `staffId` narrows to sessions started by one teammate; null means everyone.
+ */
+export async function getQueueAnalytics(input?: {
+  range?: DashboardDateRange;
+  branchId?: string | null;
+  staffId?: string | null;
+}): Promise<QueueAnalyticsResult> {
+  const range = input?.range ?? "7d";
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated.", ...EMPTY_QUEUE_ANALYTICS };
+
+    const merchantId = await resolveMerchantId(supabase, user.id);
+    if (!merchantId) {
+      return { ok: false, error: "Merchant account not found.", ...EMPTY_QUEUE_ANALYTICS };
+    }
+
+    const branchFilter = await resolveBranchFilterForUser(
+      supabase,
+      merchantId,
+      user.id,
+      input?.branchId ?? null,
+    );
+
+    const start = dashboardRangeStart(range);
+    const sinceIso = start ? start.toISOString() : null;
+    const admin = createAdminClient();
+
+    let entriesQuery = admin
+      .from("queue_entries")
+      .select(
+        "id, session_id, party_size, kind, status, joined_at, called_at, seated_at, left_at",
+        { count: "exact" },
+      )
+      .eq("merchant_id", merchantId)
+      .order("joined_at", { ascending: false })
+      .range(0, QUEUE_ANALYTICS_FETCH_LIMIT - 1);
+    let sessionsQuery = admin
+      .from("queue_sessions")
+      .select("id, started_at, ended_at, started_by_user_id, started_by_name, started_by_role")
+      .eq("merchant_id", merchantId)
+      .order("started_at", { ascending: false })
+      .range(0, QUEUE_ANALYTICS_FETCH_LIMIT - 1);
+
+    if (branchFilter) {
+      entriesQuery = entriesQuery.eq("branch_id", branchFilter);
+      sessionsQuery = sessionsQuery.eq("branch_id", branchFilter);
+    }
+    if (sinceIso) {
+      entriesQuery = entriesQuery.gte("joined_at", sinceIso);
+      sessionsQuery = sessionsQuery.gte("started_at", sinceIso);
+    }
+
+    const [entriesRes, sessionsRes] = await Promise.all([entriesQuery, sessionsQuery]);
+    if (entriesRes.error) {
+      return { ok: false, error: "Could not load queue analytics.", ...EMPTY_QUEUE_ANALYTICS };
+    }
+
+    const allEntries = (entriesRes.data ?? []) as QueueAnalyticsEntryRow[];
+    const allSessions = (sessionsRes.data ?? []) as QueueAnalyticsSessionRow[];
+    const staffId = input?.staffId ?? null;
+    const scoped = staffId
+      ? filterQueueDataByStaff(allEntries, allSessions, staffId)
+      : { entries: allEntries, sessions: allSessions };
+
+    return {
+      ok: true,
+      stats: computeQueueAnalytics({ range, ...scoped }),
+      staffOptions: queueStaffOptions(allSessions),
+      truncated: (entriesRes.count ?? 0) > QUEUE_ANALYTICS_FETCH_LIMIT,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not load queue analytics.",
+      ...EMPTY_QUEUE_ANALYTICS,
     };
   }
 }

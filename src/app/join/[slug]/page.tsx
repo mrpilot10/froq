@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { loyaltyHubRedirectPath } from "@/lib/customer/hub";
 import { JoinScreen } from "@/components/loyalty/join-screen";
 import { FroqFooter } from "@/components/shared/froq-footer";
 
@@ -10,6 +12,9 @@ export default async function JoinPage({
   searchParams: Promise<{ b?: string; next?: string }>;
 }) {
   const { slug } = await params;
+  const hubRedirect = loyaltyHubRedirectPath(slug);
+  if (hubRedirect) redirect(hubRedirect);
+
   const { b: branchSlug, next } = await searchParams;
   const nextPath =
     typeof next === "string" && next.startsWith("/c/") ? next : null;

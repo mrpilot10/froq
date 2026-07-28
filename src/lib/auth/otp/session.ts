@@ -23,8 +23,14 @@ function strongPassword(): string {
  *  2. mints a Supabase session (sets the auth cookies on the response).
  *
  * @param phone Canonical digits incl. country code, no '+' (e.g. 919876543210).
+ * @param captchaToken Fresh Turnstile token. Step 2 is a phone+password grant,
+ *   which GoTrue guards with its CAPTCHA check, so this is required whenever
+ *   CAPTCHA protection is enabled on the project.
  */
-export async function establishPhoneSession(phone: string): Promise<EstablishResult> {
+export async function establishPhoneSession(
+  phone: string,
+  captchaToken?: string,
+): Promise<EstablishResult> {
   const admin = createAdminClient();
   const password = strongPassword();
   const authPhone = toSupabaseAuthPhone(phone);
@@ -75,6 +81,7 @@ export async function establishPhoneSession(phone: string): Promise<EstablishRes
   const { error: signInError } = await supabase.auth.signInWithPassword({
     phone: authPhone,
     password,
+    options: { captchaToken },
   });
   if (signInError) {
     otpLog.error("session_signin_failed", { phone: maskPhone(phone), reason: signInError.message });

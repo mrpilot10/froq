@@ -23,6 +23,15 @@ export function cooldownUnlockCopy(cooldownUntilIso: string | null | undefined):
   return `Unlocks in ${clock}`;
 }
 
+/** Post-redeem CTA while stamp collection is locked. */
+export function cooldownRestartButtonCopy(
+  cooldownUntilIso: string | null | undefined,
+): string | null {
+  const clock = formatCooldownClock(cooldownUntilIso);
+  if (!clock) return null;
+  return `Start collecting stamps again in ${clock}`;
+}
+
 /** Remaining wait as `Hh Mm` (or `Mm` / `Ss` when short). */
 export function formatCooldownClock(cooldownUntilIso: string | null | undefined): string | null {
   if (!cooldownUntilIso) return null;

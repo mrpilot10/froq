@@ -259,7 +259,7 @@ export function LoyaltyExperience({
         open={showClaimed}
         business={business}
         canRestart={canRestart}
-        cooldownMessage={cooldownUnlockCopy(card.cooldownUntil)}
+        cooldownUntil={card.cooldownUntil}
         onStartAgain={() => {
           setShowClaimed(false);
           setScreen("card");

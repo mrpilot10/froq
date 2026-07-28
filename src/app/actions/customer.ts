@@ -1,5 +1,6 @@
 "use server";
 
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isCustomerPublicToken } from "@/lib/customer/hub";
@@ -419,25 +420,57 @@ export async function requestStamp(customerId: string): Promise<{ ok: boolean; e
   const { error } = await supabase.rpc("request_stamp", { p_customer_id: customerId });
   if (error) return { ok: false, error: error.message };
 
-  // Notify the merchant. Await delivery so the push isn't dropped when the
-  // serverless function exits (after() is unreliable for web push on Vercel).
+  // Capture every push field before return — never re-query inside after().
+  // `after()` is stable in Next ≥15.1 (waitUntil under the hood on Vercel).
+  let captured: {
+    merchantId: string;
+    title: string;
+    body: string;
+    url: string;
+    tag: string;
+  } | null = null;
   try {
     const { data: customer } = await supabase
       .from("customers")
       .select("name, merchant_id")
       .eq("id", customerId)
       .maybeSingle();
-    if (customer) {
-      const { sendPushToMerchant } = await import("@/lib/push/server");
-      await sendPushToMerchant(customer.merchant_id, {
+    if (customer?.merchant_id) {
+      captured = {
+        merchantId: customer.merchant_id,
         title: "New stamp request",
         body: `${customer.name} is waiting for you to approve a stamp.`,
         url: "/merchant?tab=approvals",
         tag: "froq-approval",
-      });
+      };
     }
   } catch {
-    // Never let notification failures affect the stamp request.
+    // Payload capture failure must not fail the stamp request.
+  }
+
+  if (captured) {
+    const push = captured;
+    after(async () => {
+      try {
+        const { sendPushToMerchant } = await import("@/lib/push/server");
+        await sendPushToMerchant(push.merchantId, {
+          title: push.title,
+          body: push.body,
+          url: push.url,
+          tag: push.tag,
+        });
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            scope: "stamp_push_after",
+            event: "requestStamp_send_failed",
+            merchantId: push.merchantId,
+            error: err instanceof Error ? err.message : "unknown",
+            at: new Date().toISOString(),
+          }),
+        );
+      }
+    });
   }
 
   return { ok: true };
