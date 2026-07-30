@@ -16,6 +16,8 @@ export const MERCHANT_PROFILE: MerchantProfile = {
   brandColor: "#2b6f5c",
   websiteUrl: "bloomcoffee.com",
   googleBusinessUrl: "g.page/bloomcoffee",
+  googlePlaceId: "",
+  googleMapsUrl: "",
   instagramUrl: "instagram.com/bloomcoffee",
   facebookUrl: "",
   xUrl: "",

@@ -7,6 +7,7 @@ import type {
   MerchantProduct,
   PendingApproval,
 } from "@/lib/merchant/types";
+import { ApprovalsList } from "./approvals-list";
 
 interface MerchantNotificationsDrawerProps {
   open: boolean;
@@ -14,6 +15,8 @@ interface MerchantNotificationsDrawerProps {
   approvals: PendingApproval[];
   notifications: MerchantInAppNotification[];
   onViewApprovals: () => void;
+  onApprove?: (id: string) => void | Promise<unknown>;
+  onDisapprove?: (id: string) => void | Promise<unknown>;
   onClose: () => void;
 }
 
@@ -23,11 +26,14 @@ export function MerchantNotificationsDrawer({
   approvals,
   notifications,
   onViewApprovals,
+  onApprove,
+  onDisapprove,
   onClose,
 }: MerchantNotificationsDrawerProps) {
   const isLoyalty = product === "loyalty";
   const hasNotifications = notifications.length > 0;
   const hasApprovals = isLoyalty && approvals.length > 0;
+  const canActOnApprovals = Boolean(onApprove && onDisapprove);
   const empty = !hasNotifications && !hasApprovals;
 
   return (
@@ -78,33 +84,41 @@ export function MerchantNotificationsDrawer({
             {hasNotifications ? (
               <p className="merchant-notif-section-label">Waiting for review</p>
             ) : null}
-            <div className="merchant-notif-list">
-              {approvals.map((approval) => (
-                <button
-                  key={approval.id}
-                  type="button"
-                  className="merchant-notif-item"
-                  onClick={() => {
-                    onViewApprovals();
-                    onClose();
-                  }}
-                >
-                  <span className="merchant-notif-avatar">
-                    {getInitials(approval.customerName)}
-                  </span>
-                  <span className="merchant-notif-copy">
-                    <span className="merchant-notif-item-title">
-                      {approval.customerName} requested a stamp
+            {canActOnApprovals ? (
+              <ApprovalsList
+                approvals={approvals}
+                onApprove={onApprove!}
+                onDisapprove={onDisapprove!}
+              />
+            ) : (
+              <div className="merchant-notif-list">
+                {approvals.map((approval) => (
+                  <button
+                    key={approval.id}
+                    type="button"
+                    className="merchant-notif-item"
+                    onClick={() => {
+                      onViewApprovals();
+                      onClose();
+                    }}
+                  >
+                    <span className="merchant-notif-avatar">
+                      {getInitials(approval.customerName)}
                     </span>
-                    <span className="merchant-notif-item-sub">
-                      Stamp {approval.stampsBefore + 1} of {approval.totalStamps} ·{" "}
-                      {approval.requestedAt}
+                    <span className="merchant-notif-copy">
+                      <span className="merchant-notif-item-title">
+                        {approval.customerName} requested a stamp
+                      </span>
+                      <span className="merchant-notif-item-sub">
+                        Stamp {approval.stampsBefore + 1} of {approval.totalStamps} ·{" "}
+                        {approval.requestedAt}
+                      </span>
                     </span>
-                  </span>
-                  <span className="merchant-notif-pill">Review</span>
-                </button>
-              ))}
-            </div>
+                    <span className="merchant-notif-pill">Review</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         ) : null}
 
@@ -126,7 +140,7 @@ export function MerchantNotificationsDrawer({
           </div>
         ) : null}
 
-        {(hasApprovals || hasNotifications) && isLoyalty ? (
+        {(hasApprovals || hasNotifications) && isLoyalty && !canActOnApprovals ? (
           <button
             type="button"
             className="cta-btn merchant-cta-accent merchant-notif-cta"

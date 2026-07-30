@@ -16,7 +16,13 @@ export function isPushSupported() {
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return null;
   try {
-    return await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    // Pick up a new SW after deploys so clients don't keep stale Next chunks.
+    void registration.update();
+    if (registration.waiting) {
+      registration.waiting.postMessage({ type: "SKIP_WAITING" });
+    }
+    return registration;
   } catch {
     return null;
   }

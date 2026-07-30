@@ -1,6 +1,10 @@
 export interface BusinessInfo {
   name: string;
   address: string;
+  /** Store phone for tel: links on the stamp card (optional). */
+  phone?: string;
+  /** Google Maps URI from Places (preferred for the map icon). */
+  googleMapsUrl?: string;
   brandColor: string;
   logoUrl?: string | null;
   rewardTitle: string;

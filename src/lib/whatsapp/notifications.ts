@@ -298,16 +298,28 @@ export async function sendWhatsAppTemplate(
   }
 
   // APITxT often returns HTTP 200 with a business error in status/message
-  // (e.g. 203 "Template not found or not approved"). Treat those as failures.
+  // (e.g. 203 "Template not found", 301 "Insufficient balance"). Only a small
+  // set of statuses mean the message was accepted — everything else is a failure.
   const providerStatus = parsed.status;
   const providerMessage =
     typeof parsed.message === "string" ? parsed.message.trim() : "";
+  const providerOk =
+    providerStatus === undefined ||
+    providerStatus === null ||
+    providerStatus === "" ||
+    providerStatus === 200 ||
+    providerStatus === "200" ||
+    providerStatus === 1 ||
+    providerStatus === "1" ||
+    providerStatus === "success" ||
+    providerStatus === "Success" ||
+    providerStatus === "ok" ||
+    providerStatus === "OK";
   const providerFailed =
-    providerStatus === "error" ||
-    providerStatus === "Error" ||
-    providerStatus === 203 ||
-    providerStatus === "203" ||
-    /template not found|not approved|failed/i.test(providerMessage);
+    !providerOk ||
+    /template not found|not approved|failed|insufficient balance|invalid/i.test(
+      providerMessage,
+    );
 
   if (providerFailed) {
     waLog("error", "send_wa_provider_error", {

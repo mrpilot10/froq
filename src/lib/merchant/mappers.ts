@@ -43,6 +43,8 @@ export function toMerchantProfile(row: MerchantProfileSource): MerchantProfile {
     logoDataUrl: row.logo_url ?? undefined,
     websiteUrl: row.website_url ?? "",
     googleBusinessUrl: row.google_business_url ?? "",
+    googlePlaceId: row.google_place_id ?? "",
+    googleMapsUrl: row.google_maps_url ?? "",
     instagramUrl: row.instagram_url ?? "",
     facebookUrl: row.facebook_url ?? "",
     xUrl: row.x_url ?? "",
@@ -105,6 +107,8 @@ export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<Mer
   if (patch.logoDataUrl !== undefined) row.logo_url = patch.logoDataUrl ?? null;
   if (patch.websiteUrl !== undefined) row.website_url = patch.websiteUrl;
   if (patch.googleBusinessUrl !== undefined) row.google_business_url = patch.googleBusinessUrl;
+  if (patch.googlePlaceId !== undefined) row.google_place_id = patch.googlePlaceId || null;
+  if (patch.googleMapsUrl !== undefined) row.google_maps_url = patch.googleMapsUrl || null;
   if (patch.instagramUrl !== undefined) row.instagram_url = patch.instagramUrl;
   if (patch.facebookUrl !== undefined) row.facebook_url = patch.facebookUrl;
   if (patch.xUrl !== undefined) row.x_url = patch.xUrl;

@@ -17,7 +17,7 @@ import { FloatingNav } from "./floating-nav";
 import { HistoryScreen } from "./history-screen";
 import { ProfileScreen } from "./profile-screen";
 import { RewardSheet } from "./reward-sheet";
-import { SocialRow } from "./social-row";
+import { FollowUs } from "./social-row";
 import { SuccessScreen } from "./success-screen";
 import { WalletPass } from "./wallet-pass";
 
@@ -234,7 +234,7 @@ export function LoyaltyExperience({
                 </div>
               </div>
 
-              <SocialRow links={business.socialLinks} />
+              <FollowUs links={business.socialLinks} />
             </div>
           )}
 

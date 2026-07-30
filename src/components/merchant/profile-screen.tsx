@@ -27,7 +27,7 @@ const SETTINGS_GROUPS: Array<{
     title: "Store",
     items: [
       { id: "business", label: "Store details", value: "Logo, color, name & address", Icon: Store },
-      { id: "links", label: "Links & social", value: "Google, website & socials", Icon: Link2 },
+      { id: "links", label: "Links & social", value: "Website & socials", Icon: Link2 },
     ],
   },
   {

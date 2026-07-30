@@ -11,6 +11,7 @@ import {
   Gift,
   ImagePlus,
   Link2,
+  MapPin,
   Palette,
   PartyPopper,
   QrCode,
@@ -55,6 +56,7 @@ import {
   type RewardCooldownUnit,
 } from "@/lib/loyalty/rules";
 import { OnboardingVerifyStep } from "./onboarding-verify-step";
+import { GoogleBusinessSearch } from "@/components/merchant/google-business-search";
 
 function reservationProfilePatch(draft: OnboardingDraft) {
   return {
@@ -85,6 +87,11 @@ const STEP_HEAD: Record<
 > = {
   intro: { Icon: Sparkles, title: "Welcome to Froq", desc: "" },
   identity: { Icon: Store, title: "Your business", desc: "Add your name, business, and logo." },
+  google: {
+    Icon: MapPin,
+    title: "Find your business on Google",
+    desc: "This helps customers leave reviews and unlocks future AI-powered features.",
+  },
   verify: {
     Icon: ShieldCheck,
     title: "Verify contact",
@@ -155,6 +162,8 @@ export function OnboardingWizard({
         address: draft.address,
         websiteUrl: draft.websiteUrl.trim() || undefined,
         googleBusinessUrl: draft.googleBusinessUrl.trim() || undefined,
+        googlePlaceId: draft.googlePlaceId.trim() || undefined,
+        googleMapsUrl: draft.googleMapsUrl.trim() || undefined,
         instagramUrl: draft.instagramUrl.trim() || undefined,
         facebookUrl: draft.facebookUrl.trim() || undefined,
         xUrl: draft.xUrl.trim() || undefined,
@@ -429,6 +438,41 @@ export function OnboardingWizard({
               />
             )}
 
+            {current === "google" && (
+              <div className="panel-card merchant-edit-panel">
+                <GoogleBusinessSearch
+                  autoFocus
+                  selected={
+                    draft.googlePlaceId
+                      ? {
+                          placeId: draft.googlePlaceId,
+                          name: draft.businessName,
+                          googleMapsUrl: draft.googleMapsUrl,
+                        }
+                      : null
+                  }
+                  onSelect={(place) => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      googlePlaceId: place.placeId,
+                      googleMapsUrl: place.googleMapsUrl,
+                      businessName: place.name,
+                    }));
+                  }}
+                  onClear={() => {
+                    setDraft((prev) => ({
+                      ...prev,
+                      googlePlaceId: "",
+                      googleMapsUrl: "",
+                    }));
+                  }}
+                  onSelectedAndContinue={() => {
+                    setStepIndex((s) => Math.min(s + 1, steps.length - 1));
+                  }}
+                />
+              </div>
+            )}
+
             {current === "color" && (
               <div className="panel-card merchant-edit-panel">
                 <div className="merchant-color-field">
@@ -473,13 +517,6 @@ export function OnboardingWizard({
                   maxLength={FIELD_LIMITS.url}
                   placeholder="bloomcoffee.com"
                   onChange={(v) => update("websiteUrl", v)}
-                />
-                <WizardField
-                  label="Google Business"
-                  value={draft.googleBusinessUrl}
-                  maxLength={FIELD_LIMITS.url}
-                  placeholder="g.page/bloomcoffee"
-                  onChange={(v) => update("googleBusinessUrl", v)}
                 />
                 <WizardField
                   label="Instagram"

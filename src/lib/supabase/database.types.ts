@@ -68,6 +68,8 @@ export interface MerchantRow {
   logo_url: string | null;
   website_url: string | null;
   google_business_url: string | null;
+  google_place_id: string | null;
+  google_maps_url: string | null;
   instagram_url: string | null;
   facebook_url: string | null;
   x_url: string | null;

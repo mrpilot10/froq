@@ -74,6 +74,8 @@ function toBusinessInfo(m: MerchantRow): BusinessInfo {
   return {
     name: m.business_name,
     address: m.address ?? "",
+    phone: m.phone?.trim() || undefined,
+    googleMapsUrl: m.google_maps_url?.trim() || undefined,
     brandColor: m.brand_color,
     logoUrl: m.logo_url ?? null,
     rewardTitle: m.reward_title,

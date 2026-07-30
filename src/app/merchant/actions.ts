@@ -521,7 +521,7 @@ export async function getMerchantBundle(activeBranchId?: string | null): Promise
  * Intentionally omits short_name and created_at (unused on this path).
  */
 const MERCHANT_ACCESS_COLUMNS =
-  "id, owner_user_id, slug, business_name, owner_first_name, owner_last_name, email, phone, address, brand_color, logo_url, website_url, google_business_url, instagram_url, facebook_url, x_url, reward_title, reward_name, reward_image_url, total_stamps, restart_after_reward, reward_cooldown_value, reward_cooldown_unit, min_purchase_amount, stamp_notifications, approval_notifications, marketing_emails, queue_banner, queue_banner_link, queue_open_time, queue_close_time, queue_hours_timezone, queue_open_days, queue_auto_start, queue_auto_close, reservation_description, reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes, reservation_auto_decline_hours, reservation_whatsapp_enabled, reservation_paused";
+  "id, owner_user_id, slug, business_name, owner_first_name, owner_last_name, email, phone, address, brand_color, logo_url, website_url, google_business_url, google_place_id, google_maps_url, instagram_url, facebook_url, x_url, reward_title, reward_name, reward_image_url, total_stamps, restart_after_reward, reward_cooldown_value, reward_cooldown_unit, min_purchase_amount, stamp_notifications, approval_notifications, marketing_emails, queue_banner, queue_banner_link, queue_open_time, queue_close_time, queue_hours_timezone, queue_open_days, queue_auto_start, queue_auto_close, reservation_description, reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes, reservation_auto_decline_hours, reservation_whatsapp_enabled, reservation_paused";
 
 /** Optional toggles — selected separately so missing migrations can't take down the dashboard. */
 const MERCHANT_OPTIONAL_TOGGLE_COLUMNS =
@@ -2939,6 +2939,8 @@ export async function createMerchant(input: {
   address?: string;
   websiteUrl?: string;
   googleBusinessUrl?: string;
+  googlePlaceId?: string;
+  googleMapsUrl?: string;
   instagramUrl?: string;
   facebookUrl?: string;
   xUrl?: string;
@@ -2993,6 +2995,8 @@ export async function createMerchant(input: {
           address: input.address?.trim() || null,
           website_url: input.websiteUrl?.trim() || null,
           google_business_url: input.googleBusinessUrl?.trim() || null,
+          google_place_id: input.googlePlaceId?.trim() || null,
+          google_maps_url: input.googleMapsUrl?.trim() || null,
           instagram_url: input.instagramUrl?.trim() || null,
           facebook_url: input.facebookUrl?.trim() || null,
           x_url: input.xUrl?.trim() || null,
@@ -3205,7 +3209,20 @@ function notifyAfterStampVerified(input: {
   rewardReady: boolean;
 }) {
   const { customer, merchant, currentStamps, rewardReady } = input;
-  if (!customer.phone?.trim() || !customer.public_token) return;
+  if (!customer.phone?.trim()) {
+    loyaltyNotifyLog("error", "stamp_notification_skipped", {
+      reason: "missing_phone",
+      rewardReady,
+    });
+    return;
+  }
+  if (!customer.public_token?.trim()) {
+    loyaltyNotifyLog("error", "stamp_notification_skipped", {
+      reason: "missing_public_token",
+      rewardReady,
+    });
+    return;
+  }
 
   const notifiable = toLoyaltyNotifiable(customer);
 

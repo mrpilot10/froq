@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, ChevronRight, Gift } from "lucide-react";
+import { Bell, ChevronRight, Gift, MapPin } from "lucide-react";
 import type { MerchantEditSection, MerchantProfile } from "@/lib/merchant/types";
 import { MerchantPlanCard } from "./plan-card";
 import { MerchantQrPanel } from "./qr-panel";
@@ -25,19 +25,30 @@ interface LoyaltySettingsScreenProps {
 const LOYALTY_SETTINGS: Array<{
   id: MerchantEditSection;
   label: string;
-  value: string;
+  value: (profile: MerchantProfile) => string;
   Icon: typeof Gift;
+  ownerOnly?: boolean;
 }> = [
   {
     id: "loyalty",
     label: "Rewards & stamps",
-    value: "Offer, stamps, birthday bonus",
+    value: () => "Offer, stamps, birthday bonus",
     Icon: Gift,
+    ownerOnly: true,
+  },
+  {
+    id: "google",
+    label: "Google Business",
+    value: (profile) =>
+      profile.googlePlaceId
+        ? profile.businessName || "Linked"
+        : "Find your business on Google",
+    Icon: MapPin,
   },
   {
     id: "notifications",
     label: "Alerts & email",
-    value: "Stamp and approval alerts",
+    value: () => "Stamp and approval alerts",
     Icon: Bell,
   },
 ];
@@ -73,7 +84,7 @@ export function LoyaltySettingsScreen({
         <h3 className="merchant-settings-title">Loyalty program</h3>
         <div className="panel-card merchant-settings-panel">
           {LOYALTY_SETTINGS.filter(
-            ({ id }) => id !== "loyalty" || canEditProgram,
+            ({ id, ownerOnly }) => !(ownerOnly && id === "loyalty" && !canEditProgram),
           ).map(({ id, label, value, Icon }) => (
             <button
               key={id}
@@ -86,7 +97,9 @@ export function LoyaltySettingsScreen({
               </div>
               <div className="profile-row-copy">
                 <div className="profile-row-label">{label}</div>
-                <div className="profile-row-value profile-row-value--soft">{value}</div>
+                <div className="profile-row-value profile-row-value--soft">
+                  {value(profile)}
+                </div>
               </div>
               <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
             </button>

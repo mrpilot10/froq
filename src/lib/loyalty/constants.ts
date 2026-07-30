@@ -5,6 +5,7 @@ export const DEFAULT_TOTAL_STAMPS = 5;
 export const DEMO_BUSINESS: BusinessInfo = {
   name: "Bloom Coffee Co.",
   address: "42 Market Street, San Francisco, CA 94105",
+  phone: "+14155550142",
   brandColor: "#2b6f5c",
   rewardTitle: "Buy 4 coffees,\nget your 5th free",
   rewardSubtitle: "Any handcrafted drink, any size",
@@ -17,7 +18,7 @@ export const DEMO_BUSINESS: BusinessInfo = {
     instagram: "#",
     whatsapp: "#",
     facebook: "#",
-    website: "#",
+    website: "https://example.com",
     googleReviews: "https://search.google.com/local/writereview",
   },
 };

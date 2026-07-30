@@ -17,6 +17,7 @@ import {
   AccountSettingsPanel,
   type AccountSettingsHandle,
 } from "./account-settings-panel";
+import { GoogleBusinessSearch } from "./google-business-search";
 
 interface MerchantProfileEditScreenProps {
   section: MerchantEditSection;
@@ -43,7 +44,11 @@ const SECTION_META: Record<
   },
   links: {
     title: "Links & social",
-    subtitle: "Google Business, website, and socials",
+    subtitle: "Website and socials",
+  },
+  google: {
+    title: "Google Business",
+    subtitle: "Link your listing for reviews and maps",
   },
   loyalty: {
     title: "Rewards & stamps",
@@ -317,14 +322,37 @@ export function MerchantProfileEditScreen({
           </>
         )}
 
+        {section === "google" && (
+          <GoogleBusinessSearch
+            selected={
+              profile.googlePlaceId
+                ? {
+                    placeId: profile.googlePlaceId,
+                    name: profile.businessName,
+                    googleMapsUrl: profile.googleMapsUrl,
+                  }
+                : null
+            }
+            onSelect={(place) =>
+              onChange({
+                ...profile,
+                googlePlaceId: place.placeId,
+                googleMapsUrl: place.googleMapsUrl,
+                businessName: place.name,
+              })
+            }
+            onClear={() =>
+              onChange({
+                ...profile,
+                googlePlaceId: "",
+                googleMapsUrl: "",
+              })
+            }
+          />
+        )}
+
         {section === "links" && (
           <>
-            <PlainField
-              label="Google Business"
-              value={profile.googleBusinessUrl}
-              onChange={(v) => updateField("googleBusinessUrl", v)}
-              placeholder="g.page/your-business"
-            />
             <PlainField
               label="Website"
               value={profile.websiteUrl}

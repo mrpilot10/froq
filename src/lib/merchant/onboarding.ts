@@ -10,6 +10,7 @@ import type { RewardCooldownUnit } from "@/lib/loyalty/rules";
 export type OnboardingStep =
   | "intro"
   | "identity" // first/last name, business name, logo
+  | "google" // find business on Google Places
   | "verify" // email + phone verification before branding
   | "color" // brand color
   | "contact" // address + social links
@@ -37,6 +38,8 @@ export interface OnboardingDraft {
   address: string;
   websiteUrl: string;
   googleBusinessUrl: string;
+  googlePlaceId: string;
+  googleMapsUrl: string;
   instagramUrl: string;
   facebookUrl: string;
   xUrl: string;
@@ -79,6 +82,8 @@ export function emptyOnboardingDraft(account?: CheckoutAccount | null): Onboardi
     address: location,
     websiteUrl: "",
     googleBusinessUrl: "",
+    googlePlaceId: "",
+    googleMapsUrl: "",
     instagramUrl: "",
     facebookUrl: "",
     xUrl: "",
@@ -113,7 +118,16 @@ export function buildOnboardingSteps(
   product: MerchantProduct,
 ): OnboardingStep[] {
   if (mode === "full") {
-    return ["intro", "identity", "verify", "color", "contact", productStep(product), "outro"];
+    return [
+      "intro",
+      "identity",
+      "google",
+      "verify",
+      "color",
+      "contact",
+      productStep(product),
+      "outro",
+    ];
   }
   return ["intro", productStep(product), "outro"];
 }
@@ -123,6 +137,9 @@ export function canAdvanceStep(step: OnboardingStep, draft: OnboardingDraft): bo
   switch (step) {
     case "identity":
       return draft.firstName.trim().length > 0 && draft.businessName.trim().length > 0;
+    case "google":
+      // Optional — selecting a place auto-advances; Continue lets them skip.
+      return true;
     case "verify":
       return draft.emailVerified && draft.phoneVerified;
     case "reward":

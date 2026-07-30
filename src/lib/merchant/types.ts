@@ -61,6 +61,7 @@ export type MerchantTab = LoyaltyTab | QueueTab | ReservationTab | WorkspaceTab;
 export type MerchantEditSection =
   | "business"
   | "links"
+  | "google"
   | "loyalty"
   | "notifications"
   | "account"
@@ -79,6 +80,10 @@ export interface MerchantProfile {
   logoDataUrl?: string;
   websiteUrl: string;
   googleBusinessUrl: string;
+  /** Google Places resource id (ChIJ…). */
+  googlePlaceId: string;
+  /** Maps URL from Google Places (googleMapsUri). */
+  googleMapsUrl: string;
   instagramUrl: string;
   facebookUrl: string;
   xUrl: string;

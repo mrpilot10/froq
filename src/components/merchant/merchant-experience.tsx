@@ -549,7 +549,7 @@ export function MerchantExperience({
   );
 
   const handleDisapprove = useCallback(
-    (id: string) => run(() => rejectStamp(id)),
+    (id: string) => run(() => rejectStamp(id), "Stamp rejected"),
     [run],
   );
 
@@ -1112,6 +1112,8 @@ export function MerchantExperience({
         approvals={approvals}
         notifications={inAppNotifications}
         onViewApprovals={() => goToTab("dashboard")}
+        onApprove={handleApprove}
+        onDisapprove={handleDisapprove}
         onClose={() => setNotifOpen(false)}
       />
 

@@ -79,7 +79,7 @@ export function ApprovalsList({
                 ) : (
                   <X size={16} strokeWidth={2.4} />
                 )}
-                {isRejecting ? "Working…" : "Disapprove"}
+                {isRejecting ? "Rejecting…" : "Reject"}
               </button>
               <button
                 type="button"
