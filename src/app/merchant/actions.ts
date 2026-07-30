@@ -1,5 +1,6 @@
 "use server";
 
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type {
@@ -3114,7 +3115,42 @@ type StampNotifMerchant = {
   reward_cooldown_unit?: string | null;
 };
 
-/** Fire-and-forget after a reward is scanned/claimed (not when it becomes available). */
+function loyaltyNotifyLog(
+  level: "info" | "error",
+  event: string,
+  fields: Record<string, unknown>,
+) {
+  const line = JSON.stringify({
+    scope: "loyalty_notifications",
+    level,
+    event,
+    ...fields,
+    at: new Date().toISOString(),
+  });
+  if (level === "error") console.error(line);
+  else console.info(line);
+}
+
+/**
+ * Loyalty templates are WhatsApp-first with SMS fallback, so the customer's
+ * stored channel prefs only decide the SMS body — never whether WhatsApp runs.
+ */
+function toLoyaltyNotifiable(customer: StampNotifCustomer) {
+  return {
+    phone: customer.phone as string,
+    name: (customer.name ?? "").trim() || "there",
+    publicToken: customer.public_token as string,
+    whatsappAvailable: true,
+    preferredNotificationChannel: "whatsapp" as const,
+  };
+}
+
+/**
+ * Sent after a reward is scanned/claimed (not when it becomes available).
+ *
+ * Runs in `after()` so the send completes once the response has flushed — a bare
+ * floating promise is killed when the serverless invocation ends.
+ */
 function notifyRewardClaimed(input: {
   customer: StampNotifCustomer;
   businessName: string;
@@ -3123,20 +3159,12 @@ function notifyRewardClaimed(input: {
   const { customer, businessName, rewardTitle } = input;
   if (!customer.phone?.trim() || !customer.public_token) return;
 
-  const notifiable = {
-    phone: customer.phone,
-    name: (customer.name ?? "").trim() || "there",
-    publicToken: customer.public_token,
-    whatsappAvailable: customer.whatsapp_available === true,
-    preferredNotificationChannel:
-      customer.preferred_notification_channel === "whatsapp"
-        ? ("whatsapp" as const)
-        : ("sms" as const),
-  };
+  const notifiable = toLoyaltyNotifiable(customer);
 
-  void import("@/lib/notifications").then(async ({ sendCustomerNotification }) => {
+  after(async () => {
     try {
-      await sendCustomerNotification({
+      const { sendCustomerNotification } = await import("@/lib/notifications");
+      const result = await sendCustomerNotification({
         customer: notifiable,
         template: "reward_redeemed",
         data: {
@@ -3144,13 +3172,23 @@ function notifyRewardClaimed(input: {
           rewardTitle: rewardTitle.trim() || "Reward",
         },
       });
+      loyaltyNotifyLog(result.ok ? "info" : "error", "reward_redeemed", {
+        ok: result.ok,
+        channel: result.channel,
+        error: result.error ?? null,
+      });
     } catch (err) {
-      console.error("Failed to send loyaltycard_reward_claimed", err);
+      loyaltyNotifyLog("error", "reward_redeemed_threw", {
+        reason: err instanceof Error ? err.message : "unknown",
+      });
     }
   });
 }
 
-/** Fire-and-forget loyalty alerts after a stamp is committed (never blocks approval). */
+/**
+ * Loyalty alerts after a stamp is committed. Never blocks the approval: the send
+ * runs in `after()`, which keeps the serverless invocation alive until it lands.
+ */
 function notifyAfterStampVerified(input: {
   customer: StampNotifCustomer;
   merchant: StampNotifMerchant;
@@ -3160,23 +3198,18 @@ function notifyAfterStampVerified(input: {
   const { customer, merchant, currentStamps, rewardReady } = input;
   if (!customer.phone?.trim() || !customer.public_token) return;
 
-  const notifiable = {
-    phone: customer.phone,
-    name: (customer.name ?? "").trim() || "there",
-    publicToken: customer.public_token,
-    whatsappAvailable: customer.whatsapp_available === true,
-    preferredNotificationChannel:
-      customer.preferred_notification_channel === "whatsapp" ? "whatsapp" as const : "sms" as const,
-  };
+  const notifiable = toLoyaltyNotifiable(customer);
 
   const rewardTitle =
     (merchant.reward_title || merchant.reward_name || "Reward").trim() || "Reward";
 
-  void import("@/lib/notifications").then(async ({ sendCustomerNotification }) => {
+  after(async () => {
     try {
+      const { sendCustomerNotification } = await import("@/lib/notifications");
+
       // Non-final stamp → stamp verified only.
       if (!rewardReady) {
-        await sendCustomerNotification({
+        const result = await sendCustomerNotification({
           customer: notifiable,
           template: "stamp_verified",
           data: {
@@ -3186,13 +3219,18 @@ function notifyAfterStampVerified(input: {
             rewardTitle,
           },
         });
+        loyaltyNotifyLog(result.ok ? "info" : "error", "stamp_verified", {
+          ok: result.ok,
+          channel: result.channel,
+          error: result.error ?? null,
+        });
         return;
       }
 
       // Final stamp: do NOT send stamp_verified — final-stamp templates replace it.
       const waitValue = Math.max(0, Number(merchant.reward_cooldown_value ?? 0));
       if (waitValue <= 0) {
-        await sendCustomerNotification({
+        const result = await sendCustomerNotification({
           customer: notifiable,
           template: "reward_unlocked",
           data: {
@@ -3201,6 +3239,11 @@ function notifyAfterStampVerified(input: {
             requiredStamps: merchant.total_stamps,
             rewardTitle,
           },
+        });
+        loyaltyNotifyLog(result.ok ? "info" : "error", "reward_unlocked", {
+          ok: result.ok,
+          channel: result.channel,
+          error: result.error ?? null,
         });
         return;
       }
@@ -3212,7 +3255,7 @@ function notifyAfterStampVerified(input: {
           ? merchant.reward_cooldown_unit
           : "days";
       const { formatRewardCooldown } = await import("@/lib/loyalty/rules");
-      await sendCustomerNotification({
+      const result = await sendCustomerNotification({
         customer: notifiable,
         template: "stamp_collected_last_wait_time",
         data: {
@@ -3223,8 +3266,15 @@ function notifyAfterStampVerified(input: {
           rewardTitle,
         },
       });
+      loyaltyNotifyLog(result.ok ? "info" : "error", "stamp_collected_last_wait_time", {
+        ok: result.ok,
+        channel: result.channel,
+        error: result.error ?? null,
+      });
     } catch (err) {
-      console.error("Failed to send loyalty stamp notification", err);
+      loyaltyNotifyLog("error", "stamp_notification_threw", {
+        reason: err instanceof Error ? err.message : "unknown",
+      });
     }
   });
 }
