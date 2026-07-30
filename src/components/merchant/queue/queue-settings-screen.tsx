@@ -61,6 +61,8 @@ interface QueueSettingsScreenProps {
   productEnabled?: boolean;
   onGetStarted?: () => void;
   onManagePlan?: () => void;
+  branchSlug?: string | null;
+  branchSelected?: boolean;
 }
 
 const hasImage = (value: string) => value.trim().length > 0;
@@ -74,6 +76,8 @@ export function QueueSettingsScreen({
   productEnabled,
   onGetStarted,
   onManagePlan,
+  branchSlug = null,
+  branchSelected = true,
 }: QueueSettingsScreenProps) {
   const [waitMinutes, setWaitMinutes] = useState(DEFAULT_ESTIMATED_WAIT_MINUTES);
   const [waitMeta, setWaitMeta] = useState(() => ({
@@ -211,7 +215,13 @@ export function QueueSettingsScreen({
         <p className="tab-sub">Configure how your live waitlist behaves</p>
       </div>
 
-      <MerchantQrPanel profile={profile} product="queue" />
+      <MerchantQrPanel
+        profile={profile}
+        product="queue"
+        branchSlug={branchSlug}
+        needsBranch
+        branchSelected={branchSelected}
+      />
 
       <div className="merchant-settings-group">
         <h3 className="merchant-settings-title">Queue setup</h3>

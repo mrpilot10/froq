@@ -34,6 +34,8 @@ export const CustomerNotificationTemplate = {
   QueueSeated: "queue_seated",
   /** @deprecated Prefer QueueSeated */
   QueueCustomerSeated: "queue_seated",
+  /** Birthday bonus — 2 stamps on birthday (WhatsApp template birthday_bonus_stamps). */
+  BirthdayBonusStamps: "birthday_bonus_stamps",
 } as const;
 
 export type CustomerNotificationTemplate =
@@ -127,6 +129,12 @@ export type QueueJoinedData = QueuePartyData & {
   estimatedWaitMinutes: number;
 };
 
+export type BirthdayBonusStampsData = {
+  businessName: string;
+  /** Reward the customer is collecting toward (Meta {{3}}). */
+  rewardName: string;
+};
+
 export type CustomerNotificationDataMap = {
   stamp_verified: StampVerifiedData;
   reward_unlocked: RewardUnlockedData;
@@ -146,6 +154,7 @@ export type CustomerNotificationDataMap = {
   queue_reminder_3: QueuePartyData;
   queue_customer_skipped: QueuePartyData;
   queue_seated: QueuePartyData;
+  birthday_bonus_stamps: BirthdayBonusStampsData;
 };
 
 export function shouldSendWhatsApp(customer: NotifiableCustomer): boolean {
@@ -261,6 +270,10 @@ export function buildSmsBody(
       const size = formatBookingSize(d.bookingSize);
       return `Hi ${name}, you're seated at ${d.businessName} (${size}). Details: ${hub}`;
     }
+    case "birthday_bonus_stamps": {
+      const d = data as BirthdayBonusStampsData;
+      return `Happy birthday ${name}! Visit ${d.businessName} today for 2 loyalty stamps toward ${d.rewardName} (usually 1). Card: ${hub}`;
+    }
     default: {
       const _exhaustive: never = template;
       return _exhaustive;
@@ -290,6 +303,7 @@ export function smsTemplateIdFor(
     queue_reminder_3: "APITXT_SMS_TEMPLATE_QUEUE_REMINDER_3",
     queue_customer_skipped: "APITXT_SMS_TEMPLATE_QUEUE_CUSTOMER_SKIPPED",
     queue_seated: "APITXT_SMS_TEMPLATE_QUEUE_SEATED",
+    birthday_bonus_stamps: "APITXT_SMS_TEMPLATE_BIRTHDAY_BONUS_STAMPS",
   }[template];
   return process.env[envKey]?.trim() || undefined;
 }

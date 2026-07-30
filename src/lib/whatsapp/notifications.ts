@@ -16,6 +16,7 @@ import {
   buildQueueCustomerSeatedTemplate,
   buildQueueCustomerSkippedTemplate,
   buildQueueJoinedTemplate,
+  buildBirthdayBonusStampsTemplate,
   requireNonEmptyString,
   requireNumberAsString,
   WhatsAppTemplateValidationError,
@@ -106,6 +107,7 @@ function labeledBodyVariables(
       "rewardTitle",
     ],
     loyaltycard_reward_claimed: ["customerName", "rewardTitle", "businessName"],
+    birthday_bonus_stamps: ["customerFirstName", "businessName", "rewardName"],
     reservation_request_received: [
       "customerName",
       "businessName",
@@ -660,4 +662,34 @@ export async function sendQueueCustomerSeated(
   input: SendQueuePartyInput,
 ): Promise<ApitxtSendWaResponse> {
   return sendFromQueuePayload(input.mobile, buildQueueCustomerSeatedTemplate(input));
+}
+
+export interface SendBirthdayBonusStampsInput {
+  mobile: string;
+  customerFirstName: string;
+  businessName: string;
+  rewardName: string;
+  publicToken: string;
+}
+
+/**
+ * birthday_bonus_stamps —
+ * body: firstName, café name, reward name
+ * Button URL {{1}} = publicToken → Meta: https://froq.io/c/{{1}}
+ */
+export async function sendBirthdayBonusStamps(
+  input: SendBirthdayBonusStampsInput,
+): Promise<ApitxtSendWaResponse> {
+  const payload = buildBirthdayBonusStampsTemplate({
+    customerFirstName: input.customerFirstName,
+    businessName: input.businessName,
+    rewardName: input.rewardName,
+    publicToken: input.publicToken,
+  });
+  return sendWhatsAppTemplate({
+    templateName: payload.templateName,
+    mobile: input.mobile,
+    bodyParams: payload.body,
+    publicToken: input.publicToken,
+  });
 }

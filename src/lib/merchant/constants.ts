@@ -31,6 +31,7 @@ export const MERCHANT_PROFILE: MerchantProfile = {
   notifyStaffPendingApprovals: true,
   notifyManagerPendingApprovals: true,
   notifyOwnerPendingApprovals: false,
+  birthdayDoubleStamps: false,
   marketingEmails: true,
   queueOpenTime: "10:00",
   queueCloseTime: "22:00",

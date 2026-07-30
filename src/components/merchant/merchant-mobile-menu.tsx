@@ -174,32 +174,32 @@ export function MerchantMobileMenu({
           </button>
         </div>
 
-        <div className="merchant-menu-scroll">
-          <div className="merchant-menu-tabs" role="tablist" aria-label="Menu sections">
-            <button
-              type="button"
-              role="tab"
-              id="merchant-menu-tab-business"
-              aria-selected={menuPanel === "business"}
-              aria-controls="merchant-menu-panel-business"
-              className={`merchant-menu-tab${menuPanel === "business" ? " active" : ""}`}
-              onClick={() => setMenuPanel("business")}
-            >
-              My Business
-            </button>
-            <button
-              type="button"
-              role="tab"
-              id="merchant-menu-tab-products"
-              aria-selected={menuPanel === "products"}
-              aria-controls="merchant-menu-panel-products"
-              className={`merchant-menu-tab${menuPanel === "products" ? " active" : ""}`}
-              onClick={() => setMenuPanel("products")}
-            >
-              Products
-            </button>
-          </div>
+        <div className="merchant-menu-tabs" role="tablist" aria-label="Menu sections">
+          <button
+            type="button"
+            role="tab"
+            id="merchant-menu-tab-business"
+            aria-selected={menuPanel === "business"}
+            aria-controls="merchant-menu-panel-business"
+            className={`merchant-menu-tab${menuPanel === "business" ? " active" : ""}`}
+            onClick={() => setMenuPanel("business")}
+          >
+            My Business
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="merchant-menu-tab-products"
+            aria-selected={menuPanel === "products"}
+            aria-controls="merchant-menu-panel-products"
+            className={`merchant-menu-tab${menuPanel === "products" ? " active" : ""}`}
+            onClick={() => setMenuPanel("products")}
+          >
+            Products
+          </button>
+        </div>
 
+        <div className="merchant-menu-scroll">
           {menuPanel === "business" ? (
             <nav
               id="merchant-menu-panel-business"
@@ -208,29 +208,6 @@ export function MerchantMobileMenu({
               aria-labelledby="merchant-menu-tab-business"
               aria-label="My Business"
             >
-              <button
-                type="button"
-                className="merchant-side-user merchant-menu-user"
-                onClick={() => {
-                  onOpenAccount?.();
-                  onClose();
-                }}
-                aria-label="Account settings"
-              >
-                <span className="merchant-avatar merchant-side-user-avatar" aria-hidden="true">
-                  {initials}
-                </span>
-                <span className="merchant-side-user-copy">
-                  <span className="merchant-side-user-name">{displayName}</span>
-                  <span className="merchant-side-user-role">{ROLE_LABELS[role]}</span>
-                </span>
-                <ChevronRight
-                  size={15}
-                  strokeWidth={2.4}
-                  className="merchant-side-user-chevron"
-                  aria-hidden="true"
-                />
-              </button>
               {workspaceItems.map(renderNavItem)}
             </nav>
           ) : (
@@ -367,6 +344,30 @@ export function MerchantMobileMenu({
               </button>
             ) : null}
           </div>
+
+          <button
+            type="button"
+            className="merchant-side-user"
+            onClick={() => {
+              onOpenAccount?.();
+              onClose();
+            }}
+            aria-label="Account settings"
+          >
+            <span className="merchant-avatar merchant-side-user-avatar" aria-hidden="true">
+              {initials}
+            </span>
+            <span className="merchant-side-user-copy">
+              <span className="merchant-side-user-name">{displayName}</span>
+              <span className="merchant-side-user-role">{ROLE_LABELS[role]}</span>
+            </span>
+            <ChevronRight
+              size={15}
+              strokeWidth={2.4}
+              className="merchant-side-user-chevron"
+              aria-hidden="true"
+            />
+          </button>
 
           <Link href="/help" className="merchant-menu-item" onClick={onClose}>
             <span className="merchant-menu-item-icon">

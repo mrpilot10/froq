@@ -99,6 +99,11 @@ export interface MerchantProfile {
   notifyManagerPendingApprovals: boolean;
   /** Notify owners for pending-stamp escalations. Default off. */
   notifyOwnerPendingApprovals: boolean;
+  /**
+   * On a customer's birthday: send a notification that they can earn double
+   * stamps, and award 2 stamps per visit that day. Default off.
+   */
+  birthdayDoubleStamps: boolean;
   marketingEmails: boolean;
   queueBanner?: string;
   queueBannerLink?: string;
@@ -231,6 +236,8 @@ export interface PendingApproval {
   requestedAt: string;
   stampsBefore: number;
   totalStamps: number;
+  branchId?: string | null;
+  branchName?: string | null;
 }
 
 /** Per-user merchant notification centre item. */

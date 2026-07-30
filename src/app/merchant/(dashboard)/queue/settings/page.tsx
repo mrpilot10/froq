@@ -10,12 +10,18 @@ export default function QueueSettingsPage() {
   const {
     profile,
     role,
+    branches,
+    activeBranchId,
     onSaveQueueBanner,
     onSaveQueueHours,
     entitlements,
     onPurchaseProduct,
   } = useMerchantWorkspace();
   const isOwner = role === "owner";
+  const activeBranch = branches.find((b) => b.id === activeBranchId) ?? null;
+  const branchSlug =
+    activeBranch && !activeBranch.isDefault ? activeBranch.slug : null;
+
   return (
     <QueueSettingsScreen
       profile={profile}
@@ -26,6 +32,8 @@ export default function QueueSettingsPage() {
       productEnabled={isProductEnabled(entitlements, "queue")}
       onGetStarted={isOwner ? () => onPurchaseProduct("queue") : undefined}
       onManagePlan={isOwner ? () => router.push("/merchant/queue/plan") : undefined}
+      branchSlug={branchSlug}
+      branchSelected={activeBranchId !== null}
     />
   );
 }

@@ -3106,6 +3106,26 @@ body {
 }
 
 /* ── Product rail (far-left icon column) ── */
+.merchant-rail-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 46px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.merchant-rail-brand-name {
+  display: none;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--brand-deep);
+  white-space: nowrap;
+}
+
 .merchant-rail-logo {
   width: 40px;
   height: 40px;
@@ -3130,7 +3150,8 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 0;
+  width: 100%;
 }
 
 .merchant-rail-foot {
@@ -3139,14 +3160,32 @@ body {
   align-items: center;
   gap: 8px;
   margin-top: auto;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.merchant-rail-label {
+  display: none;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .merchant-rail-divider {
   display: block;
   width: 28px;
   height: 1px;
-  margin: 4px 0;
+  margin: 0;
+  flex-shrink: 0;
   background: color-mix(in srgb, var(--brand-deep) 14%, transparent);
+}
+
+.merchant-rail-divider--head {
+  width: 28px;
 }
 
 .merchant-rail-item {
@@ -3171,7 +3210,7 @@ body {
   position: absolute;
   left: calc(100% + 12px);
   top: 50%;
-  transform: translateY(-50%) translateX(-4px);
+  transform: translateY(-50%) translateX(-12px);
   padding: 6px 10px;
   border-radius: 9px;
   background: var(--brand-deep);
@@ -3185,7 +3224,9 @@ body {
   opacity: 0;
   pointer-events: none;
   z-index: 60;
-  transition: opacity 0.14s ease, transform 0.14s ease;
+  transition:
+    opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* Little arrow pointing back at the icon. */
@@ -3194,13 +3235,15 @@ body {
   position: absolute;
   left: calc(100% + 7px);
   top: 50%;
-  transform: translateY(-50%) translateX(-4px);
+  transform: translateY(-50%) translateX(-12px);
   border: 5px solid transparent;
   border-right-color: var(--brand-deep);
   opacity: 0;
   pointer-events: none;
   z-index: 60;
-  transition: opacity 0.14s ease, transform 0.14s ease;
+  transition:
+    opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .merchant-rail-item[data-tip]:hover::after,
@@ -3213,6 +3256,45 @@ body {
 .merchant-rail-item[data-tip]:focus-visible::before {
   opacity: 1;
   transform: translateY(-50%) translateX(0);
+}
+
+/* Collapse control uses the same tip treatment in icon-only mode. */
+.merchant-rail-collapse[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 14px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-12px);
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: var(--brand-deep);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+  box-shadow: 0 10px 24px -12px rgba(15, 42, 33, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 60;
+  transition:
+    opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.merchant-rail-collapse[data-tip]:hover::after,
+.merchant-rail-collapse[data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+/* Labels are visible when expanded — suppress tips there. */
+.merchant-page--app.is-rail-expanded .merchant-rail-item[data-tip]::before,
+.merchant-page--app.is-rail-expanded .merchant-rail-item[data-tip]::after,
+.merchant-page--app.is-rail-expanded .merchant-rail-collapse[data-tip]::after {
+  content: none;
+  display: none;
 }
 
 .merchant-rail-item:hover {
@@ -3315,6 +3397,41 @@ body {
   color: var(--ink-soft);
 }
 
+.merchant-access-denied {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 4px 4px;
+}
+
+.merchant-access-denied-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: color-mix(in srgb, #d97706 14%, var(--paper));
+  color: #b45309;
+}
+
+.merchant-access-denied-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  line-height: 1.25;
+}
+
+.merchant-access-denied-sub {
+  margin: 0 0 8px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
 .merchant-menu-item--soon {
   opacity: 0.92;
 }
@@ -3344,14 +3461,17 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 40px;
-  padding: 0 8px;
+  height: 46px;
+  padding: 0;
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .merchant-sidebar-divider {
   display: block;
   height: 1px;
-  margin: 4px 8px;
+  margin: 0;
+  flex-shrink: 0;
   background: color-mix(in srgb, var(--brand-deep) 10%, transparent);
 }
 
@@ -3363,8 +3483,8 @@ body {
   height: 34px;
   border-radius: 11px;
   flex-shrink: 0;
-  background: color-mix(in srgb, var(--brand) 12%, var(--paper));
-  color: var(--brand);
+  background: color-mix(in srgb, var(--ink) 6%, var(--paper));
+  color: var(--ink-soft);
 }
 
 .merchant-sidebar-head-copy {
@@ -3423,8 +3543,9 @@ body {
 }
 
 .merchant-side-item--product.active {
-  background: color-mix(in srgb, var(--brand) 14%, transparent);
-  box-shadow: inset 3px 0 0 var(--brand);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink);
+  box-shadow: none;
 }
 
 .merchant-side-label-stack {
@@ -3445,7 +3566,7 @@ body {
 }
 
 .merchant-side-item--product.active .merchant-side-sub {
-  color: color-mix(in srgb, var(--brand) 72%, var(--ink-soft));
+  color: var(--ink-soft);
 }
 
 /* Per-product plan card in the sidebar footer. */
@@ -3684,6 +3805,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
   padding: 4px 6px 12px;
 }
 
@@ -3734,18 +3856,21 @@ body {
 
 .merchant-menu-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 4px 0;
+  padding: 8px 0 4px;
+  -webkit-overflow-scrolling: touch;
 }
 
 .merchant-menu-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  flex-shrink: 0;
   gap: 4px;
-  margin: 0 2px 2px;
+  margin: 0 2px;
   padding: 4px;
   border-radius: 14px;
   background: color-mix(in srgb, var(--brand-deep) 7%, transparent);
@@ -3925,6 +4050,7 @@ body {
 .merchant-menu-foot {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: 4px;
   margin-top: 8px;
   padding-top: 12px;
@@ -3933,6 +4059,10 @@ body {
 
 .merchant-menu-foot .merchant-side-plan {
   margin-bottom: 4px;
+}
+
+.merchant-menu-foot .merchant-side-user {
+  margin: 2px 0 6px;
 }
 
 .merchant-menu-copy,
@@ -4861,7 +4991,7 @@ body {
 .merchant-sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   flex: 1;
 }
 
@@ -4976,10 +5106,12 @@ body {
   justify-content: center;
   gap: 12px;
   width: 100%;
-  padding: 11px 12px;
+  height: 46px;
+  min-height: 46px;
+  padding: 0 12px;
   border: none;
   background: transparent;
-  border-radius: 14px;
+  border-radius: 15px;
   color: var(--ink-soft);
   font-family: inherit;
   font-size: 14px;
@@ -4990,13 +5122,19 @@ body {
 }
 
 .merchant-side-item:hover {
-  background: color-mix(in srgb, var(--brand) 6%, transparent);
-  color: var(--brand);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--ink);
 }
 
 .merchant-side-item.active {
-  background: color-mix(in srgb, var(--brand) 10%, transparent);
-  color: var(--brand);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.merchant-side-item.active:hover {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink);
 }
 
 .merchant-side-icon {
@@ -6231,7 +6369,7 @@ body {
   gap: 10px;
 }
 
-/* Loyalty dashboard quick actions (Show QR / Redeem code / Rewards). */
+/* Product home quick actions — default 2-up (e.g. reservations). */
 .merchant-quick-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6320,6 +6458,10 @@ body {
 
 .merchant-customer-search-result:disabled {
   opacity: 0.55;
+  cursor: default;
+}
+
+.merchant-customer-search-result--static {
   cursor: default;
 }
 
@@ -6421,16 +6563,16 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 13px;
-  background: color-mix(in srgb, var(--brand) 12%, var(--paper));
-  color: var(--brand);
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: #eef1f4;
+  color: var(--brand-deep, #1a2e28);
 }
 
 .queue-action-icon--accent {
-  background: color-mix(in srgb, var(--accent) 26%, var(--paper));
-  color: var(--brand-deep);
+  background: #d8f3e4;
+  color: var(--brand-deep, #1a2e28);
 }
 
 /* Bottom-sheet forms (add guest / reservation / QR). */
@@ -8041,38 +8183,183 @@ body {
     display: none;
   }
 
-  /* Far-left icon rail: product switcher. */
+  /* Far-left icon rail: product switcher.
+     Vertical rhythm mirrors `.merchant-sidebar`:
+     pad → 46px head → gap → divider → gap → first item. */
   .merchant-rail {
+    --shell-pad-y: 20px;
+    --shell-head-h: 46px;
+    --shell-gap: 10px;
+    --shell-item-h: 46px;
+    --shell-nav-gap: 8px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: var(--shell-gap);
     position: sticky;
     top: 0;
     align-self: flex-start;
     height: 100vh;
-    width: 72px;
+    width: 86px;
     flex-shrink: 0;
-    z-index: 45;
-    padding: 20px 10px;
+    z-index: 46;
+    padding: 20px;
+    overflow: visible;
     background: color-mix(in srgb, var(--brand) 7%, rgba(255, 255, 255, 0.82));
     backdrop-filter: blur(28px) saturate(180%);
     -webkit-backdrop-filter: blur(28px) saturate(180%);
     border-right: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+    transition: width 0.22s ease;
   }
 
-  /* Contextual labeled sidebar. */
-  .merchant-sidebar {
+  .merchant-rail-inner {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    align-items: center;
+    gap: var(--shell-gap);
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    /* Keep visible so icon-only hover tooltips aren’t clipped. */
+    overflow: visible;
+  }
+
+  .merchant-rail-collapse {
+    position: absolute;
+    top: calc(var(--shell-pad-y) + var(--shell-head-h) + (var(--shell-gap) / 2) - 11px);
+    right: -11px;
+    z-index: 46;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-top: 4px;
+    padding: 0;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--brand-deep) 12%, transparent);
+    background: var(--paper, #fff);
+    color: var(--brand-deep);
+    box-shadow: 0 4px 12px -6px color-mix(in srgb, var(--brand-deep) 35%, transparent);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  }
+
+  .merchant-rail-collapse:hover {
+    background: color-mix(in srgb, var(--brand) 10%, var(--paper));
+    color: var(--brand);
+  }
+
+  .merchant-rail-collapse:active {
+    transform: scale(0.94);
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail {
+    width: 220px;
+    align-items: stretch;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-inner {
+    align-items: stretch;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-brand {
+    display: grid;
+    grid-template-columns: 46px minmax(0, 1fr);
+    align-items: center;
+    justify-content: stretch;
+    gap: 12px;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-logo {
+    width: 40px;
+    height: 40px;
+    justify-self: center;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-brand-name {
+    display: inline;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-nav,
+  .merchant-page--app.is-rail-expanded .merchant-rail-foot {
+    align-items: stretch;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-foot {
+    margin-top: auto;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-divider,
+  .merchant-page--app.is-rail-expanded .merchant-rail-divider--head {
+    width: auto;
+    align-self: stretch;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-item,
+  .merchant-page--app.is-rail-expanded .merchant-rail-item--ghost {
+    width: 100%;
+    height: var(--shell-item-h);
+    min-height: var(--shell-item-h);
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 0;
+    border-radius: 15px;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-icon {
+    width: 46px;
+    height: 46px;
+    flex-shrink: 0;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-item:active {
+    transform: none;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-item:hover {
+    background: color-mix(in srgb, var(--brand) 6%, transparent);
+    color: var(--brand);
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-item.active {
+    background: #024354;
+    color: #fff;
+    box-shadow: none;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-rail-label {
+    display: block;
+    padding-right: 8px;
+    font-size: 13.5px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  /* Contextual labeled sidebar — same vertical rhythm as the product rail. */
+  .merchant-sidebar {
+    --shell-pad-y: 20px;
+    --shell-head-h: 46px;
+    --shell-gap: 10px;
+    --shell-item-h: 46px;
+    --shell-nav-gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--shell-gap);
     position: sticky;
     top: 0;
     align-self: flex-start;
     height: 100vh;
     width: 224px;
     flex-shrink: 0;
-    padding: 20px 14px;
+    z-index: 40;
+    padding: var(--shell-pad-y) 14px;
     background: rgba(255, 255, 255, 0.7);
     backdrop-filter: blur(28px) saturate(180%);
     -webkit-backdrop-filter: blur(28px) saturate(180%);
@@ -8104,6 +8391,10 @@ body {
     width: 252px;
     padding: 20px 16px;
     gap: 10px;
+  }
+
+  .merchant-page--app.is-rail-expanded .merchant-sidebar {
+    padding: 20px 16px;
   }
 
   .merchant-main {
@@ -8276,17 +8567,166 @@ body {
 
 .merchant-home-tools .merchant-quick-actions {
   margin: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .merchant-home-tools .queue-action {
-  background: color-mix(in srgb, var(--brand) 6%, var(--bg));
-  border-color: transparent;
-  box-shadow: none;
+  background: var(--paper, #fff);
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--brand-deep) 5%, transparent);
 }
 
 .merchant-home-tools .queue-action:hover {
   border-color: color-mix(in srgb, var(--brand) 22%, transparent);
-  box-shadow: none;
+  box-shadow: 0 8px 18px -14px color-mix(in srgb, var(--brand-deep) 35%, transparent);
+}
+
+.merchant-home-tools .queue-action-icon {
+  background: #eef1f4;
+  color: var(--brand-deep, #1a2e28);
+}
+
+.merchant-home-tools .queue-action-icon--accent {
+  background: #d8f3e4;
+  color: var(--brand-deep, #1a2e28);
+}
+
+.merchant-quick-actions--all {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.merchant-home-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.merchant-home-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 12px;
+  border-radius: 18px;
+  background: var(--paper);
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+  box-shadow: 0 8px 22px -18px color-mix(in srgb, var(--brand-deep) 40%, transparent);
+}
+
+.merchant-home-metric--accent {
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--accent) 24%, var(--paper)) 0%,
+      var(--paper) 72%
+    );
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.merchant-home-metric-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--brand-deep) 7%, var(--paper));
+  color: var(--brand-deep);
+}
+
+.merchant-home-metric--accent .merchant-home-metric-icon {
+  background: color-mix(in srgb, var(--accent) 34%, var(--paper));
+}
+
+.merchant-home-metric-value {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--brand-deep);
+  line-height: 1.1;
+}
+
+.merchant-home-metric-label {
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--ink-faint);
+  line-height: 1.3;
+}
+
+.merchant-home-tools .merchant-customer-search--embedded {
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+}
+
+.merchant-home-tools .merchant-customer-search-field {
+  background: color-mix(in srgb, var(--brand-deep) 3%, var(--paper));
+}
+
+.merchant-branch-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand-deep) 7%, var(--paper));
+  color: var(--brand-deep);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.merchant-approval-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.merchant-approval-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 0 2px;
+}
+
+.merchant-approval-group-head .merchant-branch-badge {
+  margin-top: 0;
+}
+
+.merchant-approval-group-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.merchant-qr-panel--locked {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 18px;
+}
+
+.merchant-qr-locked-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--brand-deep);
+}
+
+.merchant-qr-locked-sub {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.45;
+  color: var(--ink-soft);
 }
 
 .merchant-home-tools-label {
@@ -8491,10 +8931,47 @@ body {
 
 .merchant-analytics-tabs {
   margin-bottom: 4px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.merchant-analytics-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .merchant-analytics-tabs .queue-tab {
+  flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.merchant-analytics-tabs .queue-tab--soon {
+  color: var(--ink-faint);
+}
+
+.merchant-analytics-tabs .queue-tab-soon {
+  margin-left: 2px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--brand-deep);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.merchant-analytics-tabs .queue-tab.active .queue-tab-soon {
+  background: color-mix(in srgb, var(--accent) 34%, var(--paper));
+}
+
+.merchant-analytics-coming-soon {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 28px 22px;
+  margin-top: 8px;
 }
 
 .merchant-analytics-truncated {

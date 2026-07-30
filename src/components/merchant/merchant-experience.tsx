@@ -58,6 +58,7 @@ import { MerchantNotificationsDrawer } from "./notifications-drawer";
 import { OnboardingPrompt } from "./onboarding-prompt";
 import { ProductRail } from "./product-rail";
 import { ComingSoonProductDrawer } from "./coming-soon-product-drawer";
+import { AccessDeniedDrawer } from "./access-denied-drawer";
 import { MerchantProfileEditScreen } from "./profile-edit-screen";
 import { MerchantWorkspaceProvider, type MerchantWorkspaceValue } from "./merchant-workspace-context";
 import { BranchSwitcher } from "./branch-switcher";
@@ -183,10 +184,12 @@ export function MerchantExperience({
     productFromPath ?? "loyalty",
   );
   useEffect(() => {
-    if (productFromPath && productFromPath !== activeProduct) {
-      setActiveProduct(productFromPath);
-    }
-  }, [productFromPath, activeProduct]);
+    if (!productFromPath || productFromPath === activeProduct) return;
+    // Don't adopt a product the teammate isn't allowed to open — the access
+    // gate below will send them home and show the warning.
+    if (!memberCanAccessProduct(role, memberProductIds, productFromPath)) return;
+    setActiveProduct(productFromPath);
+  }, [productFromPath, activeProduct, role, memberProductIds]);
 
   // Warm the App Router cache so tab switches feel instant.
   useEffect(() => {
@@ -196,26 +199,44 @@ export function MerchantExperience({
     }
   }, [router]);
 
-  // Non-owners can't stay on owner-only workspace hubs (All customers).
-  useEffect(() => {
-    if (role === "owner") return;
-    if (OWNER_WORKSPACE_TABS.includes(activeTab)) {
-      router.replace(TAB_HREF[PRODUCT_DEFAULT_TAB[activeProduct]]);
-    }
-  }, [role, activeTab, activeProduct, router]);
-
   const allowedProducts = useMemo(
     () => accessibleProducts(role, memberProductIds, PRODUCTS.map((p) => p.id)),
     [role, memberProductIds],
   );
 
-  // Teammates with restricted product access can't stay on a product they weren't granted.
-  useEffect(() => {
-    if (memberCanAccessProduct(role, memberProductIds, activeProduct)) return;
+  const [accessDeniedOpen, setAccessDeniedOpen] = useState(false);
+
+  const goToAllowedProductHome = useCallback(() => {
     const fallback = allowedProducts[0] ?? "loyalty";
     setActiveProduct(fallback);
-    router.replace(TAB_HREF[PRODUCT_DEFAULT_TAB[fallback]]);
-  }, [role, memberProductIds, activeProduct, allowedProducts, router]);
+    const tab = PRODUCT_DEFAULT_TAB[fallback];
+    setPendingTab(tab);
+    router.replace(TAB_HREF[tab]);
+  }, [allowedProducts, router]);
+
+  const dismissAccessDenied = useCallback(() => {
+    setAccessDeniedOpen(false);
+    goToAllowedProductHome();
+  }, [goToAllowedProductHome]);
+
+  // Non-owners can't stay on owner-only workspace hubs (All customers).
+  useEffect(() => {
+    if (role === "owner") return;
+    if (!OWNER_WORKSPACE_TABS.includes(activeTab)) return;
+    setAccessDeniedOpen(true);
+    goToAllowedProductHome();
+  }, [role, activeTab, goToAllowedProductHome]);
+
+  // Teammates with restricted product access can't stay on a product they weren't granted.
+  useEffect(() => {
+    const pathBlocked =
+      !!productFromPath &&
+      !memberCanAccessProduct(role, memberProductIds, productFromPath);
+    const stateBlocked = !memberCanAccessProduct(role, memberProductIds, activeProduct);
+    if (!pathBlocked && !stateBlocked) return;
+    setAccessDeniedOpen(true);
+    goToAllowedProductHome();
+  }, [role, memberProductIds, activeProduct, productFromPath, goToAllowedProductHome]);
 
   const [profile, setProfile] = useState<MerchantProfile>(initialProfile);
   const [qrOpen, setQrOpen] = useState(false);
@@ -230,6 +251,30 @@ export function MerchantExperience({
   const [purchaseProductTarget, setPurchaseProductTarget] = useState<MerchantProduct | null>(null);
   const [comingSoonProduct, setComingSoonProduct] = useState<ComingSoonProduct | null>(null);
   const [manageView, setManageView] = useState<"branches" | "team" | null>(null);
+  const [railExpanded, setRailExpanded] = useState(true);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("froq.railExpanded");
+      // Default open; only collapse when the user previously chose icons-only.
+      if (saved === "0") setRailExpanded(false);
+      else if (saved === "1") setRailExpanded(true);
+    } catch {
+      /* private mode */
+    }
+  }, []);
+
+  const toggleRailExpanded = useCallback(() => {
+    setRailExpanded((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("froq.railExpanded", next ? "1" : "0");
+      } catch {
+        /* private mode */
+      }
+      return next;
+    });
+  }, []);
 
   // Latches: mount heavy drawers after first open so cold load skips their
   // chunks, while later close/reopen keeps exit animations + internal state.
@@ -252,20 +297,42 @@ export function MerchantExperience({
     if (manageView) setManageOpened(true);
   }, [manageView]);
 
+  const openQr = useCallback(
+    (product?: MerchantProduct) => {
+      if (!activeBranchId) {
+        toast.error("Select a branch to show its QR code.");
+        return;
+      }
+      const resolved =
+        product ?? productForPathname(pathname) ?? activeProduct;
+      setQrProduct(resolved);
+      setQrOpen(true);
+    },
+    [pathname, activeProduct, activeBranchId],
+  );
+
+  const openRedeem = useCallback(() => {
+    if (!activeBranchId) {
+      toast.error("Select a branch to redeem a reward.");
+      return;
+    }
+    setRedeemOpen(true);
+  }, [activeBranchId]);
+
   // Navigate to a tab by pushing its route (URL is the source of truth).
   const goToTab = useCallback(
     (tab: MerchantTab) => {
       if (tab === "scan") {
-        setRedeemOpen(true);
+        openRedeem();
         return;
       }
       if (OWNER_WORKSPACE_TABS.includes(tab) && role !== "owner") {
-        toast.error("Only the owner can open this page.");
+        setAccessDeniedOpen(true);
         return;
       }
       const product = productForTab(tab);
       if (product && !memberCanAccessProduct(role, memberProductIds, product)) {
-        toast.error("You don't have access to this product.");
+        setAccessDeniedOpen(true);
         return;
       }
       if (tab === pathTab) {
@@ -278,24 +345,14 @@ export function MerchantExperience({
         router.push(TAB_HREF[tab]);
       });
     },
-    [router, role, pathTab, memberProductIds],
-  );
-
-  const openQr = useCallback(
-    (product?: MerchantProduct) => {
-      const resolved =
-        product ?? productForPathname(pathname) ?? activeProduct;
-      setQrProduct(resolved);
-      setQrOpen(true);
-    },
-    [pathname, activeProduct],
+    [router, role, pathTab, memberProductIds, openRedeem],
   );
 
   // Switch product from the rail and land on that product's default tab.
   const goToProduct = useCallback(
     (product: MerchantProduct) => {
       if (!memberCanAccessProduct(role, memberProductIds, product)) {
-        toast.error("You don't have access to this product.");
+        setAccessDeniedOpen(true);
         return;
       }
       const tab = PRODUCT_DEFAULT_TAB[product];
@@ -643,7 +700,7 @@ export function MerchantExperience({
       canViewAllBranches,
       goToTab,
       onShowQr: openQr,
-      onRedeemCode: () => setRedeemOpen(true),
+      onRedeemCode: openRedeem,
       onSelectBranch,
       onManageBranches: () => setManageView("branches"),
       onManageTeam: () => setManageView("team"),
@@ -691,6 +748,7 @@ export function MerchantExperience({
       onSelectBranch,
       goToTab,
       openQr,
+      openRedeem,
       onCreateBranch,
       onUpdateBranch,
       onDeleteBranch,
@@ -736,12 +794,16 @@ export function MerchantExperience({
   }
 
   return (
-    <div className="merchant-page merchant-page--app merchant-theme">
+    <div
+      className={`merchant-page merchant-page--app merchant-theme${railExpanded ? " is-rail-expanded" : ""}`}
+    >
       <ProductRail
         activeProduct={activeProduct}
         activeTab={activeTab}
         isOwner={role === "owner"}
         allowedProducts={allowedProducts}
+        expanded={railExpanded}
+        onToggleExpand={toggleRailExpanded}
         onProductChange={goToProduct}
         onComingSoonProduct={setComingSoonProduct}
         onTabChange={goToTab}
@@ -842,7 +904,7 @@ export function MerchantExperience({
         onTabChange={goToTab}
         onProductChange={goToProduct}
         onComingSoonProduct={setComingSoonProduct}
-        onScan={() => setRedeemOpen(true)}
+        onScan={openRedeem}
         pendingCount={approvals.length}
       />
 
@@ -901,6 +963,8 @@ export function MerchantExperience({
         product={comingSoonProduct}
         onClose={() => setComingSoonProduct(null)}
       />
+
+      <AccessDeniedDrawer open={accessDeniedOpen} onClose={dismissAccessDenied} />
 
       {purchaseOpened && (
         <ProductPurchaseDrawer

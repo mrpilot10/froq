@@ -8,7 +8,7 @@ interface BranchSwitcherProps {
   branches: Branch[];
   activeBranch: Branch | null;
   canManage: boolean;
-  /** Owners (and staff with full access) can view a combined all-branches mode. */
+  /** Owners and managers with unrestricted branch access get All Branches. */
   allowAllBranches?: boolean;
   onSelect: (branchId: string | null) => void | Promise<void>;
   onAddBranch: () => void;

@@ -7,9 +7,20 @@ import { isProductEnabled } from "@/lib/merchant/entitlements";
 
 export default function ReservationSettingsPage() {
   const router = useRouter();
-  const { profile, role, entitlements, onSaveReservationSettings, onPurchaseProduct } =
-    useMerchantWorkspace();
+  const {
+    profile,
+    role,
+    branches,
+    activeBranchId,
+    entitlements,
+    onSaveReservationSettings,
+    onPurchaseProduct,
+  } = useMerchantWorkspace();
   const isOwner = role === "owner";
+  const activeBranch = branches.find((b) => b.id === activeBranchId) ?? null;
+  const branchSlug =
+    activeBranch && !activeBranch.isDefault ? activeBranch.slug : null;
+
   return (
     <ReservationSettingsScreen
       profile={profile}
@@ -17,6 +28,8 @@ export default function ReservationSettingsPage() {
       productEnabled={isProductEnabled(entitlements, "reservation")}
       onGetStarted={isOwner ? () => onPurchaseProduct("reservation") : undefined}
       onManagePlan={isOwner ? () => router.push("/merchant/reservations/plan") : undefined}
+      branchSlug={branchSlug}
+      branchSelected={activeBranchId !== null}
     />
   );
 }

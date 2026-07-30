@@ -13,6 +13,7 @@ export {
   sendStampCollectedLastWaitTime,
   sendRewardReadyWaitTime,
   sendRewardRedeemed,
+  sendBirthdayBonusStamps,
   type SendWhatsAppTemplateInput,
   type ApitxtSendWaResponse,
   type SendStampVerifiedInput,
@@ -20,4 +21,5 @@ export {
   type SendStampCollectedLastWaitTimeInput,
   type SendRewardReadyWaitTimeInput,
   type SendRewardRedeemedInput,
+  type SendBirthdayBonusStampsInput,
 } from "./notifications";

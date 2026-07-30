@@ -13,8 +13,13 @@ interface CustomerStampSearchProps {
   role: MemberRole;
   /** Render search field only (no section chrome) for embedding in another card. */
   embedded?: boolean;
-  onRequestOfferStampOtp: (customerId: string) => Promise<RequestOfferStampOtpResult>;
-  onConfirmOfferStamp: (
+  /** When false, find customers without offering stamps (All Branches). */
+  allowStamp?: boolean;
+  showBranchBadge?: boolean;
+  branchNameById?: Map<string, string>;
+  label?: string;
+  onRequestOfferStampOtp?: (customerId: string) => Promise<RequestOfferStampOtpResult>;
+  onConfirmOfferStamp?: (
     customerId: string,
     code: string,
   ) => Promise<{ ok: boolean; error?: string }>;
@@ -37,6 +42,10 @@ export function CustomerStampSearch({
   customers,
   role,
   embedded = false,
+  allowStamp = true,
+  showBranchBadge = false,
+  branchNameById,
+  label,
   onRequestOfferStampOtp,
   onConfirmOfferStamp,
 }: CustomerStampSearchProps) {
@@ -45,6 +54,12 @@ export function CustomerStampSearch({
   const hideContact = !canViewCustomerData(role);
 
   const selected = customers.find((c) => c.id === selectedId) ?? null;
+  const canStampSelected =
+    allowStamp &&
+    !!selected &&
+    canOfferStamp(selected) &&
+    !!onRequestOfferStampOtp &&
+    !!onConfirmOfferStamp;
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -61,11 +76,11 @@ export function CustomerStampSearch({
       .slice(0, 8);
   }, [customers, query, hideContact]);
 
+  const heading = label ?? (allowStamp ? "Add a stamp" : "Find a customer");
+
   const search = (
     <div className={`merchant-customer-search${embedded ? " merchant-customer-search--embedded" : ""}`}>
-      {!embedded ? null : (
-        <p className="merchant-home-tools-label">Add a stamp</p>
-      )}
+      {embedded ? <p className="merchant-home-tools-label">{heading}</p> : null}
       <label className="merchant-customer-search-field">
         <Search size={16} strokeWidth={2.2} aria-hidden />
         <input
@@ -99,17 +114,20 @@ export function CustomerStampSearch({
           </div>
         ) : (
           <ul className="merchant-customer-search-results">
-            {matches.map((customer) => (
-              <li key={customer.id}>
-                <button
-                  type="button"
-                  className="merchant-customer-search-result"
-                  disabled={!canOfferStamp(customer)}
-                  onClick={() => setSelectedId(customer.id)}
-                >
+            {matches.map((customer) => {
+              const stampable = allowStamp && canOfferStamp(customer);
+              const branchName =
+                showBranchBadge && customer.branchId
+                  ? (branchNameById?.get(customer.branchId) ?? "Branch")
+                  : null;
+              const body = (
+                <>
                   <div className="merchant-avatar">{getInitials(customer.name)}</div>
                   <div className="merchant-list-copy">
                     <div className="merchant-list-title">{customer.name}</div>
+                    {branchName ? (
+                      <span className="merchant-branch-badge">{branchName}</span>
+                    ) : null}
                     <div className="merchant-list-sub">
                       {customer.stamps}/{customer.totalStamps} stamps
                       {!hideContact
@@ -122,17 +140,37 @@ export function CustomerStampSearch({
                           : null}
                     </div>
                   </div>
-                  {canOfferStamp(customer) ? (
-                    <span className="merchant-customer-search-cta">
-                      <Stamp size={14} strokeWidth={2.3} />
-                      Stamp
-                    </span>
+                  {allowStamp ? (
+                    stampable ? (
+                      <span className="merchant-customer-search-cta">
+                        <Stamp size={14} strokeWidth={2.3} />
+                        Stamp
+                      </span>
+                    ) : (
+                      <span className="merchant-customer-search-cta is-muted">Unavailable</span>
+                    )
+                  ) : null}
+                </>
+              );
+              return (
+                <li key={customer.id}>
+                  {allowStamp ? (
+                    <button
+                      type="button"
+                      className="merchant-customer-search-result"
+                      disabled={!stampable}
+                      onClick={() => setSelectedId(customer.id)}
+                    >
+                      {body}
+                    </button>
                   ) : (
-                    <span className="merchant-customer-search-cta is-muted">Unavailable</span>
+                    <div className="merchant-customer-search-result merchant-customer-search-result--static">
+                      {body}
+                    </div>
                   )}
-                </button>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )
       ) : null}
@@ -146,34 +184,20 @@ export function CustomerStampSearch({
       ) : (
         <section className="merchant-section">
           <div className="merchant-section-head">
-            <h3 className="merchant-section-label">Find a customer</h3>
+            <h3 className="merchant-section-label">{heading}</h3>
           </div>
           {search}
         </section>
       )}
 
-      <BottomSheet
-        open={selected !== null}
-        onClose={() => setSelectedId(null)}
-        labelledBy="stamp-search-customer-name"
-        className="merchant-theme"
-      >
-        {selected ? (
-          <div className="merchant-drawer">
-            <div className="merchant-drawer-head">
-              <div className="merchant-avatar merchant-avatar--lg">
-                {getInitials(selected.name)}
-              </div>
-              <div className="merchant-drawer-head-copy">
-                <h3 id="stamp-search-customer-name" className="merchant-drawer-name">
-                  {selected.name}
-                </h3>
-                <span className="merchant-list-sub">
-                  {selected.stamps}/{selected.totalStamps} stamps
-                  {!hideContact ? ` · ${formatPhoneDisplay(selected.phone)}` : null}
-                </span>
-              </div>
-            </div>
+      {allowStamp ? (
+        <BottomSheet
+          open={selected !== null && canStampSelected}
+          onClose={() => setSelectedId(null)}
+          labelledBy="stamp-search-customer-name"
+          className="merchant-theme"
+        >
+          {selected && onRequestOfferStampOtp && onConfirmOfferStamp ? (
             <OfferStampOtp
               customerName={selected.name}
               autoSend
@@ -185,9 +209,9 @@ export function CustomerStampSearch({
               }}
               onCancel={() => setSelectedId(null)}
             />
-          </div>
-        ) : null}
-      </BottomSheet>
+          ) : null}
+        </BottomSheet>
+      ) : null}
     </>
   );
 }

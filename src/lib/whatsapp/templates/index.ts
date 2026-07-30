@@ -25,6 +25,9 @@ export type {
 export { buildStampEarnedTemplate } from "./stamp-earned";
 export type { StampEarnedTemplateInput } from "./stamp-earned";
 
+export { buildBirthdayBonusStampsTemplate } from "./birthday-bonus-stamps";
+export type { BirthdayBonusStampsTemplateInput } from "./birthday-bonus-stamps";
+
 export {
   buildQueueJoinedWhatsAppVars,
   buildQueuePartyWhatsAppVars,

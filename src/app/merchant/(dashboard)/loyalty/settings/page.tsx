@@ -7,8 +7,13 @@ import { isProductEnabled } from "@/lib/merchant/entitlements";
 
 export default function LoyaltySettingsPage() {
   const router = useRouter();
-  const { profile, role, onEditSection, entitlements, onPurchaseProduct } = useMerchantWorkspace();
+  const { profile, role, branches, activeBranchId, onEditSection, entitlements, onPurchaseProduct } =
+    useMerchantWorkspace();
   const isOwner = role === "owner";
+  const activeBranch = branches.find((b) => b.id === activeBranchId) ?? null;
+  const branchSlug =
+    activeBranch && !activeBranch.isDefault ? activeBranch.slug : null;
+
   return (
     <LoyaltySettingsScreen
       profile={profile}
@@ -18,6 +23,8 @@ export default function LoyaltySettingsPage() {
       productEnabled={isProductEnabled(entitlements, "loyalty")}
       onGetStarted={() => onPurchaseProduct("loyalty")}
       onManagePlan={isOwner ? () => router.push("/merchant/loyalty/plan") : undefined}
+      branchSlug={branchSlug}
+      branchSelected={activeBranchId !== null}
     />
   );
 }

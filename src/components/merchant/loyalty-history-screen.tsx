@@ -123,6 +123,7 @@ export function LoyaltyHistoryScreen() {
     onRequestOfferStampOtp,
     onConfirmOfferStamp,
   } = useMerchantWorkspace();
+  const allBranches = activeBranchId === null;
   const [range, setRange] = useState<RangeKey>("7d");
   const [sort, setSort] = useState<SortKey>("newest");
   const [type, setType] = useState<TypeKey>("all");
@@ -204,7 +205,9 @@ export function LoyaltyHistoryScreen() {
       <div className="tab-head">
         <h2 className="tab-title">History</h2>
         <p className="tab-sub">
-          Every stamp and reward at {profile.businessName}
+          {allBranches
+            ? `Stamps and rewards across every branch at ${profile.businessName}`
+            : `Every stamp and reward at ${profile.businessName}`}
         </p>
       </div>
 
@@ -319,6 +322,9 @@ export function LoyaltyHistoryScreen() {
 
                     <div className="lhist-copy">
                       <div className="lhist-title">{event.customerName}</div>
+                      {allBranches && event.branchName ? (
+                        <span className="merchant-branch-badge">{event.branchName}</span>
+                      ) : null}
                       {staff ? (
                         <div className="lhist-actor">
                           <span className="lhist-actor-avatar" aria-hidden>
@@ -368,8 +374,9 @@ export function LoyaltyHistoryScreen() {
           setSelectedId(null);
         }}
         onSaveNotes={onSaveCustomerNotes}
-        onRequestOfferStampOtp={onRequestOfferStampOtp}
-        onConfirmOfferStamp={onConfirmOfferStamp}
+        allowOfferStamp={!allBranches}
+        onRequestOfferStampOtp={allBranches ? undefined : onRequestOfferStampOtp}
+        onConfirmOfferStamp={allBranches ? undefined : onConfirmOfferStamp}
       />
     </div>
   );

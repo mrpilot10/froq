@@ -13,6 +13,10 @@ interface LoyaltySettingsScreenProps {
   productEnabled?: boolean;
   onGetStarted?: () => void;
   onManagePlan?: () => void;
+  /** Branch slug for the QR (`?b=`). Null for the default branch. */
+  branchSlug?: string | null;
+  /** False when viewing All Branches — QR requires a concrete branch. */
+  branchSelected?: boolean;
 }
 
 const LOYALTY_SETTINGS: Array<{
@@ -24,13 +28,13 @@ const LOYALTY_SETTINGS: Array<{
   {
     id: "loyalty",
     label: "Rewards & stamps",
-    value: "Configure offer and stamps",
+    value: "Offer, stamps, birthday bonus",
     Icon: Gift,
   },
   {
     id: "notifications",
     label: "Alerts & email",
-    value: "Stamp, approval, marketing",
+    value: "Stamp and approval alerts",
     Icon: Bell,
   },
 ];
@@ -43,6 +47,8 @@ export function LoyaltySettingsScreen({
   productEnabled,
   onGetStarted,
   onManagePlan,
+  branchSlug = null,
+  branchSelected = true,
 }: LoyaltySettingsScreenProps) {
   return (
     <div className="tab-screen">
@@ -51,7 +57,12 @@ export function LoyaltySettingsScreen({
         <p className="tab-sub">Configure your stamp program, QR, and alerts</p>
       </div>
 
-      <MerchantQrPanel profile={profile} />
+      <MerchantQrPanel
+        profile={profile}
+        branchSlug={branchSlug}
+        needsBranch
+        branchSelected={branchSelected}
+      />
 
       <div className="merchant-settings-group">
         <h3 className="merchant-settings-title">Loyalty program</h3>

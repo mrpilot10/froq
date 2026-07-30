@@ -63,7 +63,7 @@ import {
   normalizeEmail,
 } from "@/lib/auth/format";
 import { sendPasswordResetEmail, sendTeamInviteEmail } from "@/lib/email/resend";
-import { getAppOrigin } from "@/lib/app-url";
+import { getPublicAppOrigin } from "@/lib/app-url";
 import {
   ASSIGNABLE_ROLES,
   canViewCustomerData,
@@ -515,9 +515,9 @@ export async function getMerchantBundle(activeBranchId?: string | null): Promise
 const MERCHANT_ACCESS_COLUMNS =
   "id, owner_user_id, slug, business_name, owner_first_name, owner_last_name, email, phone, address, brand_color, logo_url, website_url, google_business_url, instagram_url, facebook_url, x_url, reward_title, reward_name, reward_image_url, total_stamps, restart_after_reward, reward_cooldown_value, reward_cooldown_unit, min_purchase_amount, stamp_notifications, approval_notifications, marketing_emails, queue_banner, queue_banner_link, queue_open_time, queue_close_time, queue_hours_timezone, queue_open_days, queue_auto_start, queue_auto_close, reservation_description, reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes, reservation_auto_decline_hours, reservation_whatsapp_enabled, reservation_paused";
 
-/** Optional escalation toggles — selected separately so missing migration 0064 can't take down the dashboard. */
-const MERCHANT_ESCALATION_TOGGLE_COLUMNS =
-  "notify_staff_pending_approvals, notify_manager_pending_approvals, notify_owner_pending_approvals";
+/** Optional toggles — selected separately so missing migrations can't take down the dashboard. */
+const MERCHANT_OPTIONAL_TOGGLE_COLUMNS =
+  "notify_staff_pending_approvals, notify_manager_pending_approvals, notify_owner_pending_approvals, birthday_double_stamps";
 
 /**
  * Resolve the merchant this user can access — as owner or as a team member.
@@ -557,10 +557,11 @@ async function loadEscalationToggles(
   notify_staff_pending_approvals?: boolean;
   notify_manager_pending_approvals?: boolean;
   notify_owner_pending_approvals?: boolean;
+  birthday_double_stamps?: boolean;
 }> {
   const { data, error } = await supabase
     .from("merchants")
-    .select(MERCHANT_ESCALATION_TOGGLE_COLUMNS)
+    .select(MERCHANT_OPTIONAL_TOGGLE_COLUMNS)
     .eq("id", merchantId)
     .maybeSingle();
   if (error || !data) return {};
@@ -628,6 +629,8 @@ export interface LoyaltyHistoryEvent {
   amount?: number;
   /** Reward events only — the redeem code that was used. */
   code?: string;
+  branchId?: string | null;
+  branchName?: string | null;
 }
 
 export interface LoyaltyHistoryResult {
@@ -672,7 +675,7 @@ export async function getLoyaltyHistory(input?: {
     let visitsQuery = supabase
       .from("visits")
       .select(
-        "id, customer_id, amount, created_at, performed_by_name, performed_by_role",
+        "id, customer_id, branch_id, amount, created_at, performed_by_name, performed_by_role",
         { count: "exact" },
       )
       .eq("merchant_id", merchantId)
@@ -681,7 +684,7 @@ export async function getLoyaltyHistory(input?: {
     let redemptionsQuery = supabase
       .from("redemptions")
       .select(
-        "id, customer_id, code, redeemed_at, performed_by_name, performed_by_role",
+        "id, customer_id, branch_id, code, redeemed_at, performed_by_name, performed_by_role",
         { count: "exact" },
       )
       .eq("merchant_id", merchantId)
@@ -738,6 +741,12 @@ export async function getLoyaltyHistory(input?: {
       }
     }
 
+    const { data: branchRows } = await supabase
+      .from("branches")
+      .select("id, name")
+      .eq("merchant_id", merchantId);
+    const branchNameById = new Map((branchRows ?? []).map((b) => [b.id, b.name]));
+
     const resolve = (customerId: string | null) => {
       const found = customerId ? nameById.get(customerId) : undefined;
       return {
@@ -751,6 +760,11 @@ export async function getLoyaltyHistory(input?: {
       staffRole: row.performed_by_role ? normalizeMemberRole(row.performed_by_role) : null,
     });
 
+    const branchOf = (branchId: string | null | undefined) => ({
+      branchId: branchId ?? null,
+      branchName: branchId ? (branchNameById.get(branchId) ?? null) : null,
+    });
+
     const events: LoyaltyHistoryEvent[] = [
       ...visits.map((row) => ({
         id: `stamp:${row.id}`,
@@ -758,6 +772,7 @@ export async function getLoyaltyHistory(input?: {
         customerId: row.customer_id,
         ...resolve(row.customer_id),
         ...staffOf(row),
+        ...branchOf(row.branch_id),
         atMs: new Date(row.created_at).getTime(),
         amount: Number(row.amount ?? 0),
       })),
@@ -767,6 +782,7 @@ export async function getLoyaltyHistory(input?: {
         customerId: row.customer_id,
         ...resolve(row.customer_id),
         ...staffOf(row),
+        ...branchOf(row.branch_id),
         atMs: new Date(row.redeemed_at).getTime(),
         code: row.code,
       })),
@@ -1101,6 +1117,11 @@ async function establishMerchantAccess(
     ? allBranches.filter((b) => allowedBranchIds.has(b.id))
     : allBranches;
 
+  // Combined "All branches" view is for owners and managers with unrestricted
+  // branch access only. Staff always work in a single-branch context.
+  const canViewAllBranches =
+    allowedBranchIds === null && (hasOwnerPowers || role === "manager");
+
   // Resolve the active branch. Restricted staff can never use the combined
   // "all branches" view — force them onto one of their allowed branches.
   let branchFilter: string | null = null;
@@ -1112,6 +1133,9 @@ async function establishMerchantAccess(
     }
   } else if (activeBranchId && allBranches.some((b) => b.id === activeBranchId)) {
     branchFilter = activeBranchId;
+  } else if (!canViewAllBranches) {
+    branchFilter =
+      allBranches.find((b) => b.isDefault)?.id ?? allBranches[0]?.id ?? null;
   }
 
   const access: VerifiedMerchantAccess = {
@@ -1124,7 +1148,7 @@ async function establishMerchantAccess(
     role,
     branches,
     branchFilter,
-    canViewAllBranches: allowedBranchIds === null,
+    canViewAllBranches,
     productRowsRaw: (productsRes.data ?? []) as ProductBillingRow[],
     isOwner,
     me,
@@ -1194,7 +1218,7 @@ async function loadMerchantWorkspaceData(
     .range(0, CUSTOMERS_FETCH_LIMIT - 1);
   let approvalsQuery = supabase
     .from("approvals")
-    .select("id, customer_id, stamps_before, requested_at", { count: "exact" })
+    .select("id, customer_id, branch_id, stamps_before, requested_at", { count: "exact" })
     .eq("merchant_id", merchantId)
     .eq("status", "pending")
     .order("requested_at", { ascending: true })
@@ -1286,6 +1310,10 @@ async function loadMerchantWorkspaceData(
 
   const approvals: PendingApproval[] = (approvalsRes.data ?? []).map((row) => {
     const customer = customerById.get(row.customer_id);
+    const branchId = row.branch_id ?? customer?.branchId ?? null;
+    const branchName = branchId
+      ? (access.branches.find((b) => b.id === branchId)?.name ?? null)
+      : null;
     return {
       id: row.id,
       customerId: row.customer_id,
@@ -1297,6 +1325,8 @@ async function loadMerchantWorkspaceData(
       }),
       stampsBefore: row.stamps_before,
       totalStamps: profile.totalStamps,
+      branchId,
+      branchName,
     };
   });
 
@@ -2000,12 +2030,9 @@ export async function verifyMerchantEmailVerification(
   }
 }
 
+/** Origin for email links — never localhost (invitees can't open it). */
 function siteOrigin() {
-  try {
-    return getAppOrigin();
-  } catch {
-    return process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || "http://localhost:3000";
-  }
+  return getPublicAppOrigin();
 }
 
 /**

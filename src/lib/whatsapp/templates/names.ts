@@ -17,6 +17,12 @@ export const WhatsAppTemplateName = {
   StampVerified: "loyaltycard_stamp_verified",
   /** @deprecated Use StampVerified */
   StampEarned: "loyaltycard_stamp_verified",
+  /**
+   * Birthday bonus — 2 stamps on birthday visit.
+   * Body: {{1}} first name, {{2}} café, {{3}} reward name.
+   * CTA: View Loyalty Card → https://froq.io/c/{{1}} (publicToken suffix).
+   */
+  BirthdayBonusStamps: "birthday_bonus_stamps",
   /** Last stamp collected with no wait — QR ready now. */
   RewardUnlocked: "loyaltycard_reward_unlocked_no_wait_time",
   /** Last stamp collected while a wait before QR unlock is configured. */

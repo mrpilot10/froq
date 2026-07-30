@@ -7,6 +7,8 @@ import type { PendingApproval } from "@/lib/merchant/types";
 interface ApprovalsListProps {
   approvals: PendingApproval[];
   hideContact?: boolean;
+  /** Show each approval's branch name (useful outside grouped all-branches lists). */
+  showBranchBadge?: boolean;
   onApprove: (id: string) => void | Promise<unknown>;
   onDisapprove: (id: string) => void | Promise<unknown>;
 }
@@ -16,6 +18,7 @@ type BusyState = { id: string; action: "approve" | "disapprove" } | null;
 export function ApprovalsList({
   approvals,
   hideContact = false,
+  showBranchBadge = false,
   onApprove,
   onDisapprove,
 }: ApprovalsListProps) {
@@ -59,6 +62,9 @@ export function ApprovalsList({
                   Stamp {approval.stampsBefore + 1} of {approval.totalStamps} ·{" "}
                   {approval.requestedAt}
                 </div>
+                {showBranchBadge && approval.branchName ? (
+                  <span className="merchant-branch-badge">{approval.branchName}</span>
+                ) : null}
               </div>
             </div>
             <div className="merchant-approval-actions">

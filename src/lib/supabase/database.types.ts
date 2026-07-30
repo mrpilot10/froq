@@ -90,6 +90,8 @@ export interface MerchantRow {
   notify_manager_pending_approvals?: boolean;
   /** Include owners in escalation reminders. Default false. */
   notify_owner_pending_approvals?: boolean;
+  /** Birthday double-stamp promo (notify + award 2×). Default false. */
+  birthday_double_stamps?: boolean;
   marketing_emails: boolean;
   queue_banner: string | null;
   queue_banner_link: string | null;
@@ -147,6 +149,10 @@ export interface CustomerRow {
   member_since: string;
   /** Private merchant-only notes. Never shown to the guest. */
   merchant_notes: string | null;
+  /** Date of birth (YYYY-MM-DD). Optional until collected on loyalty join. */
+  birthdate: string | null;
+  /** Year the last birthday double-stamp notification was sent. */
+  birthday_notify_year: number | null;
   created_at: string;
   /** Permanent Customer × Business public hub token (`frq_…`). Never regenerated. */
   public_token: string;
@@ -674,6 +680,7 @@ export interface Database {
           p_phone: string;
           p_email?: string | null;
           p_branch?: string | null;
+          p_birthdate?: string | null;
         };
         Returns: string;
       };

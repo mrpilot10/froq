@@ -375,11 +375,17 @@ export async function joinMerchant(
   phone: string,
   email?: string,
   branchSlug?: string | null,
+  birthdate?: string | null,
 ): Promise<{ ok: boolean; publicToken?: string; error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  const birthdateValue = birthdate?.trim() || null;
+  if (birthdateValue && !/^\d{4}-\d{2}-\d{2}$/.test(birthdateValue)) {
+    return { ok: false, error: "Enter a valid birthdate." };
+  }
 
   const { data: customerId, error } = await supabase.rpc("join_merchant", {
     p_slug: slug,
@@ -387,6 +393,7 @@ export async function joinMerchant(
     p_phone: phone,
     p_email: email?.trim() || null,
     p_branch: branchSlug?.trim() || null,
+    p_birthdate: birthdateValue,
   });
   if (error) {
     const msg = error.message ?? "";

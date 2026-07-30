@@ -13,6 +13,7 @@ import {
   sendRewardUnlocked,
   sendStampCollectedLastWaitTime,
   sendStampVerified,
+  sendBirthdayBonusStamps,
   sendWhatsAppTemplate,
 } from "@/lib/whatsapp/notifications";
 import {
@@ -236,6 +237,19 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
         customerName: customer.name,
         businessName: d.businessName,
         bookingSize: d.bookingSize,
+        publicToken: customer.publicToken,
+      });
+      return;
+    }
+    case "birthday_bonus_stamps": {
+      const d = data as CustomerNotificationDataMap["birthday_bonus_stamps"];
+      const firstName =
+        customer.name.trim().split(/\s+/).filter(Boolean)[0] || customer.name || "there";
+      await sendBirthdayBonusStamps({
+        mobile: customer.phone,
+        customerFirstName: firstName,
+        businessName: d.businessName,
+        rewardName: d.rewardName,
         publicToken: customer.publicToken,
       });
       return;

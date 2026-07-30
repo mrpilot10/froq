@@ -44,18 +44,48 @@ const QR_COPY: Record<
 interface MerchantQrPanelProps {
   profile: MerchantProfile;
   product?: MerchantProduct;
+  /** Branch slug encoded into the join URL (`?b=`). Omit for the default branch. */
+  branchSlug?: string | null;
+  /**
+   * When true (All Branches mode), hide the live QR — a code must belong to
+   * one concrete branch.
+   */
+  needsBranch?: boolean;
+  branchSelected?: boolean;
 }
 
 export function MerchantQrPanel({
   profile,
   product = "loyalty",
+  branchSlug = null,
+  needsBranch = false,
+  branchSelected = true,
 }: MerchantQrPanelProps) {
   const [view, setView] = useState<QrView>("qr");
   const [copied, setCopied] = useState(false);
-  const { qrUrl, joinUrl, displayUrl, download } = useMerchantQr(profile, product);
+  const { qrUrl, joinUrl, displayUrl, download } = useMerchantQr(
+    profile,
+    product,
+    branchSlug,
+  );
   const copy = QR_COPY[product];
   // The printable poster template only exists for loyalty.
   const posterAvailable = product === "loyalty";
+
+  if (needsBranch && !branchSelected) {
+    return (
+      <div className="merchant-settings-group">
+        <h3 className="merchant-settings-title">{copy.title}</h3>
+        <div className="panel-card merchant-qr-panel merchant-qr-panel--locked">
+          <p className="merchant-qr-locked-title">Select a branch</p>
+          <p className="merchant-qr-locked-sub">
+            QR codes are branch-specific. Switch to a single branch to show or
+            download its code.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const copyLink = async () => {
     try {

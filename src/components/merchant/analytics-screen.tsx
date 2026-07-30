@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowDownWideNarrow, ChevronDown, UserRound } from "lucide-react";
 import { getDashboardStats } from "@/app/merchant/actions";
 import { getQueueAnalytics } from "@/app/merchant/queue-actions";
@@ -8,7 +8,13 @@ import { getReservationAnalytics } from "@/app/merchant/reservation-actions";
 import { isProductEnabled } from "@/lib/merchant/entitlements";
 import type { QueueAnalyticsStats, QueueStaffOption } from "@/lib/merchant/queue-analytics";
 import type { ReservationAnalytics } from "@/lib/reservations/stats";
-import { PRODUCTS } from "@/lib/merchant/nav";
+import {
+  COMING_SOON_PRODUCTS,
+  PRODUCTS,
+  comingSoonAfterProduct,
+  comingSoonBeforeProducts,
+  type ComingSoonProduct,
+} from "@/lib/merchant/nav";
 import type {
   DashboardDateRange,
   DashboardFilteredStats,
@@ -44,6 +50,45 @@ const CHART_SORTS: { value: ChartSort; label: string }[] = [
 ];
 
 const ALL_STAFF = "__all_staff__";
+const SOON_IDS = new Set(COMING_SOON_PRODUCTS.map((p) => p.id));
+
+type AnalyticsTabId = MerchantProduct | ComingSoonProduct["id"];
+
+type AnalyticsTab =
+  | { id: MerchantProduct; name: string; Icon: (typeof PRODUCTS)[number]["Icon"]; soon: false }
+  | { id: string; name: string; Icon: ComingSoonProduct["Icon"]; soon: true; product: ComingSoonProduct };
+
+function buildAnalyticsTabs(): AnalyticsTab[] {
+  const tabs: AnalyticsTab[] = [];
+  for (const product of comingSoonBeforeProducts()) {
+    tabs.push({
+      id: product.id,
+      name: product.name,
+      Icon: product.Icon,
+      soon: true,
+      product,
+    });
+  }
+  for (const live of PRODUCTS) {
+    tabs.push({ id: live.id, name: live.name, Icon: live.Icon, soon: false });
+    for (const product of comingSoonAfterProduct(live.id)) {
+      tabs.push({
+        id: product.id,
+        name: product.name,
+        Icon: product.Icon,
+        soon: true,
+        product,
+      });
+    }
+  }
+  return tabs;
+}
+
+const ANALYTICS_TABS = buildAnalyticsTabs();
+
+function isLiveProduct(id: AnalyticsTabId): id is MerchantProduct {
+  return !SOON_IDS.has(id);
+}
 
 interface LoyaltySnapshot {
   key: string;
@@ -74,9 +119,15 @@ export function AnalyticsScreen({
   // Every product stays switchable here even when it isn't subscribed — merchants
   // run the queue before upgrading, and those numbers are real. The tab you land
   // on is the first product you actually own.
-  const [product, setProduct] = useState<MerchantProduct>(
+  const [tabId, setTabId] = useState<AnalyticsTabId>(
     () => PRODUCTS.find((item) => isProductEnabled(entitlements, item.id))?.id ?? PRODUCTS[0].id,
   );
+  const product = isLiveProduct(tabId) ? tabId : null;
+  const soonProduct = useMemo(
+    () => COMING_SOON_PRODUCTS.find((item) => item.id === tabId) ?? null,
+    [tabId],
+  );
+
   const [range, setRange] = useState<DashboardDateRange>("7d");
   const [sort, setSort] = useState<ChartSort>("chronological");
 
@@ -153,13 +204,26 @@ export function AnalyticsScreen({
   const freshReservation = reservation?.key === loyaltyKey ? reservation : null;
 
   const pending =
-    product === "loyalty" ? freshLoyalty : product === "queue" ? freshQueue : freshReservation;
-  const cached = product === "loyalty" ? loyalty : product === "queue" ? queue : reservation;
+    product === "loyalty"
+      ? freshLoyalty
+      : product === "queue"
+        ? freshQueue
+        : product === "reservation"
+          ? freshReservation
+          : true;
+  const cached =
+    product === "loyalty"
+      ? loyalty
+      : product === "queue"
+        ? queue
+        : product === "reservation"
+          ? reservation
+          : true;
 
   const loading = pending === null;
   // Only the very first load gets a skeleton. Refetches keep the previous
   // numbers on screen (dimmed) so changing range doesn't blank the page.
-  const showSkeleton = loading && cached === null;
+  const showSkeleton = Boolean(product) && loading && cached === null;
 
   // Held over from the last response so the picker doesn't blank out mid-fetch.
   const staffOptions = queue?.staffOptions ?? [];
@@ -169,6 +233,8 @@ export function AnalyticsScreen({
       ? [...staffOptions, { id: staff.id, name: staff.name, role: null }]
       : staffOptions;
 
+  const SoonIcon = soonProduct?.Icon;
+
   return (
     <div className="tab-screen merchant-dashboard">
       <div className="tab-head merchant-dashboard-head">
@@ -176,10 +242,53 @@ export function AnalyticsScreen({
           <h2 className="tab-title">Analytics</h2>
           <p className="tab-sub">{profile.businessName}</p>
         </div>
-        <div className="merchant-analytics-toolbar">
-          {showStaffPicker ? (
+        {product ? (
+          <div className="merchant-analytics-toolbar">
+            {showStaffPicker ? (
+              <div className="merchant-date-select">
+                <UserRound
+                  size={15}
+                  strokeWidth={2.2}
+                  className="merchant-analytics-sort-lead"
+                  aria-hidden="true"
+                />
+                <select
+                  className="merchant-date-select-input"
+                  aria-label="Team member"
+                  value={staff?.id ?? ALL_STAFF}
+                  onChange={(event) => {
+                    const id = event.target.value;
+                    const picked = staffChoices.find((option) => option.id === id);
+                    setStaff(id === ALL_STAFF || !picked ? null : { id, name: picked.name });
+                  }}
+                >
+                  <option value={ALL_STAFF}>All team</option>
+                  {staffChoices.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} strokeWidth={2.4} className="merchant-date-select-icon" />
+              </div>
+            ) : null}
             <div className="merchant-date-select">
-              <UserRound
+              <select
+                className="merchant-date-select-input"
+                aria-label="Date range"
+                value={range}
+                onChange={(event) => setRange(event.target.value as DashboardDateRange)}
+              >
+                {DATE_RANGES.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={16} strokeWidth={2.4} className="merchant-date-select-icon" />
+            </div>
+            <div className="merchant-date-select">
+              <ArrowDownWideNarrow
                 size={15}
                 strokeWidth={2.2}
                 className="merchant-analytics-sort-lead"
@@ -187,80 +296,56 @@ export function AnalyticsScreen({
               />
               <select
                 className="merchant-date-select-input"
-                aria-label="Team member"
-                value={staff?.id ?? ALL_STAFF}
-                onChange={(event) => {
-                  const id = event.target.value;
-                  const picked = staffChoices.find((option) => option.id === id);
-                  setStaff(id === ALL_STAFF || !picked ? null : { id, name: picked.name });
-                }}
+                aria-label="Sort activity"
+                value={sort}
+                onChange={(event) => setSort(event.target.value as ChartSort)}
               >
-                <option value={ALL_STAFF}>All team</option>
-                {staffChoices.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.name}
+                {CHART_SORTS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
                   </option>
                 ))}
               </select>
               <ChevronDown size={16} strokeWidth={2.4} className="merchant-date-select-icon" />
             </div>
-          ) : null}
-          <div className="merchant-date-select">
-            <select
-              className="merchant-date-select-input"
-              aria-label="Date range"
-              value={range}
-              onChange={(event) => setRange(event.target.value as DashboardDateRange)}
-            >
-              {DATE_RANGES.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={16} strokeWidth={2.4} className="merchant-date-select-icon" />
           </div>
-          <div className="merchant-date-select">
-            <ArrowDownWideNarrow
-              size={15}
-              strokeWidth={2.2}
-              className="merchant-analytics-sort-lead"
-              aria-hidden="true"
-            />
-            <select
-              className="merchant-date-select-input"
-              aria-label="Sort activity"
-              value={sort}
-              onChange={(event) => setSort(event.target.value as ChartSort)}
-            >
-              {CHART_SORTS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={16} strokeWidth={2.4} className="merchant-date-select-icon" />
-          </div>
-        </div>
+        ) : null}
       </div>
 
       <div className="queue-tabs merchant-analytics-tabs" role="tablist" aria-label="Product">
-        {PRODUCTS.map(({ id, name, Icon }) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={product === id}
-            className={`queue-tab${product === id ? " active" : ""}`}
-            onClick={() => setProduct(id)}
-          >
-            <Icon size={15} strokeWidth={2.3} aria-hidden="true" />
-            <span>{name}</span>
-          </button>
-        ))}
+        {ANALYTICS_TABS.map((tab) => {
+          const Icon = tab.Icon;
+          const selected = tabId === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              className={`queue-tab${selected ? " active" : ""}${tab.soon ? " queue-tab--soon" : ""}`}
+              onClick={() => setTabId(tab.id)}
+            >
+              <Icon size={15} strokeWidth={2.3} aria-hidden="true" />
+              <span>{tab.name}</span>
+              {tab.soon ? <span className="queue-tab-soon">Soon</span> : null}
+            </button>
+          );
+        })}
       </div>
 
-      {showSkeleton ? (
+      {soonProduct && SoonIcon ? (
+        <div className="panel-card merchant-analytics-coming-soon">
+          <div className="merchant-coming-soon-icon" aria-hidden>
+            <SoonIcon size={28} strokeWidth={2.1} />
+          </div>
+          <span className="merchant-coming-soon-badge">Coming soon</span>
+          <h3 className="merchant-coming-soon-name">{soonProduct.name}</h3>
+          <p className="merchant-coming-soon-headline">{soonProduct.headline}</p>
+          <p className="merchant-coming-soon-sub">
+            Analytics for this product will show up here as soon as it launches.
+          </p>
+        </div>
+      ) : showSkeleton ? (
         <AnalyticsSkeleton />
       ) : product === "queue" ? (
         <QueueAnalyticsView

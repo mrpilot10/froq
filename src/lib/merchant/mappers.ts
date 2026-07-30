@@ -59,6 +59,7 @@ export function toMerchantProfile(row: MerchantProfileSource): MerchantProfile {
     notifyStaffPendingApprovals: row.notify_staff_pending_approvals !== false,
     notifyManagerPendingApprovals: row.notify_manager_pending_approvals !== false,
     notifyOwnerPendingApprovals: row.notify_owner_pending_approvals === true,
+    birthdayDoubleStamps: row.birthday_double_stamps === true,
     marketingEmails: row.marketing_emails,
     queueBanner: row.queue_banner ?? "",
     queueBannerLink: row.queue_banner_link ?? "",
@@ -130,6 +131,8 @@ export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<Mer
     row.notify_manager_pending_approvals = patch.notifyManagerPendingApprovals;
   if (patch.notifyOwnerPendingApprovals !== undefined)
     row.notify_owner_pending_approvals = patch.notifyOwnerPendingApprovals;
+  if (patch.birthdayDoubleStamps !== undefined)
+    row.birthday_double_stamps = patch.birthdayDoubleStamps;
   if (patch.marketingEmails !== undefined) row.marketing_emails = patch.marketingEmails;
   if (patch.queueBanner !== undefined) row.queue_banner = patch.queueBanner || null;
   if (patch.queueBannerLink !== undefined)

@@ -1,16 +1,12 @@
 import "server-only";
 
 import { Resend } from "resend";
-import { getAppOrigin } from "@/lib/app-url";
+import { getPublicAppOrigin } from "@/lib/app-url";
 
 const BRAND = "#004353";
 const ACCENT = "#00f47b";
 function logoUrl() {
-  try {
-    return `${getAppOrigin()}/froq-mark.png`;
-  } catch {
-    return "https://froq.io/froq-mark.png";
-  }
+  return `${getPublicAppOrigin()}/froq-mark.png`;
 }
 const HELP_URL = "https://www.froq.io/help";
 const YEAR = new Date().getFullYear();
@@ -367,13 +363,7 @@ export async function sendEmailVerificationCode(input: {
     </p>
     <p style="margin:0 0 24px;font-size:32px;font-weight:800;letter-spacing:0.18em;color:${BRAND};">${code}</p>`,
     ctaLabel: "Open Froq",
-    ctaUrl: (() => {
-      try {
-        return getAppOrigin();
-      } catch {
-        return "https://froq.io";
-      }
-    })(),
+    ctaUrl: getPublicAppOrigin(),
     footnoteHtml: `<p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#3d5c52;">
       If you didn&apos;t request this code, you can safely ignore this email.
     </p>`,

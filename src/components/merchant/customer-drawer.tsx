@@ -36,8 +36,10 @@ interface CustomerDrawerProps {
   onBan: (id: string) => void;
   onDelete: (id: string) => void;
   onSaveNotes: (id: string, notes: string) => Promise<boolean>;
-  onRequestOfferStampOtp: (customerId: string) => Promise<RequestOfferStampOtpResult>;
-  onConfirmOfferStamp: (
+  /** When false, hide Offer stamp (e.g. All Branches view). Default true. */
+  allowOfferStamp?: boolean;
+  onRequestOfferStampOtp?: (customerId: string) => Promise<RequestOfferStampOtpResult>;
+  onConfirmOfferStamp?: (
     customerId: string,
     code: string,
   ) => Promise<{ ok: boolean; error?: string }>;
@@ -86,6 +88,7 @@ export function CustomerDrawer({
   onBan,
   onDelete,
   onSaveNotes,
+  allowOfferStamp = true,
   onRequestOfferStampOtp,
   onConfirmOfferStamp,
 }: CustomerDrawerProps) {
@@ -122,6 +125,9 @@ export function CustomerDrawer({
   }, [customer?.id, showData]);
 
   const canOfferStamp =
+    allowOfferStamp &&
+    !!onRequestOfferStampOtp &&
+    !!onConfirmOfferStamp &&
     !!customer &&
     !customer.banned &&
     customer.status !== "reward_ready" &&
@@ -370,9 +376,9 @@ export function CustomerDrawer({
             <OfferStampOtp
               customerName={customer.name}
               autoSend
-              onRequestCode={() => onRequestOfferStampOtp(customer.id)}
+              onRequestCode={() => onRequestOfferStampOtp!(customer.id)}
               onConfirm={async (code) => {
-                const result = await onConfirmOfferStamp(customer.id, code);
+                const result = await onConfirmOfferStamp!(customer.id, code);
                 if (result.ok) {
                   setOffering(false);
                   void getCustomerLoyaltyTimeline(customer.id).then((res) =>
@@ -385,6 +391,7 @@ export function CustomerDrawer({
             />
           ) : (
             <div className="merchant-drawer-actions merchant-drawer-actions--stack">
+              {allowOfferStamp ? (
               <button
                 type="button"
                 className="merchant-action-btn merchant-action-btn--approve merchant-action-btn--block"
@@ -403,6 +410,7 @@ export function CustomerDrawer({
                 <Stamp size={16} strokeWidth={2.3} />
                 Offer stamp
               </button>
+              ) : null}
               {canModerate ? (
                 <div className="merchant-drawer-actions">
                   {customer.banned ? (

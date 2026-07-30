@@ -63,6 +63,7 @@ export function JoinScreen({
   const [otp, setOtp] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [birthdate, setBirthdate] = useState("");
   const [authedPhone, setAuthedPhone] = useState("");
   const [error, setError] = useState("");
   const [isReturningMember, setIsReturningMember] = useState(false);
@@ -183,9 +184,18 @@ export function JoinScreen({
       setError("Enter a valid email address.");
       return;
     }
+    if (!birthdate) {
+      setError("Please enter your birthdate.");
+      return;
+    }
+    const birth = new Date(`${birthdate}T00:00:00`);
+    if (Number.isNaN(birth.getTime()) || birth > new Date()) {
+      setError("Enter a valid birthdate.");
+      return;
+    }
     setError("");
     setStep("joining");
-    const res = await joinMerchant(slug, name.trim(), e164, email.trim(), branchSlug);
+    const res = await joinMerchant(slug, name.trim(), e164, email.trim(), branchSlug, birthdate);
     if (!res.ok) {
       setError(res.error ?? "Could not join. Please try again.");
       setStep("signup");
@@ -197,7 +207,7 @@ export function JoinScreen({
       slug,
       nextPath,
     });
-  }, [name, email, slug, e164, businessName, router, branchSlug, nextPath]);
+  }, [name, email, birthdate, slug, e164, businessName, router, branchSlug, nextPath]);
 
   return (
     <div className="loyalty-page">
@@ -375,6 +385,23 @@ export function JoinScreen({
                     }}
                   />
                 </div>
+              </label>
+              <label className="auth-field">
+                <span className="auth-label">Birthdate</span>
+                <input
+                  className="auth-input"
+                  type="date"
+                  autoComplete="bday"
+                  max={new Date().toISOString().slice(0, 10)}
+                  value={birthdate}
+                  onChange={(e) => {
+                    setBirthdate(e.target.value);
+                    setError("");
+                  }}
+                />
+                <span className="merchant-field-hint">
+                  So the store can send you birthday rewards
+                </span>
               </label>
               <label className="auth-field">
                 <span className="auth-label">Mobile number</span>

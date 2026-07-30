@@ -34,6 +34,8 @@ interface ReservationSettingsScreenProps {
   productEnabled?: boolean;
   onGetStarted?: () => void;
   onManagePlan?: () => void;
+  branchSlug?: string | null;
+  branchSelected?: boolean;
 }
 
 export function ReservationSettingsScreen({
@@ -42,6 +44,8 @@ export function ReservationSettingsScreen({
   productEnabled,
   onGetStarted,
   onManagePlan,
+  branchSlug = null,
+  branchSelected = true,
 }: ReservationSettingsScreenProps) {
   const [settings, setSettings] = useState<ReservationSettings>(() =>
     reservationSettingsFromProfile(profile),
@@ -107,7 +111,13 @@ export function ReservationSettingsScreen({
         <p className="tab-sub">Control when guests can book and what they can tell you</p>
       </div>
 
-      <MerchantQrPanel profile={profile} product="reservation" />
+      <MerchantQrPanel
+        profile={profile}
+        product="reservation"
+        branchSlug={branchSlug}
+        needsBranch
+        branchSelected={branchSelected}
+      />
 
       <div className="merchant-settings-group">
         <h3 className="merchant-settings-title">Reservation setup</h3>

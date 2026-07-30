@@ -18,6 +18,11 @@ const SORT_LABELS: Record<SortKey, string> = {
 interface CustomersScreenProps {
   customers: MerchantCustomer[];
   role: MemberRole;
+  /** Show branch name on each row (All Branches mode). */
+  showBranchBadge?: boolean;
+  branchNameById?: Map<string, string>;
+  /** Hide offer-stamp actions when no single branch is selected. */
+  hideOfferStamp?: boolean;
   onBanCustomer: (id: string) => void;
   onDeleteCustomer: (id: string) => void;
   onSaveCustomerNotes: (id: string, notes: string) => Promise<boolean>;
@@ -108,6 +113,9 @@ function exportCsv(customers: MerchantCustomer[], includeContact: boolean) {
 export function CustomersScreen({
   customers,
   role,
+  showBranchBadge = false,
+  branchNameById,
+  hideOfferStamp = false,
   onBanCustomer,
   onDeleteCustomer,
   onSaveCustomerNotes,
@@ -273,12 +281,19 @@ export function CustomersScreen({
                             <span className={`merchant-badge ${badge.className}`}>{badge.label}</span>
                           ) : null}
                         </div>
+                        {showBranchBadge && customer.branchId ? (
+                          <span className="merchant-branch-badge">
+                            {branchNameById?.get(customer.branchId) ?? "Branch"}
+                          </span>
+                        ) : null}
                         {showData ? (
                           <span className="merchant-list-sub">
                             Member since {customer.memberSince}
                           </span>
                         ) : (
-                          <span className="merchant-list-sub">Tap to offer stamp</span>
+                          <span className="merchant-list-sub">
+                            {hideOfferStamp ? "View only in All branches" : "Tap to offer stamp"}
+                          </span>
                         )}
                       </div>
 
@@ -341,8 +356,9 @@ export function CustomersScreen({
           setSelectedId(null);
         }}
         onSaveNotes={onSaveCustomerNotes}
-        onRequestOfferStampOtp={onRequestOfferStampOtp}
-        onConfirmOfferStamp={onConfirmOfferStamp}
+        allowOfferStamp={!hideOfferStamp}
+        onRequestOfferStampOtp={hideOfferStamp ? undefined : onRequestOfferStampOtp}
+        onConfirmOfferStamp={hideOfferStamp ? undefined : onConfirmOfferStamp}
       />
     </div>
   );

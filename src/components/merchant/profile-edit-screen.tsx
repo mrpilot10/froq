@@ -427,6 +427,12 @@ export function MerchantProfileEditScreen({
                 </span>
               </div>
             ) : null}
+            <ToggleRow
+              label="Birthday double stamps"
+              description="On a customer's birthday, notify them they can earn double stamps — and award 2 stamps per visit that day"
+              checked={profile.birthdayDoubleStamps}
+              onChange={(v) => updateField("birthdayDoubleStamps", v)}
+            />
           </>
         )}
 
