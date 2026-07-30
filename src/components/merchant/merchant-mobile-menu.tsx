@@ -13,6 +13,7 @@ import {
   TAB_HREF,
   comingSoonAfterProduct,
   comingSoonBeforeProducts,
+  isWorkspaceTab,
   workspaceNavForRole,
   type ComingSoonProduct,
   type NavItem,
@@ -71,6 +72,7 @@ export function MerchantMobileMenu({
   onClose,
 }: MerchantMobileMenuProps) {
   const [mounted, setMounted] = useState(false);
+  const [menuPanel, setMenuPanel] = useState<"business" | "products">("business");
   const product = PRODUCTS.find((p) => p.id === activeProduct) ?? PRODUCTS[0];
   const entitlement = entitlements[activeProduct];
   const enabled = isProductEnabled(entitlements, activeProduct);
@@ -93,6 +95,11 @@ export function MerchantMobileMenu({
   const initials = getInitials(displayName);
 
   useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    if (!open) return;
+    setMenuPanel(isWorkspaceTab(activeTab) ? "business" : "products");
+  }, [open, activeTab]);
 
   useEffect(() => {
     if (!open) return;
@@ -168,89 +175,126 @@ export function MerchantMobileMenu({
         </div>
 
         <div className="merchant-menu-scroll">
-          <nav className="merchant-menu-group" aria-label="Products">
-            <span className="merchant-menu-label">Products</span>
-            {comingSoonBeforeProducts().map((item) => {
-              const Icon = item.Icon;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className="merchant-menu-item merchant-menu-item--product"
-                  onClick={() => {
-                    onComingSoonProduct?.(item);
-                    onClose();
-                  }}
-                >
-                  <span className="merchant-menu-item-icon">
-                    <Icon size={19} strokeWidth={2} />
-                  </span>
-                  <span className="merchant-menu-item-stack">
-                    <span>
-                      {item.name}
-                      <span className="merchant-menu-soon-pill">Coming soon</span>
-                    </span>
-                    <span className="merchant-menu-item-sub">{item.headline}</span>
-                  </span>
-                </button>
-              );
-            })}
-            {visibleProducts.map(({ id, name, tagline, Icon }) => {
-              const isActive = activeProduct === id;
-              return (
-                <Fragment key={id}>
-                  <Link
-                    href={TAB_HREF[PRODUCT_DEFAULT_TAB[id]]}
-                    prefetch
-                    className={`merchant-menu-item merchant-menu-item--product${isActive ? " active" : ""}`}
-                    aria-current={isActive ? "true" : undefined}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      selectProduct(id);
+          <div className="merchant-menu-tabs" role="tablist" aria-label="Menu sections">
+            <button
+              type="button"
+              role="tab"
+              id="merchant-menu-tab-business"
+              aria-selected={menuPanel === "business"}
+              aria-controls="merchant-menu-panel-business"
+              className={`merchant-menu-tab${menuPanel === "business" ? " active" : ""}`}
+              onClick={() => setMenuPanel("business")}
+            >
+              My Business
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="merchant-menu-tab-products"
+              aria-selected={menuPanel === "products"}
+              aria-controls="merchant-menu-panel-products"
+              className={`merchant-menu-tab${menuPanel === "products" ? " active" : ""}`}
+              onClick={() => setMenuPanel("products")}
+            >
+              Products
+            </button>
+          </div>
+
+          {menuPanel === "business" ? (
+            <nav
+              id="merchant-menu-panel-business"
+              className="merchant-menu-group"
+              role="tabpanel"
+              aria-labelledby="merchant-menu-tab-business"
+              aria-label="My Business"
+            >
+              {workspaceItems.map(renderNavItem)}
+            </nav>
+          ) : (
+            <nav
+              id="merchant-menu-panel-products"
+              className="merchant-menu-group"
+              role="tabpanel"
+              aria-labelledby="merchant-menu-tab-products"
+              aria-label="Products"
+            >
+              {comingSoonBeforeProducts().map((item) => {
+                const Icon = item.Icon;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="merchant-menu-item merchant-menu-item--product"
+                    onClick={() => {
+                      onComingSoonProduct?.(item);
+                      onClose();
                     }}
                   >
                     <span className="merchant-menu-item-icon">
-                      <Icon size={19} strokeWidth={isActive ? 2.4 : 2} />
+                      <Icon size={19} strokeWidth={2} />
                     </span>
                     <span className="merchant-menu-item-stack">
-                      <span>{name}</span>
-                      <span className="merchant-menu-item-sub">{tagline}</span>
+                      <span>
+                        {item.name}
+                        <span className="merchant-menu-soon-pill">Coming soon</span>
+                      </span>
+                      <span className="merchant-menu-item-sub">{item.headline}</span>
                     </span>
-                  </Link>
-                  {comingSoonAfterProduct(id).map((item) => {
-                    const SoonIcon = item.Icon;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        className="merchant-menu-item merchant-menu-item--product"
-                        onClick={() => {
-                          onComingSoonProduct?.(item);
-                          onClose();
-                        }}
-                      >
-                        <span className="merchant-menu-item-icon">
-                          <SoonIcon size={19} strokeWidth={2} />
-                        </span>
-                        <span className="merchant-menu-item-stack">
-                          <span>
-                            {item.name}
-                            <span className="merchant-menu-soon-pill">Coming soon</span>
+                  </button>
+                );
+              })}
+              {visibleProducts.map(({ id, name, tagline, Icon }) => {
+                const isActive = activeProduct === id;
+                return (
+                  <Fragment key={id}>
+                    <Link
+                      href={TAB_HREF[PRODUCT_DEFAULT_TAB[id]]}
+                      prefetch
+                      className={`merchant-menu-item merchant-menu-item--product${isActive ? " active" : ""}`}
+                      aria-current={isActive ? "true" : undefined}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        selectProduct(id);
+                      }}
+                    >
+                      <span className="merchant-menu-item-icon">
+                        <Icon size={19} strokeWidth={isActive ? 2.4 : 2} />
+                      </span>
+                      <span className="merchant-menu-item-stack">
+                        <span>{name}</span>
+                        <span className="merchant-menu-item-sub">{tagline}</span>
+                      </span>
+                    </Link>
+                    {comingSoonAfterProduct(id).map((item) => {
+                      const SoonIcon = item.Icon;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className="merchant-menu-item merchant-menu-item--product"
+                          onClick={() => {
+                            onComingSoonProduct?.(item);
+                            onClose();
+                          }}
+                        >
+                          <span className="merchant-menu-item-icon">
+                            <SoonIcon size={19} strokeWidth={2} />
                           </span>
-                          <span className="merchant-menu-item-sub">{item.headline}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </Fragment>
-              );
-            })}
-          </nav>
-
-          <nav className="merchant-menu-group" aria-label="Workspace">
-            <span className="merchant-menu-label">Workspace</span>
-            {workspaceItems.map(renderNavItem)}
-          </nav>
+                          <span className="merchant-menu-item-stack">
+                            <span>
+                              {item.name}
+                              <span className="merchant-menu-soon-pill">Coming soon</span>
+                            </span>
+                            <span className="merchant-menu-item-sub">{item.headline}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </Fragment>
+                );
+              })}
+            </nav>
+          )}
         </div>
 
         <div className="merchant-menu-foot">
