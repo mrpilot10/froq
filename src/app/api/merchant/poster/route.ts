@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getPublicAppOrigin } from "@/lib/app-url";
+import { resolveMerchantId } from "@/lib/merchant/server-context";
 import { generatePoster } from "@/lib/merchant/poster";
 
 export const runtime = "nodejs";
@@ -13,13 +15,11 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-function loyaltyUrlFor(slug: string, request: Request) {
-  const base =
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") || new URL(request.url).origin;
-  return `${base}/join/${slug}`;
+function loyaltyUrlFor(slug: string) {
+  return `${getPublicAppOrigin()}/join/${slug}`;
 }
 
-export async function GET(request: Request) {
+export async function GET() {
   try {
     const supabase = await createClient();
     const {
@@ -29,17 +29,23 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
     }
 
+    // Owners and invited teammates (staff/managers) both resolve via membership.
+    const merchantId = await resolveMerchantId(supabase, user.id);
+    if (!merchantId) {
+      return NextResponse.json({ error: "Merchant account not found." }, { status: 404 });
+    }
+
     const { data: merchant } = await supabase
       .from("merchants")
       .select("slug, business_name")
-      .eq("owner_user_id", user.id)
+      .eq("id", merchantId)
       .maybeSingle();
     if (!merchant) {
       return NextResponse.json({ error: "Merchant account not found." }, { status: 404 });
     }
 
     const slug = merchant.slug || slugify(merchant.business_name ?? "") || "shop";
-    const loyaltyUrl = loyaltyUrlFor(slug, request);
+    const loyaltyUrl = loyaltyUrlFor(slug);
     const poster = await generatePoster(loyaltyUrl);
 
     // Copy into a clean ArrayBuffer-backed view so the PNG is streamed byte-for

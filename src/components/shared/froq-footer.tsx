@@ -10,16 +10,21 @@ export function FroqFooter({ className }: FroqFooterProps) {
     <div className={className ? `footer froq-footer ${className}` : "footer froq-footer"}>
       <span>
         Powered by{" "}
-        <span className="froq-footer-brand">
+        <a
+          href="https://www.froq.io"
+          target="_blank"
+          rel="noreferrer"
+          className="froq-footer-brand"
+        >
           <Image
             src={FROQ_LOGO_SRC}
-            alt="Froq"
+            alt=""
             width={14}
             height={14}
             className="froq-footer-logo"
           />
           <b>froq.io</b>
-        </span>
+        </a>
       </span>
     </div>
   );

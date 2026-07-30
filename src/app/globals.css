@@ -717,6 +717,14 @@ body {
   align-items: center;
   gap: 4px;
   vertical-align: middle;
+  color: inherit;
+  text-decoration: none;
+}
+
+.froq-footer-brand:hover,
+.froq-footer-brand:focus-visible {
+  color: inherit;
+  text-decoration: none;
 }
 
 .footer b {
