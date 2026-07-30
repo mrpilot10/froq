@@ -13,9 +13,12 @@ import { DeviceSetupRows, useDeviceSetup } from "./device-setup-rows";
 interface MerchantProfileEditScreenProps {
   section: MerchantEditSection;
   profile: MerchantProfile;
+  accountFirstName?: string;
+  accountLastName?: string;
   onChange: (profile: MerchantProfile) => void;
   onClose: () => void;
   onSave: () => void;
+  onAccountNameUpdated?: (firstName: string, lastName: string) => void;
 }
 
 const SECTION_META: Record<
@@ -40,7 +43,7 @@ const SECTION_META: Record<
   },
   account: {
     title: "Account settings",
-    subtitle: "Login and contact preferences",
+    subtitle: "Name, login, and contact preferences",
   },
 };
 
@@ -124,9 +127,12 @@ function PlainField({ label, value, onChange, type = "text", placeholder, inputM
 export function MerchantProfileEditScreen({
   section,
   profile,
+  accountFirstName = "",
+  accountLastName = "",
   onChange,
   onClose,
   onSave,
+  onAccountNameUpdated,
 }: MerchantProfileEditScreenProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rewardImageInputRef = useRef<HTMLInputElement>(null);
@@ -476,7 +482,10 @@ export function MerchantProfileEditScreen({
           <AccountSettingsPanel
             email={profile.email}
             phone={profile.phone}
+            firstName={accountFirstName}
+            lastName={accountLastName}
             onPhoneUpdated={(phone) => onChange({ ...profile, phone })}
+            onNameUpdated={onAccountNameUpdated}
           />
         )}
           </div>

@@ -16,6 +16,8 @@ export interface MerchantMember {
   id: string;
   userId: string;
   name: string;
+  firstName: string;
+  lastName: string;
   email: string;
   role: MemberRole;
   /** empty = access to all branches. */

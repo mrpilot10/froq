@@ -239,6 +239,7 @@ export type MerchantBundle =
       /** empty = all products; owners always empty. */
       memberProductIds: MerchantProduct[];
       justJoined: boolean;
+      currentUserId: string;
     };
 
 function hasMerchantOnboarding(user: { app_metadata?: Record<string, unknown> }) {
@@ -402,6 +403,7 @@ export type MerchantSessionResult =
       /** empty = all products; owners always empty. */
       memberProductIds: MerchantProduct[];
       justJoined: boolean;
+      currentUserId: string;
     };
 
 export type MerchantWorkspaceDataResult =
@@ -503,6 +505,7 @@ export async function getMerchantBundle(activeBranchId?: string | null): Promise
       canViewAllBranches: session.canViewAllBranches,
       memberProductIds: session.memberProductIds,
       justJoined: session.justJoined,
+      currentUserId: session.currentUserId,
     };
   } catch {
     // Transient network/query errors must NOT look like a sign-out, otherwise a
@@ -1206,6 +1209,7 @@ async function finalizeMerchantSession(
     memberProductIds:
       access.isOwner || access.role === "owner" ? [] : (access.me?.productIds ?? []),
     justJoined,
+    currentUserId: access.userId,
   };
 }
 
@@ -2132,6 +2136,73 @@ export async function updateMerchantPassword(
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Could not update password.",
+    };
+  }
+}
+
+/** Update the signed-in teammate's first / last name across auth + membership. */
+export async function updateAccountName(input: {
+  firstName: string;
+  lastName: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const firstName = input.firstName.trim();
+    const lastName = input.lastName.trim();
+    if (!firstName) return { ok: false, error: "Enter your first name." };
+    if (!lastName) return { ok: false, error: "Enter your last name." };
+    const fullName = `${firstName} ${lastName}`;
+
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    const { error: authError } = await supabase.auth.updateUser({
+      data: {
+        ...user.user_metadata,
+        first_name: firstName,
+        last_name: lastName,
+        full_name: fullName,
+      },
+    });
+    if (authError) return { ok: false, error: authError.message };
+
+    const ctx = await currentMerchant(supabase, user.id);
+    if (ctx) {
+      const { error: memberError } = await supabase
+        .from("merchant_members")
+        .update({
+          first_name: firstName,
+          last_name: lastName,
+          name: fullName,
+        })
+        .eq("merchant_id", ctx.id)
+        .eq("user_id", user.id);
+      if (memberError) return { ok: false, error: memberError.message };
+
+      const { data: merchant } = await supabase
+        .from("merchants")
+        .select("owner_user_id")
+        .eq("id", ctx.id)
+        .maybeSingle();
+      if (merchant?.owner_user_id === user.id) {
+        const { error: ownerError } = await supabase
+          .from("merchants")
+          .update({
+            owner_first_name: firstName,
+            owner_last_name: lastName,
+          })
+          .eq("id", ctx.id);
+        if (ownerError) return { ok: false, error: ownerError.message };
+      }
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update your name.",
     };
   }
 }

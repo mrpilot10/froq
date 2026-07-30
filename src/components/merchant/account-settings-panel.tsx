@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   changeMerchantPassword,
   sendMerchantPhoneChangeOtp,
+  updateAccountName,
   verifyAndUpdateMerchantPhone,
 } from "@/app/merchant/actions";
 import { formatPhoneDisplay, isValidPassword, isValidPhone } from "@/lib/auth/format";
@@ -22,21 +23,38 @@ type PhoneStep = "edit" | "otp";
 interface AccountSettingsPanelProps {
   email: string;
   phone: string;
+  firstName?: string;
+  lastName?: string;
   onPhoneUpdated: (phone: string) => void;
+  onNameUpdated?: (firstName: string, lastName: string) => void;
 }
 
 export function AccountSettingsPanel({
   email,
   phone,
+  firstName: initialFirstName = "",
+  lastName: initialLastName = "",
   onPhoneUpdated,
+  onNameUpdated,
 }: AccountSettingsPanelProps) {
   const [panel, setPanel] = useState<Panel>("idle");
+  const [accountEmail, setAccountEmail] = useState(email);
   const [accountPhone, setAccountPhone] = useState(phone);
+  const [firstName, setFirstName] = useState(initialFirstName);
+  const [lastName, setLastName] = useState(initialLastName);
+  const [savedFirstName, setSavedFirstName] = useState(initialFirstName);
+  const [savedLastName, setSavedLastName] = useState(initialLastName);
+  const [savingName, setSavingName] = useState(false);
 
   useEffect(() => {
     setPanel("idle");
     setAccountPhone(phone);
-  }, [email, phone]);
+    setAccountEmail(email);
+    setFirstName(initialFirstName);
+    setLastName(initialLastName);
+    setSavedFirstName(initialFirstName);
+    setSavedLastName(initialLastName);
+  }, [email, phone, initialFirstName, initialLastName]);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,22 +64,104 @@ export function AccountSettingsPanel({
         data: { user },
       } = await supabase.auth.getUser();
       if (cancelled || !user) return;
-      const metaPhone =
-        typeof user.user_metadata?.phone === "string" ? user.user_metadata.phone : "";
+      if (user.email) setAccountEmail(user.email);
+      const meta = user.user_metadata ?? {};
+      const metaPhone = typeof meta.phone === "string" ? meta.phone : "";
       const resolved = metaPhone || user.phone || phone;
       if (resolved) setAccountPhone(resolved);
+
+      const metaFirst = typeof meta.first_name === "string" ? meta.first_name.trim() : "";
+      const metaLast = typeof meta.last_name === "string" ? meta.last_name.trim() : "";
+      if (metaFirst || metaLast) {
+        setFirstName(metaFirst || initialFirstName);
+        setLastName(metaLast || initialLastName);
+        setSavedFirstName(metaFirst || initialFirstName);
+        setSavedLastName(metaLast || initialLastName);
+      } else if (typeof meta.full_name === "string" && meta.full_name.trim()) {
+        const parts = meta.full_name.trim().split(/\s+/);
+        const first = parts[0] ?? "";
+        const last = parts.slice(1).join(" ");
+        setFirstName(first);
+        setLastName(last);
+        setSavedFirstName(first);
+        setSavedLastName(last);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [phone]);
+  }, [phone, initialFirstName, initialLastName]);
 
   const phoneDigits = accountPhone.replace(/\D/g, "").slice(-10);
   const phoneDisplay = phoneDigits ? formatPhoneDisplay(phoneDigits) : accountPhone || "Not set";
+  const nameDirty =
+    firstName.trim() !== savedFirstName.trim() || lastName.trim() !== savedLastName.trim();
+
+  async function saveName() {
+    setSavingName(true);
+    try {
+      const result = await updateAccountName({ firstName, lastName });
+      if (!result.ok) {
+        toast.error(result.error ?? "Could not update your name.");
+        return;
+      }
+      const nextFirst = firstName.trim();
+      const nextLast = lastName.trim();
+      setSavedFirstName(nextFirst);
+      setSavedLastName(nextLast);
+      setFirstName(nextFirst);
+      setLastName(nextLast);
+      onNameUpdated?.(nextFirst, nextLast);
+      toast.success("Name updated");
+    } finally {
+      setSavingName(false);
+    }
+  }
 
   return (
     <div className="merchant-account-panel">
-      <ReadOnlyField label="Email" value={email || "Not set"} />
+      {panel === "idle" ? (
+        <>
+          <div className="wizard-field-row">
+            <label className="auth-field">
+              <span className="auth-label">First name</span>
+              <input
+                className="auth-input"
+                type="text"
+                autoComplete="given-name"
+                maxLength={40}
+                value={firstName}
+                onChange={(event) => setFirstName(event.target.value)}
+                placeholder="First name"
+              />
+            </label>
+            <label className="auth-field">
+              <span className="auth-label">Last name</span>
+              <input
+                className="auth-input"
+                type="text"
+                autoComplete="family-name"
+                maxLength={40}
+                value={lastName}
+                onChange={(event) => setLastName(event.target.value)}
+                placeholder="Last name"
+              />
+            </label>
+          </div>
+          {nameDirty ? (
+            <button
+              type="button"
+              className="merchant-action-btn merchant-action-btn--reject"
+              disabled={savingName}
+              onClick={() => void saveName()}
+            >
+              {savingName ? "Saving…" : "Save name"}
+            </button>
+          ) : null}
+        </>
+      ) : null}
+
+      <ReadOnlyField label="Email" value={accountEmail || "Not set"} />
 
       {panel === "idle" ? (
         <>

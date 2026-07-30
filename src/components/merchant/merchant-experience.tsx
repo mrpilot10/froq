@@ -141,6 +141,7 @@ interface MerchantWorkspaceProps {
   /** empty = all products; owners always empty. */
   memberProductIds?: MerchantProduct[];
   justJoined?: boolean;
+  currentUserId?: string;
   onSelectBranch: (branchId: string | null) => void | Promise<void>;
   onRefresh: () => Promise<void>;
   onLogout?: () => void;
@@ -161,6 +162,7 @@ export function MerchantExperience({
   canViewAllBranches = true,
   memberProductIds = [],
   justJoined = false,
+  currentUserId = "",
   onSelectBranch,
   onRefresh,
   onLogout,
@@ -687,18 +689,37 @@ export function MerchantExperience({
   const activeBranch = branches.find((b) => b.id === activeBranchId) ?? null;
 
   const ownerName = `${profile.ownerFirstName} ${profile.ownerLastName}`.trim();
-  const memberName =
-    members
-      .find((m) => m.email.trim().toLowerCase() === profile.email.trim().toLowerCase())
-      ?.name.trim() || "";
-  // Owner membership was historically seeded with the business name — skip that.
+  const me = currentUserId
+    ? members.find((m) => m.userId === currentUserId)
+    : undefined;
+  const myName =
+    [me?.firstName, me?.lastName].filter(Boolean).join(" ").trim() ||
+    me?.name.trim() ||
+    "";
   const memberLooksLikePerson =
-    memberName.length > 0 &&
-    memberName.toLowerCase() !== profile.businessName.trim().toLowerCase();
+    myName.length > 0 &&
+    myName.toLowerCase() !== profile.businessName.trim().toLowerCase();
   const sidebarUserName =
-    role === "owner"
-      ? ownerName || (memberLooksLikePerson ? memberName : "") || profile.email
-      : (memberLooksLikePerson ? memberName : "") || ownerName || profile.email;
+    (memberLooksLikePerson ? myName : "") ||
+    (role === "owner" ? ownerName : "") ||
+    me?.email ||
+    profile.email;
+
+  const [accountFirstName, setAccountFirstName] = useState(
+    me?.firstName || (role === "owner" ? profile.ownerFirstName : "") || "",
+  );
+  const [accountLastName, setAccountLastName] = useState(
+    me?.lastName || (role === "owner" ? profile.ownerLastName : "") || "",
+  );
+
+  useEffect(() => {
+    setAccountFirstName(
+      me?.firstName || (role === "owner" ? profile.ownerFirstName : "") || "",
+    );
+    setAccountLastName(
+      me?.lastName || (role === "owner" ? profile.ownerLastName : "") || "",
+    );
+  }, [me?.firstName, me?.lastName, role, profile.ownerFirstName, profile.ownerLastName]);
 
   const workspaceValue = useMemo<MerchantWorkspaceValue>(
     () => ({
@@ -923,9 +944,23 @@ export function MerchantExperience({
       <MerchantProfileEditScreen
         section={editSection}
         profile={profile}
+        accountFirstName={accountFirstName}
+        accountLastName={accountLastName}
         onChange={setProfile}
         onClose={() => setEditSection(null)}
         onSave={handleSaveProfile}
+        onAccountNameUpdated={(firstName, lastName) => {
+          setAccountFirstName(firstName);
+          setAccountLastName(lastName);
+          if (role === "owner") {
+            setProfile((prev) => ({
+              ...prev,
+              ownerFirstName: firstName,
+              ownerLastName: lastName,
+            }));
+          }
+          void onRefresh();
+        }}
       />
 
       <MerchantMobileMenu

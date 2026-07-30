@@ -207,10 +207,15 @@ function toMemberProductIds(ids: MerchantMemberRow["product_ids"]): MerchantMemb
 }
 
 export function toMember(row: MerchantMemberRow): MerchantMember {
+  const firstName = row.first_name?.trim() || "";
+  const lastName = row.last_name?.trim() || "";
+  const combined = [firstName, lastName].filter(Boolean).join(" ");
   return {
     id: row.id,
     userId: row.user_id,
-    name: row.name ?? "",
+    name: (row.name ?? "").trim() || combined,
+    firstName,
+    lastName,
     email: row.email ?? "",
     role: row.role === "owner" ? "owner" : row.role === "manager" ? "manager" : "staff",
     branchIds:
