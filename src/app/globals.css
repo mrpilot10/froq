@@ -13864,14 +13864,63 @@ body {
 .merchant-account-access {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   margin-top: 2px;
   padding-top: 14px;
   border-top: 1px solid color-mix(in srgb, var(--brand-deep) 10%, transparent);
 }
 
-.merchant-account-access .auth-field {
+.merchant-account-access-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.merchant-account-access-group .auth-label {
   margin: 0;
+}
+
+.merchant-account-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.merchant-account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--brand-deep) 6%, var(--paper));
+  color: var(--brand-deep);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.merchant-account-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merchant-account-chip--role {
+  background: color-mix(in srgb, var(--brand) 12%, var(--paper));
+  color: var(--brand);
+}
+
+.merchant-account-chip--all {
+  background: transparent;
+  border: 1px dashed color-mix(in srgb, var(--brand-deep) 18%, transparent);
+  color: var(--ink-soft);
+  font-weight: 650;
 }
 
 .merchant-account-panel {

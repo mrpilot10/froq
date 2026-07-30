@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Eye, EyeOff, KeyRound, Phone } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Phone, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
   changeMerchantPassword,
@@ -38,20 +38,32 @@ interface AccountSettingsPanelProps {
   onNameUpdated?: (firstName: string, lastName: string) => void;
 }
 
-function productAccessLabel(role: MemberRole, productIds: MerchantProduct[]): string {
-  if (role === "owner" || productIds.length === 0) return "All products";
-  return productIds
-    .map((id) => PRODUCTS.find((p) => p.id === id)?.name ?? id)
-    .join(", ");
-}
-
-function branchAccessLabel(
-  role: MemberRole,
-  branchIds: string[],
-  branchNameById: Record<string, string>,
-): string {
-  if (role === "owner" || branchIds.length === 0) return "All branches";
-  return branchIds.map((id) => branchNameById[id] ?? "Branch").join(", ");
+function AccessChipGroup({
+  label,
+  chips,
+  emptyLabel,
+}: {
+  label: string;
+  chips: Array<{ id: string; name: string; Icon?: LucideIcon }>;
+  emptyLabel: string;
+}) {
+  return (
+    <div className="merchant-account-access-group">
+      <span className="auth-label">{label}</span>
+      <ul className="merchant-account-chips" aria-label={label}>
+        {chips.length === 0 ? (
+          <li className="merchant-account-chip merchant-account-chip--all">{emptyLabel}</li>
+        ) : (
+          chips.map(({ id, name, Icon }) => (
+            <li key={id} className="merchant-account-chip">
+              {Icon ? <Icon size={13} strokeWidth={2.4} aria-hidden /> : null}
+              <span>{name}</span>
+            </li>
+          ))
+        )}
+      </ul>
+    </div>
+  );
 }
 
 export function AccountSettingsPanel({
@@ -190,14 +202,43 @@ export function AccountSettingsPanel({
 
           {role ? (
             <div className="merchant-account-access" aria-label="Your access">
-              <ReadOnlyField label="Role" value={ROLE_LABELS[role]} />
-              <ReadOnlyField
+              <div className="merchant-account-access-group">
+                <span className="auth-label">Role</span>
+                <ul className="merchant-account-chips" aria-label="Role">
+                  <li className="merchant-account-chip merchant-account-chip--role">
+                    {ROLE_LABELS[role]}
+                  </li>
+                </ul>
+              </div>
+
+              <AccessChipGroup
                 label="Product access"
-                value={productAccessLabel(role, productIds)}
+                emptyLabel="All products"
+                chips={
+                  role === "owner" || productIds.length === 0
+                    ? []
+                    : productIds.map((id) => {
+                        const meta = PRODUCTS.find((p) => p.id === id);
+                        return {
+                          id,
+                          name: meta?.name ?? id,
+                          Icon: meta?.Icon,
+                        };
+                      })
+                }
               />
-              <ReadOnlyField
+
+              <AccessChipGroup
                 label="Branch access"
-                value={branchAccessLabel(role, branchIds, branchNameById)}
+                emptyLabel="All branches"
+                chips={
+                  role === "owner" || branchIds.length === 0
+                    ? []
+                    : branchIds.map((id) => ({
+                        id,
+                        name: branchNameById[id] ?? "Branch",
+                      }))
+                }
               />
             </div>
           ) : null}
