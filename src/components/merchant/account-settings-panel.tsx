@@ -12,6 +12,9 @@ import {
 import { formatPhoneDisplay, isValidPassword, isValidPhone } from "@/lib/auth/format";
 import { OTP_LENGTH, RESEND_SECONDS } from "@/lib/auth/otp/client";
 import { useResendCooldown } from "@/lib/auth/otp/use-resend-cooldown";
+import { PRODUCTS } from "@/lib/merchant/nav";
+import { ROLE_LABELS } from "@/lib/merchant/roles";
+import type { MemberRole, MerchantProduct } from "@/lib/merchant/types";
 import { createClient } from "@/lib/supabase/client";
 import { OtpInput } from "@/components/auth/otp-input";
 import { TurnstileField } from "@/components/turnstile/turnstile-field";
@@ -25,8 +28,30 @@ interface AccountSettingsPanelProps {
   phone: string;
   firstName?: string;
   lastName?: string;
+  role?: MemberRole;
+  /** Empty = all products. */
+  productIds?: MerchantProduct[];
+  /** Empty = all branches. */
+  branchIds?: string[];
+  branchNameById?: Record<string, string>;
   onPhoneUpdated: (phone: string) => void;
   onNameUpdated?: (firstName: string, lastName: string) => void;
+}
+
+function productAccessLabel(role: MemberRole, productIds: MerchantProduct[]): string {
+  if (role === "owner" || productIds.length === 0) return "All products";
+  return productIds
+    .map((id) => PRODUCTS.find((p) => p.id === id)?.name ?? id)
+    .join(", ");
+}
+
+function branchAccessLabel(
+  role: MemberRole,
+  branchIds: string[],
+  branchNameById: Record<string, string>,
+): string {
+  if (role === "owner" || branchIds.length === 0) return "All branches";
+  return branchIds.map((id) => branchNameById[id] ?? "Branch").join(", ");
 }
 
 export function AccountSettingsPanel({
@@ -34,6 +59,10 @@ export function AccountSettingsPanel({
   phone,
   firstName: initialFirstName = "",
   lastName: initialLastName = "",
+  role,
+  productIds = [],
+  branchIds = [],
+  branchNameById = {},
   onPhoneUpdated,
   onNameUpdated,
 }: AccountSettingsPanelProps) {
@@ -157,6 +186,20 @@ export function AccountSettingsPanel({
             >
               {savingName ? "Saving…" : "Save name"}
             </button>
+          ) : null}
+
+          {role ? (
+            <div className="merchant-account-access" aria-label="Your access">
+              <ReadOnlyField label="Role" value={ROLE_LABELS[role]} />
+              <ReadOnlyField
+                label="Product access"
+                value={productAccessLabel(role, productIds)}
+              />
+              <ReadOnlyField
+                label="Branch access"
+                value={branchAccessLabel(role, branchIds, branchNameById)}
+              />
+            </div>
           ) : null}
         </>
       ) : null}

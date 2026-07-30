@@ -959,6 +959,10 @@ export function MerchantExperience({
         profile={profile}
         accountFirstName={accountFirstName}
         accountLastName={accountLastName}
+        role={role}
+        productIds={me?.productIds ?? memberProductIds}
+        branchIds={me?.branchIds ?? []}
+        branches={branches}
         onChange={setProfile}
         onClose={() => setEditSection(null)}
         onSave={handleSaveProfile}

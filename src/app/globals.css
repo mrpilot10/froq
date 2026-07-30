@@ -13861,6 +13861,19 @@ body {
   transform: scale(0.97);
 }
 
+.merchant-account-access {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 2px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--brand-deep) 10%, transparent);
+}
+
+.merchant-account-access .auth-field {
+  margin: 0;
+}
+
 .merchant-account-panel {
   display: flex;
   flex-direction: column;

@@ -6,7 +6,13 @@ import Image from "next/image";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
 import { fileToLogoDataUrl } from "@/lib/merchant/image";
-import type { MerchantEditSection, MerchantProfile } from "@/lib/merchant/types";
+import type {
+  Branch,
+  MemberRole,
+  MerchantEditSection,
+  MerchantProduct,
+  MerchantProfile,
+} from "@/lib/merchant/types";
 import { AccountSettingsPanel } from "./account-settings-panel";
 import { DeviceSetupRows, useDeviceSetup } from "./device-setup-rows";
 
@@ -15,6 +21,10 @@ interface MerchantProfileEditScreenProps {
   profile: MerchantProfile;
   accountFirstName?: string;
   accountLastName?: string;
+  role?: MemberRole;
+  productIds?: MerchantProduct[];
+  branchIds?: string[];
+  branches?: Branch[];
   onChange: (profile: MerchantProfile) => void;
   onClose: () => void;
   onSave: () => void;
@@ -129,6 +139,10 @@ export function MerchantProfileEditScreen({
   profile,
   accountFirstName = "",
   accountLastName = "",
+  role,
+  productIds = [],
+  branchIds = [],
+  branches = [],
   onChange,
   onClose,
   onSave,
@@ -484,6 +498,10 @@ export function MerchantProfileEditScreen({
             phone={profile.phone}
             firstName={accountFirstName}
             lastName={accountLastName}
+            role={role}
+            productIds={productIds}
+            branchIds={branchIds}
+            branchNameById={Object.fromEntries(branches.map((b) => [b.id, b.name]))}
             onPhoneUpdated={(phone) => onChange({ ...profile, phone })}
             onNameUpdated={onAccountNameUpdated}
           />
