@@ -18,7 +18,7 @@ export interface StampEarnedTemplateInput {
 }
 
 /**
- * Builds body + button variables for loyaltycard_stamp_verified.
+ * Builds body + button variables for loyaltycard_stamp_verified_1.
  *
  * Body:
  *   {{1}} customer.name

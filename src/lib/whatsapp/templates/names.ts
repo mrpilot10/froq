@@ -14,9 +14,9 @@ import { customerHubUrl as absoluteCustomerHubUrl, getAppOrigin } from "@/lib/ap
  */
 export const WhatsAppTemplateName = {
   /** Fired when merchant verifies / offers a stamp. */
-  StampVerified: "loyaltycard_stamp_verified",
+  StampVerified: "loyaltycard_stamp_verified_1",
   /** @deprecated Use StampVerified */
-  StampEarned: "loyaltycard_stamp_verified",
+  StampEarned: "loyaltycard_stamp_verified_1",
   /**
    * Birthday bonus — 2 stamps on birthday visit.
    * Body: {{1}} first name, {{2}} café, {{3}} reward name.

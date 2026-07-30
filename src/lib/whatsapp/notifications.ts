@@ -77,7 +77,7 @@ function labeledBodyVariables(
   bodyParams: string[],
 ): Record<string, string> {
   const labelsByTemplate: Record<string, string[]> = {
-    loyaltycard_stamp_verified: [
+    loyaltycard_stamp_verified_1: [
       "customerName",
       "businessName",
       "currentStamps",
@@ -348,7 +348,7 @@ export interface SendStampVerifiedInput {
 }
 
 /**
- * loyaltycard_stamp_verified —
+ * loyaltycard_stamp_verified_1 —
  * body: name, business, currentStamps, requiredStamps, rewardTitle
  * Button URL {{1}} = publicToken → Meta: https://froq.io/c/{{1}}
  */
