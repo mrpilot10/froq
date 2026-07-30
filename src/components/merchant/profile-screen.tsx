@@ -19,7 +19,7 @@ const SETTINGS_GROUPS: Array<{
   items: Array<{
     id: MerchantEditSection;
     label: string;
-    value: string;
+    value: string | ((profile: MerchantProfile) => string);
     Icon: typeof Store;
   }>;
 }> = [
@@ -27,6 +27,15 @@ const SETTINGS_GROUPS: Array<{
     title: "Store",
     items: [
       { id: "business", label: "Store details", value: "Logo, color, name & address", Icon: Store },
+      {
+        id: "google",
+        label: "Google Business",
+        value: (profile) =>
+          profile.googlePlaceId
+            ? profile.businessName || "Linked"
+            : "Find your business on Google",
+        Icon: MapPin,
+      },
       { id: "links", label: "Links & social", value: "Website & socials", Icon: Link2 },
     ],
   },
@@ -152,7 +161,9 @@ export function MerchantProfileScreen({
                 </div>
                 <div className="profile-row-copy">
                   <div className="profile-row-label">{label}</div>
-                  <div className="profile-row-value profile-row-value--soft">{value}</div>
+                  <div className="profile-row-value profile-row-value--soft">
+                    {typeof value === "function" ? value(profile) : value}
+                  </div>
                 </div>
                 <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
               </button>
