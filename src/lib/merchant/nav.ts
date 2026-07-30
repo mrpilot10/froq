@@ -10,6 +10,9 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
+import type { ComponentType } from "react";
+import { AiReviewsIcon } from "./ai-reviews-icon";
+import { DigitalMenuIcon } from "./digital-menu-icon";
 import type { MerchantProduct, MerchantTab } from "./types";
 
 export interface NavItem {
@@ -25,7 +28,53 @@ export interface ProductMeta {
   Icon: LucideIcon;
 }
 
-/** Products shown in the far-left rail, in order. */
+type ProductIcon = LucideIcon | ComponentType<{ size?: number | string; strokeWidth?: number | string }>;
+
+/** Preview products shown in the rail / menus but not yet launchable. */
+export interface ComingSoonProduct {
+  id: string;
+  name: string;
+  tagline: string;
+  headline: string;
+  Icon: ProductIcon;
+  /**
+   * Where to insert in the product list.
+   * `null` = before all live products; otherwise after that product id.
+   */
+  insertAfter: MerchantProduct | null;
+}
+
+/** Coming-soon products shown in the rail / menus. */
+export const COMING_SOON_PRODUCTS: ComingSoonProduct[] = [
+  {
+    id: "digital-menu",
+    name: "Digital AI Menu",
+    tagline: "Coming soon",
+    headline: "Let Customer Talk To Your AI Powered Digital Menu",
+    Icon: DigitalMenuIcon,
+    insertAfter: null,
+  },
+  {
+    id: "ai-reviews",
+    name: "AI Reviews",
+    tagline: "Coming soon",
+    headline: "AI Review generator for Google Business",
+    Icon: AiReviewsIcon,
+    insertAfter: "reservation",
+  },
+];
+
+/** Coming-soon items that render before any live product. */
+export function comingSoonBeforeProducts(): ComingSoonProduct[] {
+  return COMING_SOON_PRODUCTS.filter((p) => p.insertAfter === null);
+}
+
+/** Coming-soon items that render immediately after a given live product. */
+export function comingSoonAfterProduct(productId: MerchantProduct): ComingSoonProduct[] {
+  return COMING_SOON_PRODUCTS.filter((p) => p.insertAfter === productId);
+}
+
+/** Live products shown in the far-left rail, in order. */
 export const PRODUCTS: ProductMeta[] = [
   { id: "loyalty", name: "Loyalty Stamps", tagline: "Repeat-visit rewards", Icon: Stamp },
   { id: "queue", name: "Queue Management", tagline: "Live waitlists", Icon: Users },
@@ -36,13 +85,13 @@ export const PRODUCTS: ProductMeta[] = [
 export const PRODUCT_NAV: Record<MerchantProduct, NavItem[]> = {
   loyalty: [
     { id: "dashboard", label: "Home", Icon: LayoutGrid },
-    { id: "loyalty-customers", label: "Customers", Icon: Users },
+    { id: "loyalty-customers", label: "Customers", Icon: ContactRound },
     { id: "loyalty-history", label: "History", Icon: History },
     { id: "loyalty-settings", label: "Settings", Icon: SlidersHorizontal },
   ],
   queue: [
     { id: "queue-home", label: "Home", Icon: LayoutGrid },
-    { id: "queue-customers", label: "Customers", Icon: Users },
+    { id: "queue-customers", label: "Customers", Icon: ContactRound },
     { id: "queue-history", label: "History", Icon: History },
     { id: "queue-settings", label: "Settings", Icon: SlidersHorizontal },
   ],

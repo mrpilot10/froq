@@ -40,6 +40,9 @@ export interface MerchantMemberRow {
   role: MemberRole;
   branch_id: string | null;
   branch_ids: string[];
+  /** Empty = all products. */
+  /** Empty = all products. Optional until migration 0063 is applied. */
+  product_ids?: MerchantProductKind[];
   name: string | null;
   email: string | null;
   first_name: string | null;
@@ -72,7 +75,6 @@ export interface MerchantRow {
   reward_name: string;
   reward_image_url: string | null;
   total_stamps: number;
-  avg_order_value: number;
   /** Allow customers to start a new stamp card after redeeming (default true). */
   restart_after_reward: boolean;
   /** Wait before next card unlocks after redemption; 0 = none. */
@@ -82,6 +84,12 @@ export interface MerchantRow {
   min_purchase_amount: number;
   stamp_notifications: boolean;
   approval_notifications: boolean;
+  /** Escalate pending stamps to staff after 3h (email + in-app). Default true. */
+  notify_staff_pending_approvals?: boolean;
+  /** Escalate pending stamps to managers after 6h. Default true. */
+  notify_manager_pending_approvals?: boolean;
+  /** Include owners in escalation reminders. Default false. */
+  notify_owner_pending_approvals?: boolean;
   marketing_emails: boolean;
   queue_banner: string | null;
   queue_banner_link: string | null;
@@ -137,6 +145,8 @@ export interface CustomerRow {
   email: string | null;
   banned: boolean;
   member_since: string;
+  /** Private merchant-only notes. Never shown to the guest. */
+  merchant_notes: string | null;
   created_at: string;
   /** Permanent Customer × Business public hub token (`frq_…`). Never regenerated. */
   public_token: string;
@@ -315,6 +325,30 @@ export interface ApprovalRow {
   resolved_at: string | null;
 }
 
+/** One active escalation wave per recipient × level. */
+export interface ApprovalEscalationSendRow {
+  id: string;
+  merchant_id: string;
+  user_id: string;
+  escalation_level: "3h" | "6h";
+  anchor_approval_id: string;
+  sent_at: string;
+}
+
+export interface MerchantInAppNotificationRow {
+  id: string;
+  merchant_id: string;
+  user_id: string;
+  title: string;
+  message: string;
+  action_label: string | null;
+  action_href: string | null;
+  kind: string;
+  escalation_level: "3h" | "6h" | null;
+  read_at: string | null;
+  created_at: string;
+}
+
 export interface RedemptionRow {
   id: string;
   merchant_id: string;
@@ -361,6 +395,7 @@ export interface CustomerOverviewRow {
   email: string | null;
   banned: boolean;
   member_since: string;
+  merchant_notes: string | null;
   created_at: string;
   stamps: number;
   status: CardStatus;
@@ -412,6 +447,7 @@ export interface Database {
           | "role"
           | "branch_id"
           | "branch_ids"
+          | "product_ids"
           | "name"
           | "email"
           | "first_name"
@@ -457,6 +493,27 @@ export interface Database {
         Row: ApprovalRow;
         Insert: Insert<ApprovalRow, "id" | "requested_at" | "resolved_at" | "status">;
         Update: Partial<ApprovalRow>;
+        Relationships: [];
+      };
+      approval_escalation_sends: {
+        Row: ApprovalEscalationSendRow;
+        Insert: Insert<ApprovalEscalationSendRow, "id" | "sent_at">;
+        Update: Partial<ApprovalEscalationSendRow>;
+        Relationships: [];
+      };
+      merchant_in_app_notifications: {
+        Row: MerchantInAppNotificationRow;
+        Insert: Insert<
+          MerchantInAppNotificationRow,
+          | "id"
+          | "created_at"
+          | "read_at"
+          | "action_label"
+          | "action_href"
+          | "kind"
+          | "escalation_level"
+        >;
+        Update: Partial<MerchantInAppNotificationRow>;
         Relationships: [];
       };
       redemptions: {

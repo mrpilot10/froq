@@ -3,12 +3,13 @@
 import { useState } from "react";
 import { ChevronDown, Check, MapPin, Pencil, Plus, Trash2, UserPlus, Users } from "lucide-react";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
-import type { Branch, MemberRole, MerchantMember } from "@/lib/merchant/types";
+import type { Branch, MemberRole, MerchantMember, MerchantProduct } from "@/lib/merchant/types";
 import {
   ASSIGNABLE_ROLES,
   ROLE_HINTS,
   ROLE_LABELS,
 } from "@/lib/merchant/roles";
+import { PRODUCTS } from "@/lib/merchant/nav";
 
 interface BranchesTeamDrawerProps {
   view: "branches" | "team" | null;
@@ -25,8 +26,14 @@ interface BranchesTeamDrawerProps {
     name?: string;
     role: MemberRole;
     branchIds?: string[];
+    productIds?: MerchantProduct[];
   }) => Promise<boolean>;
-  onUpdateMemberRole: (id: string, role: MemberRole, branchIds?: string[]) => Promise<boolean>;
+  onUpdateMemberRole: (
+    id: string,
+    role: MemberRole,
+    branchIds?: string[],
+    productIds?: MerchantProduct[],
+  ) => Promise<boolean>;
   onRemoveMember: (id: string) => Promise<boolean>;
   onClose: () => void;
 }
@@ -61,6 +68,7 @@ function BranchesPanel({
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("staff");
+  const [inviteProductIds, setInviteProductIds] = useState<MerchantProduct[]>([]);
   const [busy, setBusy] = useState(false);
   const canInvite = role === "owner";
   const atBranchLimit = branches.length >= maxBranches;
@@ -71,6 +79,7 @@ function BranchesPanel({
     setInviteOpen(false);
     setInviteEmail("");
     setInviteRole("staff");
+    setInviteProductIds([]);
     setAdding(false);
   };
 
@@ -87,6 +96,7 @@ function BranchesPanel({
         email: inviteEmail.trim(),
         role: inviteRole,
         branchIds: inviteRole === "owner" ? [] : [branchId],
+        productIds: inviteRole === "owner" ? [] : inviteProductIds,
       });
     }
     setBusy(false);
@@ -176,6 +186,11 @@ function BranchesPanel({
                     />
                   </label>
                   <RolePicker value={inviteRole} onChange={setInviteRole} />
+                  {inviteRole !== "owner" ? (
+                    <ProductAccessPicker selected={inviteProductIds} onChange={setInviteProductIds} />
+                  ) : (
+                    <p className="merchant-field-hint">Owners can access every product.</p>
+                  )}
                 </div>
               )}
             </div>
@@ -357,6 +372,14 @@ function branchSummary(branches: Branch[], branchIds: string[]): string {
   return `${branchIds.length} branches`;
 }
 
+function productSummary(productIds: MerchantProduct[]): string {
+  if (productIds.length === 0) return "All products";
+  if (productIds.length === 1) {
+    return PRODUCTS.find((p) => p.id === productIds[0])?.name ?? "1 product";
+  }
+  return `${productIds.length} products`;
+}
+
 function TeamPanel({
   branches,
   members,
@@ -368,6 +391,7 @@ function TeamPanel({
   const [email, setEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("staff");
   const [branchIds, setBranchIds] = useState<string[]>([]);
+  const [productIds, setProductIds] = useState<MerchantProduct[]>([]);
   const [busy, setBusy] = useState(false);
   const [editingMember, setEditingMember] = useState<MerchantMember | null>(null);
 
@@ -375,6 +399,7 @@ function TeamPanel({
     setEmail("");
     setInviteRole("staff");
     setBranchIds([]);
+    setProductIds([]);
     setAdding(false);
   };
 
@@ -385,6 +410,7 @@ function TeamPanel({
       email: email.trim(),
       role: inviteRole,
       branchIds,
+      productIds,
     });
     setBusy(false);
     if (ok) resetInvite();
@@ -425,7 +451,8 @@ function TeamPanel({
                 )}
               </div>
               <div className="merchant-manage-item-sub">
-                {ROLE_LABELS[member.role]} · {branchSummary(branches, member.branchIds)}
+                {ROLE_LABELS[member.role]} · {branchSummary(branches, member.branchIds)} ·{" "}
+                {productSummary(member.productIds)}
               </div>
             </div>
             {member.isPrimaryOwner ? (
@@ -460,9 +487,12 @@ function TeamPanel({
           </label>
           <RolePicker value={inviteRole} onChange={setInviteRole} />
           {inviteRole !== "owner" ? (
-            <BranchAccessPicker branches={branches} selected={branchIds} onChange={setBranchIds} />
+            <>
+              <BranchAccessPicker branches={branches} selected={branchIds} onChange={setBranchIds} />
+              <ProductAccessPicker selected={productIds} onChange={setProductIds} />
+            </>
           ) : (
-            <p className="merchant-field-hint">Owners can access every branch.</p>
+            <p className="merchant-field-hint">Owners can access every branch and product.</p>
           )}
           <div className="merchant-manage-form-actions">
             <button
@@ -582,6 +612,51 @@ function BranchAccessPicker({
   );
 }
 
+function ProductAccessPicker({
+  selected,
+  onChange,
+}: {
+  selected: MerchantProduct[];
+  onChange: (ids: MerchantProduct[]) => void;
+}) {
+  const allProducts = selected.length === 0;
+  const toggle = (id: MerchantProduct) => {
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  };
+  return (
+    <div className="auth-field">
+      <span className="auth-label">Product access</span>
+      <div className="branch-access-picker">
+        <button
+          type="button"
+          className={`branch-access-option${allProducts ? " is-selected" : ""}`}
+          onClick={() => onChange([])}
+        >
+          <span className="branch-access-check">{allProducts && <Check size={13} strokeWidth={3} />}</span>
+          <span className="branch-access-name">All products</span>
+        </button>
+        {PRODUCTS.map((product) => {
+          const on = selected.includes(product.id);
+          return (
+            <button
+              key={product.id}
+              type="button"
+              className={`branch-access-option${on ? " is-selected" : ""}`}
+              onClick={() => toggle(product.id)}
+            >
+              <span className="branch-access-check">{on && <Check size={13} strokeWidth={3} />}</span>
+              <span className="branch-access-name">{product.name}</span>
+            </button>
+          );
+        })}
+      </div>
+      <span className="merchant-field-hint">
+        {allProducts ? "This person can access every product." : "Only the selected products."}
+      </span>
+    </div>
+  );
+}
+
 function MemberEditSheet({
   member,
   branches,
@@ -591,7 +666,12 @@ function MemberEditSheet({
 }: {
   member: MerchantMember | null;
   branches: Branch[];
-  onSave: (id: string, role: MemberRole, branchIds?: string[]) => Promise<boolean>;
+  onSave: (
+    id: string,
+    role: MemberRole,
+    branchIds?: string[],
+    productIds?: MerchantProduct[],
+  ) => Promise<boolean>;
   onRemove: (id: string) => Promise<boolean>;
   onClose: () => void;
 }) {
@@ -625,7 +705,12 @@ function MemberEditBody({
 }: {
   member: MerchantMember;
   branches: Branch[];
-  onSave: (id: string, role: MemberRole, branchIds?: string[]) => Promise<boolean>;
+  onSave: (
+    id: string,
+    role: MemberRole,
+    branchIds?: string[],
+    productIds?: MerchantProduct[],
+  ) => Promise<boolean>;
   onRemove: (id: string) => Promise<boolean>;
   onClose: () => void;
 }) {
@@ -633,12 +718,18 @@ function MemberEditBody({
     member.role === "owner" || member.role === "manager" ? member.role : "staff",
   );
   const [branchIds, setBranchIds] = useState<string[]>(member.branchIds);
+  const [productIds, setProductIds] = useState<MerchantProduct[]>(member.productIds);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
     setBusy(true);
-    const ok = await onSave(member.id, role, role === "owner" ? [] : branchIds);
+    const ok = await onSave(
+      member.id,
+      role,
+      role === "owner" ? [] : branchIds,
+      role === "owner" ? [] : productIds,
+    );
     setBusy(false);
     if (ok) onClose();
   };
@@ -665,9 +756,12 @@ function MemberEditBody({
       <div className="merchant-edit-fields">
         <RolePicker value={role} onChange={setRole} />
         {role !== "owner" ? (
-          <BranchAccessPicker branches={branches} selected={branchIds} onChange={setBranchIds} />
+          <>
+            <BranchAccessPicker branches={branches} selected={branchIds} onChange={setBranchIds} />
+            <ProductAccessPicker selected={productIds} onChange={setProductIds} />
+          </>
         ) : (
-          <p className="merchant-field-hint">Owners can access every branch.</p>
+          <p className="merchant-field-hint">Owners can access every branch and product.</p>
         )}
       </div>
 

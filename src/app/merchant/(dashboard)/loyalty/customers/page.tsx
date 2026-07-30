@@ -6,20 +6,20 @@ import { useMerchantWorkspace } from "@/components/merchant/merchant-workspace-c
 export default function LoyaltyCustomersPage() {
   const {
     customers,
-    avgOrderValue,
     role,
     onBanCustomer,
     onDeleteCustomer,
+    onSaveCustomerNotes,
     onRequestOfferStampOtp,
     onConfirmOfferStamp,
   } = useMerchantWorkspace();
   return (
     <CustomersScreen
       customers={customers}
-      avgOrderValue={avgOrderValue}
       role={role}
       onBanCustomer={onBanCustomer}
       onDeleteCustomer={onDeleteCustomer}
+      onSaveCustomerNotes={onSaveCustomerNotes}
       onRequestOfferStampOtp={onRequestOfferStampOtp}
       onConfirmOfferStamp={onConfirmOfferStamp}
     />

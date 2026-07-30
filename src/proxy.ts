@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // Exact /merchant is redirect-only. Handle it here so client soft-nav
   // (e.g. marketing "Log in") does not land on Next's not-found UI from
   // a page that only throws NEXT_REDIRECT.

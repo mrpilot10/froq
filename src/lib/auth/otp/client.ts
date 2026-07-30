@@ -46,7 +46,10 @@ async function postJson<T extends { ok: boolean; message: string }>(
  */
 export async function sendOtp(phone: string, captchaToken?: string | null): Promise<SendOtpResult> {
   try {
-    return await postJson<SendOtpResult>("/api/send-otp", { phone, captchaToken });
+    return await postJson<SendOtpResult>("/api/send-otp", {
+      phone,
+      ...(captchaToken ? { captchaToken } : {}),
+    });
   } catch (error) {
     return {
       ok: false,
@@ -67,7 +70,11 @@ export async function verifyOtp(
   captchaToken?: string | null,
 ): Promise<VerifyOtpResult> {
   try {
-    return await postJson<VerifyOtpResult>("/api/verify-otp", { phone, otp, captchaToken });
+    return await postJson<VerifyOtpResult>("/api/verify-otp", {
+      phone,
+      otp,
+      ...(captchaToken ? { captchaToken } : {}),
+    });
   } catch (error) {
     return {
       ok: false,

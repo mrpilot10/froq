@@ -269,7 +269,7 @@ export function JoinScreen({
                 Send Verification Code
               </button>
               <p className="merchant-auth-note">
-                Each shop has its own loyalty card. Scan this store&apos;s QR to log in here.
+                By continuing, you agree to our Terms &amp; Conditions
               </p>
             </>
           )}

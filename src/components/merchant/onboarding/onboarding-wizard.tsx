@@ -161,7 +161,6 @@ export function OnboardingWizard({
         rewardTitle: draft.rewardTitle.trim() || undefined,
         rewardName: draft.rewardName.trim() || "Free reward",
         rewardImageDataUrl: draft.rewardImageDataUrl,
-        avgOrderValue: draft.avgOrderValue,
         totalStamps: draft.totalStamps,
         rewardCooldownValue: draft.rewardCooldownValue,
         rewardCooldownUnit: draft.rewardCooldownUnit,
@@ -205,7 +204,6 @@ export function OnboardingWizard({
         rewardTitle: draft.rewardTitle.trim() || "Free reward",
         rewardName: draft.rewardName.trim() || "Free reward",
         rewardImageDataUrl: draft.rewardImageDataUrl,
-        avgOrderValue: draft.avgOrderValue,
         totalStamps: draft.totalStamps,
         rewardCooldownValue: draft.rewardCooldownValue,
         rewardCooldownUnit: draft.rewardCooldownUnit,
@@ -628,18 +626,6 @@ export function OnboardingWizard({
                     this later only applies to new rewards.
                   </span>
                 </div>
-                <label className="auth-field">
-                  <span className="auth-label">Average order value (₹)</span>
-                  <input
-                    className="auth-input"
-                    type="number"
-                    min={0}
-                    step={10}
-                    value={draft.avgOrderValue}
-                    onChange={(e) => update("avgOrderValue", Number(e.target.value))}
-                  />
-                  <span className="merchant-field-hint">Used to calculate customer lifetime value.</span>
-                </label>
               </div>
             )}
 

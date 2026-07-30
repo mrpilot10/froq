@@ -50,13 +50,15 @@ export function toMerchantProfile(row: MerchantProfileSource): MerchantProfile {
     rewardName: row.reward_name,
     rewardImageDataUrl: row.reward_image_url ?? undefined,
     totalStamps: row.total_stamps,
-    avgOrderValue: Number(row.avg_order_value),
     restartAfterReward: row.restart_after_reward !== false,
     rewardCooldownValue: row.reward_cooldown_value ?? 0,
     rewardCooldownUnit: row.reward_cooldown_unit ?? "days",
     minPurchaseAmount: Number(row.min_purchase_amount ?? 0),
     stampNotifications: row.stamp_notifications,
     approvalNotifications: row.approval_notifications,
+    notifyStaffPendingApprovals: row.notify_staff_pending_approvals !== false,
+    notifyManagerPendingApprovals: row.notify_manager_pending_approvals !== false,
+    notifyOwnerPendingApprovals: row.notify_owner_pending_approvals === true,
     marketingEmails: row.marketing_emails,
     queueBanner: row.queue_banner ?? "",
     queueBannerLink: row.queue_banner_link ?? "",
@@ -112,7 +114,6 @@ export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<Mer
   if (patch.totalStamps !== undefined) {
     row.total_stamps = Math.min(20, Math.max(5, Math.floor(patch.totalStamps) || 5));
   }
-  if (patch.avgOrderValue !== undefined) row.avg_order_value = patch.avgOrderValue;
   if (patch.restartAfterReward !== undefined)
     row.restart_after_reward = patch.restartAfterReward;
   if (patch.rewardCooldownValue !== undefined)
@@ -123,6 +124,12 @@ export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<Mer
   if (patch.stampNotifications !== undefined) row.stamp_notifications = patch.stampNotifications;
   if (patch.approvalNotifications !== undefined)
     row.approval_notifications = patch.approvalNotifications;
+  if (patch.notifyStaffPendingApprovals !== undefined)
+    row.notify_staff_pending_approvals = patch.notifyStaffPendingApprovals;
+  if (patch.notifyManagerPendingApprovals !== undefined)
+    row.notify_manager_pending_approvals = patch.notifyManagerPendingApprovals;
+  if (patch.notifyOwnerPendingApprovals !== undefined)
+    row.notify_owner_pending_approvals = patch.notifyOwnerPendingApprovals;
   if (patch.marketingEmails !== undefined) row.marketing_emails = patch.marketingEmails;
   if (patch.queueBanner !== undefined) row.queue_banner = patch.queueBanner || null;
   if (patch.queueBannerLink !== undefined)
@@ -189,6 +196,13 @@ export function toBranch(row: BranchRow): Branch {
   };
 }
 
+const MEMBER_PRODUCTS = new Set(["loyalty", "queue", "reservation"]);
+
+function toMemberProductIds(ids: MerchantMemberRow["product_ids"]): MerchantMember["productIds"] {
+  if (!ids || ids.length === 0) return [];
+  return ids.filter((id): id is MerchantMember["productIds"][number] => MEMBER_PRODUCTS.has(id));
+}
+
 export function toMember(row: MerchantMemberRow): MerchantMember {
   return {
     id: row.id,
@@ -202,6 +216,7 @@ export function toMember(row: MerchantMemberRow): MerchantMember {
         : row.branch_id
           ? [row.branch_id]
           : [],
+    productIds: toMemberProductIds(row.product_ids),
     joined: row.accepted_at !== null,
   };
 }
@@ -221,5 +236,6 @@ export function toCustomer(row: CustomerOverviewRow): MerchantCustomer {
     banned: row.banned,
     lastVisit: relativeDay(row.last_visit),
     memberSince: monthYear(row.member_since),
+    merchantNotes: row.merchant_notes?.trim() ?? "",
   };
 }

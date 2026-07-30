@@ -24,7 +24,7 @@ const LOYALTY_SETTINGS: Array<{
   {
     id: "loyalty",
     label: "Rewards & stamps",
-    value: "Offer, stamps & order value",
+    value: "Configure offer and stamps",
     Icon: Gift,
   },
   {

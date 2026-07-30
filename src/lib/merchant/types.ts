@@ -20,6 +20,8 @@ export interface MerchantMember {
   role: MemberRole;
   /** empty = access to all branches. */
   branchIds: string[];
+  /** empty = access to all products. */
+  productIds: MerchantProduct[];
   /** false = invited but hasn't logged in yet. */
   joined: boolean;
   /** True for the account owner on merchants.owner_user_id (can't demote/remove). */
@@ -82,7 +84,6 @@ export interface MerchantProfile {
   rewardName: string;
   rewardImageDataUrl?: string;
   totalStamps: number;
-  avgOrderValue: number;
   /** Default true. Not shown in onboarding. */
   restartAfterReward: boolean;
   rewardCooldownValue: number;
@@ -90,7 +91,14 @@ export interface MerchantProfile {
   /** Min purchase condition (₹). Shown in onboarding. */
   minPurchaseAmount: number;
   stampNotifications: boolean;
+  /** @deprecated Prefer role-based pending approval toggles. */
   approvalNotifications: boolean;
+  /** Notify staff when a stamp stays pending > 3 hours. Default on. */
+  notifyStaffPendingApprovals: boolean;
+  /** Notify managers when a stamp stays pending > 6 hours. Default on. */
+  notifyManagerPendingApprovals: boolean;
+  /** Notify owners for pending-stamp escalations. Default off. */
+  notifyOwnerPendingApprovals: boolean;
   marketingEmails: boolean;
   queueBanner?: string;
   queueBannerLink?: string;
@@ -211,6 +219,8 @@ export interface MerchantCustomer {
   banned?: boolean;
   lastVisit: string;
   memberSince: string;
+  /** Private merchant-only notes. Never shown to the guest. */
+  merchantNotes: string;
 }
 
 export interface PendingApproval {
@@ -221,6 +231,19 @@ export interface PendingApproval {
   requestedAt: string;
   stampsBefore: number;
   totalStamps: number;
+}
+
+/** Per-user merchant notification centre item. */
+export interface MerchantInAppNotification {
+  id: string;
+  title: string;
+  message: string;
+  actionLabel: string;
+  actionHref: string;
+  kind: string;
+  escalationLevel: "3h" | "6h" | null;
+  read: boolean;
+  createdAt: string;
 }
 
 export interface RedeemRecord {

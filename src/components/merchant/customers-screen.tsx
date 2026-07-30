@@ -3,25 +3,24 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Download, Search, Users, X } from "lucide-react";
 import type { MemberRole, MerchantCustomer } from "@/lib/merchant/types";
-import { customerLtv, formatCurrency } from "@/lib/merchant/ltv";
 import { canViewCustomerData } from "@/lib/merchant/roles";
 import { CustomerDrawer } from "./customer-drawer";
 import type { RequestOfferStampOtpResult } from "./offer-stamp-otp";
 
-type SortKey = "ltv" | "visits" | "name";
+type SortKey = "stamps" | "visits" | "name";
 
 const SORT_LABELS: Record<SortKey, string> = {
-  ltv: "Lifetime value",
+  stamps: "Stamps",
   visits: "Visits",
   name: "Name (A–Z)",
 };
 
 interface CustomersScreenProps {
   customers: MerchantCustomer[];
-  avgOrderValue: number;
   role: MemberRole;
   onBanCustomer: (id: string) => void;
   onDeleteCustomer: (id: string) => void;
+  onSaveCustomerNotes: (id: string, notes: string) => Promise<boolean>;
   onRequestOfferStampOtp: (customerId: string) => Promise<RequestOfferStampOtpResult>;
   onConfirmOfferStamp: (
     customerId: string,
@@ -32,15 +31,18 @@ interface CustomersScreenProps {
 function statusLabel(status: MerchantCustomer["status"]) {
   if (status === "reward_ready") return "Reward ready";
   if (status === "claimed") return "Claimed";
-  return "Active";
+  return "Collecting";
 }
 
 function badgeFor(customer: MerchantCustomer) {
   if (customer.banned) return { label: "Banned", className: "merchant-badge--banned" };
-  return {
-    label: statusLabel(customer.status),
-    className: `merchant-badge--${customer.status}`,
-  };
+  if (customer.status === "reward_ready") {
+    return { label: "Reward ready", className: "merchant-badge--reward_ready" };
+  }
+  if (customer.status === "claimed") {
+    return { label: "Claimed", className: "merchant-badge--claimed" };
+  }
+  return null;
 }
 
 function getInitials(name: string) {
@@ -50,11 +52,12 @@ function getInitials(name: string) {
   return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
-function exportCsv(
-  customers: MerchantCustomer[],
-  avgOrderValue: number,
-  includeContact: boolean,
-) {
+function stampProgress(customer: MerchantCustomer) {
+  const total = Math.max(1, customer.totalStamps);
+  return Math.min(100, Math.round((customer.stamps / total) * 100));
+}
+
+function exportCsv(customers: MerchantCustomer[], includeContact: boolean) {
   const headers = includeContact
     ? [
         "Name",
@@ -62,11 +65,11 @@ function exportCsv(
         "Email",
         "Stamps",
         "Lifetime visits",
-        "LTV (INR)",
+        "Rewards claimed",
         "Status",
         "Member since",
       ]
-    : ["Name", "Stamps", "Lifetime visits", "LTV (INR)", "Status", "Member since"];
+    : ["Name", "Stamps", "Lifetime visits", "Rewards claimed", "Status", "Member since"];
   const rows = customers.map((c) =>
     includeContact
       ? [
@@ -75,16 +78,16 @@ function exportCsv(
           c.email ?? "",
           `${c.stamps}/${c.totalStamps}`,
           c.lifetimeVisits,
-          customerLtv(c, avgOrderValue),
-          statusLabel(c.status),
+          c.rewardsClaimed,
+          c.banned ? "Banned" : statusLabel(c.status),
           c.memberSince,
         ]
       : [
           c.name,
           `${c.stamps}/${c.totalStamps}`,
           c.lifetimeVisits,
-          customerLtv(c, avgOrderValue),
-          statusLabel(c.status),
+          c.rewardsClaimed,
+          c.banned ? "Banned" : statusLabel(c.status),
           c.memberSince,
         ],
   );
@@ -104,15 +107,15 @@ function exportCsv(
 
 export function CustomersScreen({
   customers,
-  avgOrderValue,
   role,
   onBanCustomer,
   onDeleteCustomer,
+  onSaveCustomerNotes,
   onRequestOfferStampOtp,
   onConfirmOfferStamp,
 }: CustomersScreenProps) {
   const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("ltv");
+  const [sortKey, setSortKey] = useState<SortKey>("stamps");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const showData = canViewCustomerData(role);
   const effectiveSort = showData ? sortKey : "name";
@@ -135,13 +138,19 @@ export function CustomersScreen({
   const sorted = useMemo(() => {
     const list = [...filtered];
     if (effectiveSort === "name") return list.sort((a, b) => a.name.localeCompare(b.name));
-    if (effectiveSort === "visits") return list.sort((a, b) => b.lifetimeVisits - a.lifetimeVisits);
-    return list.sort((a, b) => customerLtv(b, avgOrderValue) - customerLtv(a, avgOrderValue));
-  }, [filtered, effectiveSort, avgOrderValue]);
+    if (effectiveSort === "stamps") {
+      return list.sort(
+        (a, b) =>
+          b.stamps / Math.max(1, b.totalStamps) - a.stamps / Math.max(1, a.totalStamps) ||
+          b.lifetimeVisits - a.lifetimeVisits,
+      );
+    }
+    return list.sort((a, b) => b.lifetimeVisits - a.lifetimeVisits);
+  }, [filtered, effectiveSort]);
 
   if (customers.length === 0) {
     return (
-      <div className="tab-screen">
+      <div className="tab-screen merchant-customers-screen">
         <div className="tab-head">
           <h2 className="tab-title">Loyalty customers</h2>
           <p className="tab-sub">No loyalty members yet</p>
@@ -164,7 +173,7 @@ export function CustomersScreen({
   const searching = query.trim().length > 0;
 
   return (
-    <div className="tab-screen">
+    <div className="tab-screen merchant-customers-screen">
       <div className="tab-head">
         <h2 className="tab-title">Loyalty customers</h2>
         <p className="tab-sub">
@@ -228,7 +237,7 @@ export function CustomersScreen({
           <button
             type="button"
             className="merchant-export-btn"
-            onClick={() => exportCsv(sorted, avgOrderValue, true)}
+            onClick={() => exportCsv(sorted, true)}
           >
             <Download size={14} strokeWidth={2.3} />
             Export
@@ -242,42 +251,76 @@ export function CustomersScreen({
           <p className="merchant-empty-sub">Try a different name or spelling.</p>
         </div>
       ) : (
-        <div className="panel-card merchant-list-panel">
+        <div className="panel-card merchant-list-panel merchant-customers-panel">
           <ul className="merchant-list">
             {sorted.map((customer) => {
               const badge = badgeFor(customer);
+              const progress = stampProgress(customer);
               return (
                 <li key={customer.id} className="merchant-list-item">
                   <button
                     type="button"
-                    className={`merchant-list-btn${customer.banned ? " is-banned" : ""}`}
+                    className={`merchant-cust-row${customer.banned ? " is-banned" : ""}`}
                     onClick={() => setSelectedId(customer.id)}
                   >
                     <div className="merchant-avatar">{getInitials(customer.name)}</div>
-                    <div className="merchant-list-copy">
-                      <div className="merchant-list-title">{customer.name}</div>
-                      {showData ? (
-                        <div className="merchant-list-sub">
-                          {customer.lifetimeVisits} visits · {customer.stamps}/{customer.totalStamps}{" "}
-                          stamps · {customer.rewardsClaimed} reward
-                          {customer.rewardsClaimed === 1 ? "" : "s"} redeemed
+
+                    <div className="merchant-cust-row-main">
+                      <div className="merchant-cust-row-identity">
+                        <div className="merchant-cust-row-name-line">
+                          <span className="merchant-list-title">{customer.name}</span>
+                          {badge ? (
+                            <span className={`merchant-badge ${badge.className}`}>{badge.label}</span>
+                          ) : null}
                         </div>
-                      ) : (
-                        <div className="merchant-list-sub">Tap to offer stamp</div>
-                      )}
-                    </div>
-                    {showData ? (
-                      <div className="merchant-list-trailing">
-                        <span className="merchant-ltv-amount">
-                          {formatCurrency(customerLtv(customer, avgOrderValue))}
-                        </span>
-                        <span className={`merchant-badge ${badge.className}`}>{badge.label}</span>
+                        {showData ? (
+                          <span className="merchant-list-sub">
+                            Member since {customer.memberSince}
+                          </span>
+                        ) : (
+                          <span className="merchant-list-sub">Tap to offer stamp</span>
+                        )}
                       </div>
-                    ) : null}
+
+                      {showData ? (
+                        <>
+                          <div
+                            className="merchant-cust-stamps"
+                            aria-label={`${customer.stamps} of ${customer.totalStamps} stamps`}
+                          >
+                            <span className="merchant-cust-stamps-value">
+                              {customer.stamps}/{customer.totalStamps}
+                            </span>
+                            <span className="merchant-cust-rail-track" aria-hidden>
+                              <span
+                                className="merchant-cust-rail-fill"
+                                style={{ width: `${progress}%` }}
+                              />
+                            </span>
+                            <span className="merchant-cust-rail-label">Stamps</span>
+                          </div>
+
+                          <div
+                            className="merchant-cust-rail"
+                            aria-label={`${customer.lifetimeVisits} visits, ${customer.rewardsClaimed} rewards claimed`}
+                          >
+                            <div className="merchant-cust-rail-cell">
+                              <span className="merchant-cust-rail-value">{customer.lifetimeVisits}</span>
+                              <span className="merchant-cust-rail-label">Visits</span>
+                            </div>
+                            <div className="merchant-cust-rail-cell">
+                              <span className="merchant-cust-rail-value">{customer.rewardsClaimed}</span>
+                              <span className="merchant-cust-rail-label">Rewards</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+
                     <ChevronRight
                       size={16}
                       strokeWidth={2.2}
-                      className="merchant-list-arrow"
+                      className="merchant-list-arrow merchant-cust-row-chevron"
                       aria-hidden
                     />
                   </button>
@@ -290,7 +333,6 @@ export function CustomersScreen({
 
       <CustomerDrawer
         customer={selected}
-        avgOrderValue={avgOrderValue}
         role={role}
         onClose={() => setSelectedId(null)}
         onBan={onBanCustomer}
@@ -298,6 +340,7 @@ export function CustomersScreen({
           onDeleteCustomer(id);
           setSelectedId(null);
         }}
+        onSaveNotes={onSaveCustomerNotes}
         onRequestOfferStampOtp={onRequestOfferStampOtp}
         onConfirmOfferStamp={onConfirmOfferStamp}
       />

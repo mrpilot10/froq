@@ -71,7 +71,7 @@ The client subscription is the next wiring step (see "Remaining work").
 | `merchants` | One row per shop (the tenant). Owned by an auth user. |
 | `customers` | One row per (shop, customer). Links to an auth user when they log in. |
 | `loyalty_cards` | Stamp progress + status per customer. |
-| `visits` | One row per approved stamp — powers LTV and the weekly chart. |
+| `visits` | One row per approved stamp — powers visit counts and the weekly chart. |
 | `approvals` | Pending stamp requests awaiting merchant approval. |
 | `redemptions` | Reward claims. |
 

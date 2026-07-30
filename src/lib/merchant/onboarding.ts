@@ -44,7 +44,6 @@ export interface OnboardingDraft {
   rewardTitle: string;
   rewardName: string;
   rewardImageDataUrl?: string;
-  avgOrderValue: number;
   totalStamps: number;
   /** Shown in onboarding. 0 = no wait. */
   rewardCooldownValue: number;
@@ -85,7 +84,6 @@ export function emptyOnboardingDraft(account?: CheckoutAccount | null): Onboardi
     xUrl: "",
     rewardTitle: "",
     rewardName: "",
-    avgOrderValue: 200,
     totalStamps: 5,
     rewardCooldownValue: 0,
     rewardCooldownUnit: "days",

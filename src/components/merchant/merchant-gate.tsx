@@ -148,12 +148,14 @@ export function MerchantGate({ children }: { children: ReactNode }) {
       dashboardStats={bundle.dashboardStats}
       customers={bundle.customers}
       approvals={bundle.approvals}
+      inAppNotifications={bundle.inAppNotifications}
       entitlements={bundle.entitlements}
       branches={bundle.branches}
       members={bundle.members}
       role={bundle.role}
       activeBranchId={bundle.activeBranchId}
       canViewAllBranches={bundle.canViewAllBranches}
+      memberProductIds={bundle.memberProductIds}
       justJoined={bundle.justJoined}
       onSelectBranch={handleSelectBranch}
       onRefresh={async () => {

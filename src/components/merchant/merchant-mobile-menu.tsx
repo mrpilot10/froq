@@ -2,7 +2,7 @@
 
 import { FROQ_LOGO_SRC } from "@/lib/brand";
 
-import { useEffect, useState, type MouseEvent } from "react";
+import { Fragment, useEffect, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
@@ -11,7 +11,10 @@ import {
   PRODUCT_DEFAULT_TAB,
   PRODUCTS,
   TAB_HREF,
+  comingSoonAfterProduct,
+  comingSoonBeforeProducts,
   workspaceNavForRole,
+  type ComingSoonProduct,
   type NavItem,
 } from "@/lib/merchant/nav";
 import { ROLE_LABELS } from "@/lib/merchant/roles";
@@ -37,10 +40,13 @@ interface MerchantMobileMenuProps {
   activeProduct: MerchantProduct;
   role: MemberRole;
   entitlements: Entitlements;
+  /** Products this teammate may switch to. Defaults to the full catalog. */
+  allowedProducts?: MerchantProduct[];
   canPurchase?: boolean;
   userName?: string;
   onTabChange: (tab: MerchantTab) => void;
   onProductChange: (product: MerchantProduct) => void;
+  onComingSoonProduct?: (product: ComingSoonProduct) => void;
   onUpgrade?: (product: MerchantProduct) => void;
   onOpenAccount?: () => void;
   onLogout?: () => void;
@@ -53,10 +59,12 @@ export function MerchantMobileMenu({
   activeProduct,
   role,
   entitlements,
+  allowedProducts,
   canPurchase = true,
   userName = "",
   onTabChange,
   onProductChange,
+  onComingSoonProduct,
   onUpgrade,
   onOpenAccount,
   onLogout,
@@ -78,6 +86,10 @@ export function MerchantMobileMenu({
       : "Not enabled";
   const workspaceItems = workspaceNavForRole(role === "owner");
   const displayName = userName.trim() || "Team member";
+  const visibleProducts =
+    allowedProducts && allowedProducts.length > 0
+      ? PRODUCTS.filter((p) => allowedProducts.includes(p.id))
+      : PRODUCTS;
   const initials = getInitials(displayName);
 
   useEffect(() => setMounted(true), []);
@@ -158,28 +170,79 @@ export function MerchantMobileMenu({
         <div className="merchant-menu-scroll">
           <nav className="merchant-menu-group" aria-label="Products">
             <span className="merchant-menu-label">Products</span>
-            {PRODUCTS.map(({ id, name, tagline, Icon }) => {
-              const isActive = activeProduct === id;
+            {comingSoonBeforeProducts().map((item) => {
+              const Icon = item.Icon;
               return (
-                <Link
-                  key={id}
-                  href={TAB_HREF[PRODUCT_DEFAULT_TAB[id]]}
-                  prefetch
-                  className={`merchant-menu-item merchant-menu-item--product${isActive ? " active" : ""}`}
-                  aria-current={isActive ? "true" : undefined}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    selectProduct(id);
+                <button
+                  key={item.id}
+                  type="button"
+                  className="merchant-menu-item merchant-menu-item--product"
+                  onClick={() => {
+                    onComingSoonProduct?.(item);
+                    onClose();
                   }}
                 >
                   <span className="merchant-menu-item-icon">
-                    <Icon size={19} strokeWidth={isActive ? 2.4 : 2} />
+                    <Icon size={19} strokeWidth={2} />
                   </span>
                   <span className="merchant-menu-item-stack">
-                    <span>{name}</span>
-                    <span className="merchant-menu-item-sub">{tagline}</span>
+                    <span>
+                      {item.name}
+                      <span className="merchant-menu-soon-pill">Coming soon</span>
+                    </span>
+                    <span className="merchant-menu-item-sub">{item.headline}</span>
                   </span>
-                </Link>
+                </button>
+              );
+            })}
+            {visibleProducts.map(({ id, name, tagline, Icon }) => {
+              const isActive = activeProduct === id;
+              return (
+                <Fragment key={id}>
+                  <Link
+                    href={TAB_HREF[PRODUCT_DEFAULT_TAB[id]]}
+                    prefetch
+                    className={`merchant-menu-item merchant-menu-item--product${isActive ? " active" : ""}`}
+                    aria-current={isActive ? "true" : undefined}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      selectProduct(id);
+                    }}
+                  >
+                    <span className="merchant-menu-item-icon">
+                      <Icon size={19} strokeWidth={isActive ? 2.4 : 2} />
+                    </span>
+                    <span className="merchant-menu-item-stack">
+                      <span>{name}</span>
+                      <span className="merchant-menu-item-sub">{tagline}</span>
+                    </span>
+                  </Link>
+                  {comingSoonAfterProduct(id).map((item) => {
+                    const SoonIcon = item.Icon;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className="merchant-menu-item merchant-menu-item--product"
+                        onClick={() => {
+                          onComingSoonProduct?.(item);
+                          onClose();
+                        }}
+                      >
+                        <span className="merchant-menu-item-icon">
+                          <SoonIcon size={19} strokeWidth={2} />
+                        </span>
+                        <span className="merchant-menu-item-stack">
+                          <span>
+                            {item.name}
+                            <span className="merchant-menu-soon-pill">Coming soon</span>
+                          </span>
+                          <span className="merchant-menu-item-sub">{item.headline}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </Fragment>
               );
             })}
           </nav>

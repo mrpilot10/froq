@@ -2,31 +2,33 @@
 
 import { Bell, CheckSquare, Gift, Sparkles } from "lucide-react";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
-import type { MerchantProduct, PendingApproval } from "@/lib/merchant/types";
+import type {
+  MerchantInAppNotification,
+  MerchantProduct,
+  PendingApproval,
+} from "@/lib/merchant/types";
 
 interface MerchantNotificationsDrawerProps {
   open: boolean;
   product: MerchantProduct;
   approvals: PendingApproval[];
+  notifications: MerchantInAppNotification[];
   onViewApprovals: () => void;
   onClose: () => void;
-}
-
-function getInitials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
 export function MerchantNotificationsDrawer({
   open,
   product,
   approvals,
+  notifications,
   onViewApprovals,
   onClose,
 }: MerchantNotificationsDrawerProps) {
   const isLoyalty = product === "loyalty";
+  const hasNotifications = notifications.length > 0;
+  const hasApprovals = isLoyalty && approvals.length > 0;
+  const empty = !hasNotifications && !hasApprovals;
 
   return (
     <BottomSheet
@@ -45,35 +47,68 @@ export function MerchantNotificationsDrawer({
           </p>
         </div>
 
-        {isLoyalty && approvals.length > 0 ? (
+        {hasNotifications ? (
           <div className="merchant-notif-list">
-            {approvals.map((approval) => (
+            {notifications.map((item) => (
               <button
-                key={approval.id}
+                key={item.id}
                 type="button"
-                className="merchant-notif-item"
+                className={`merchant-notif-item${item.read ? "" : " is-unread"}`}
                 onClick={() => {
                   onViewApprovals();
                   onClose();
                 }}
               >
-                <span className="merchant-notif-avatar">
-                  {getInitials(approval.customerName)}
+                <span className="merchant-notif-avatar merchant-notif-avatar--bell" aria-hidden>
+                  <Bell size={16} strokeWidth={2.3} />
                 </span>
                 <span className="merchant-notif-copy">
-                  <span className="merchant-notif-item-title">
-                    {approval.customerName} requested a stamp
-                  </span>
-                  <span className="merchant-notif-item-sub">
-                    Stamp {approval.stampsBefore + 1} of {approval.totalStamps} ·{" "}
-                    {approval.requestedAt}
-                  </span>
+                  <span className="merchant-notif-item-title">{item.title}</span>
+                  <span className="merchant-notif-item-sub">{item.message}</span>
+                  <span className="merchant-notif-item-meta">{item.createdAt}</span>
                 </span>
-                <span className="merchant-notif-pill">Review</span>
+                <span className="merchant-notif-pill">{item.actionLabel}</span>
               </button>
             ))}
           </div>
-        ) : (
+        ) : null}
+
+        {hasApprovals ? (
+          <>
+            {hasNotifications ? (
+              <p className="merchant-notif-section-label">Waiting for review</p>
+            ) : null}
+            <div className="merchant-notif-list">
+              {approvals.map((approval) => (
+                <button
+                  key={approval.id}
+                  type="button"
+                  className="merchant-notif-item"
+                  onClick={() => {
+                    onViewApprovals();
+                    onClose();
+                  }}
+                >
+                  <span className="merchant-notif-avatar">
+                    {getInitials(approval.customerName)}
+                  </span>
+                  <span className="merchant-notif-copy">
+                    <span className="merchant-notif-item-title">
+                      {approval.customerName} requested a stamp
+                    </span>
+                    <span className="merchant-notif-item-sub">
+                      Stamp {approval.stampsBefore + 1} of {approval.totalStamps} ·{" "}
+                      {approval.requestedAt}
+                    </span>
+                  </span>
+                  <span className="merchant-notif-pill">Review</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : null}
+
+        {empty ? (
           <div className="merchant-notif-empty">
             <span className="merchant-notif-empty-icon">
               {isLoyalty ? (
@@ -85,13 +120,13 @@ export function MerchantNotificationsDrawer({
             <p className="merchant-notif-empty-title">You&apos;re all caught up</p>
             <p className="merchant-notif-empty-sub">
               {isLoyalty
-                ? "New stamp requests will show up here for quick approval."
+                ? "New stamp requests and escalation reminders will show up here."
                 : "New guest joins and ready-to-seat alerts will show up here."}
             </p>
           </div>
-        )}
+        ) : null}
 
-        {isLoyalty && approvals.length > 0 && (
+        {(hasApprovals || hasNotifications) && isLoyalty ? (
           <button
             type="button"
             className="cta-btn merchant-cta-accent merchant-notif-cta"
@@ -101,9 +136,9 @@ export function MerchantNotificationsDrawer({
             }}
           >
             <CheckSquare size={17} strokeWidth={2.3} />
-            Review all approvals
+            Review pending approvals
           </button>
-        )}
+        ) : null}
 
         {!isLoyalty && (
           <p className="merchant-notif-foot">
@@ -114,4 +149,11 @@ export function MerchantNotificationsDrawer({
       </div>
     </BottomSheet>
   );
+}
+
+function getInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }

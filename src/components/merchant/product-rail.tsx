@@ -2,17 +2,29 @@
 
 import { FROQ_LOGO_SRC } from "@/lib/brand";
 
+import { Fragment } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { BarChart3, LifeBuoy, LogOut, Settings, Users, type LucideIcon } from "lucide-react";
-import { PRODUCT_DEFAULT_TAB, PRODUCTS, TAB_HREF, isWorkspaceTab } from "@/lib/merchant/nav";
+import { BarChart3, LifeBuoy, LogOut, Settings, ContactRound, type LucideIcon } from "lucide-react";
+import {
+  PRODUCT_DEFAULT_TAB,
+  PRODUCTS,
+  TAB_HREF,
+  comingSoonAfterProduct,
+  comingSoonBeforeProducts,
+  isWorkspaceTab,
+} from "@/lib/merchant/nav";
 import type { MerchantProduct, MerchantTab } from "@/lib/merchant/types";
+import type { ComingSoonProduct } from "@/lib/merchant/nav";
 
 interface ProductRailProps {
   activeProduct: MerchantProduct;
   activeTab: MerchantTab;
   isOwner?: boolean;
+  /** Products this teammate may switch to. Defaults to the full catalog. */
+  allowedProducts?: MerchantProduct[];
   onProductChange: (product: MerchantProduct) => void;
+  onComingSoonProduct?: (product: ComingSoonProduct) => void;
   onTabChange: (tab: MerchantTab) => void;
   pendingCount?: number;
   onLogout?: () => void;
@@ -21,7 +33,7 @@ interface ProductRailProps {
 type RailItem = { id: MerchantTab; label: string; Icon: LucideIcon; ownerOnly?: boolean };
 
 const SHARED_ITEMS: RailItem[] = [
-  { id: "customers", label: "All customers", Icon: Users, ownerOnly: true },
+  { id: "customers", label: "All customers", Icon: ContactRound, ownerOnly: true },
   { id: "analytics", label: "Analytics", Icon: BarChart3 },
 ];
 
@@ -29,7 +41,9 @@ export function ProductRail({
   activeProduct,
   activeTab,
   isOwner = false,
+  allowedProducts,
   onProductChange,
+  onComingSoonProduct,
   onTabChange,
   pendingCount = 0,
   onLogout,
@@ -38,6 +52,10 @@ export function ProductRail({
   // Workspace tabs (analytics, all customers, settings) aren't product-scoped, so
   // no product icon lights up there — the sidebar still keeps the last product.
   const highlightedProduct = isWorkspaceTab(activeTab) ? null : activeProduct;
+  const visibleProducts =
+    allowedProducts && allowedProducts.length > 0
+      ? PRODUCTS.filter((p) => allowedProducts.includes(p.id))
+      : PRODUCTS;
 
   return (
     <aside className="merchant-rail" aria-label="Products">
@@ -48,32 +66,67 @@ export function ProductRail({
       <span className="merchant-rail-divider" aria-hidden="true" />
 
       <nav className="merchant-rail-nav" aria-label="Switch product">
-        {PRODUCTS.map(({ id, name, Icon }) => {
+        {comingSoonBeforeProducts().map((product) => {
+          const Icon = product.Icon;
+          return (
+            <button
+              key={product.id}
+              type="button"
+              className="merchant-rail-item"
+              aria-label={`${product.name} — Coming soon`}
+              data-tip={`${product.name} · Coming soon`}
+              onClick={() => onComingSoonProduct?.(product)}
+            >
+              <span className="merchant-rail-icon">
+                <Icon size={22} strokeWidth={2} />
+              </span>
+            </button>
+          );
+        })}
+        {visibleProducts.map(({ id, name, Icon }) => {
           const isActive = highlightedProduct === id;
           const showBadge = id === "loyalty" && pendingCount > 0;
           return (
-            <Link
-              key={id}
-              href={TAB_HREF[PRODUCT_DEFAULT_TAB[id]]}
-              prefetch
-              className={`merchant-rail-item${isActive ? " active" : ""}`}
-              aria-current={isActive ? "true" : undefined}
-              aria-label={name}
-              data-tip={name}
-              onClick={(event) => {
-                event.preventDefault();
-                onProductChange(id);
-              }}
-            >
-              <span className="merchant-rail-icon">
-                <Icon size={22} strokeWidth={isActive ? 2.4 : 2} />
-                {showBadge && (
-                  <span className="merchant-rail-badge" aria-label={`${pendingCount} pending`}>
-                    {pendingCount}
-                  </span>
-                )}
-              </span>
-            </Link>
+            <Fragment key={id}>
+              <Link
+                href={TAB_HREF[PRODUCT_DEFAULT_TAB[id]]}
+                prefetch
+                className={`merchant-rail-item${isActive ? " active" : ""}`}
+                aria-current={isActive ? "true" : undefined}
+                aria-label={name}
+                data-tip={name}
+                onClick={(event) => {
+                  event.preventDefault();
+                  onProductChange(id);
+                }}
+              >
+                <span className="merchant-rail-icon">
+                  <Icon size={22} strokeWidth={isActive ? 2.4 : 2} />
+                  {showBadge && (
+                    <span className="merchant-rail-badge" aria-label={`${pendingCount} pending`}>
+                      {pendingCount}
+                    </span>
+                  )}
+                </span>
+              </Link>
+              {comingSoonAfterProduct(id).map((product) => {
+                const SoonIcon = product.Icon;
+                return (
+                  <button
+                    key={product.id}
+                    type="button"
+                    className="merchant-rail-item"
+                    aria-label={`${product.name} — Coming soon`}
+                    data-tip={`${product.name} · Coming soon`}
+                    onClick={() => onComingSoonProduct?.(product)}
+                  >
+                    <span className="merchant-rail-icon">
+                      <SoonIcon size={22} strokeWidth={2} />
+                    </span>
+                  </button>
+                );
+              })}
+            </Fragment>
           );
         })}
       </nav>

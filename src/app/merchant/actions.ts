@@ -8,10 +8,17 @@ import type {
   DashboardFilteredStats,
   MemberRole,
   MerchantCustomer,
+  MerchantInAppNotification,
   MerchantMember,
+  MerchantProduct,
   MerchantProfile,
   PendingApproval,
 } from "@/lib/merchant/types";
+import { normalizeMemberProductIds } from "@/lib/merchant/product-access";
+import {
+  ESCALATION_ACTION_LABEL,
+  pendingApprovalsHref,
+} from "@/lib/merchant/approval-escalation";
 import {
   slugify,
   toBranch,
@@ -47,7 +54,6 @@ import { FREE_PLAN } from "@/lib/merchant/pricing";
 import { userIsMerchantAccount } from "@/lib/merchant/account";
 import { verifyTurnstileToken } from "@/lib/turnstile/verify";
 import { TURNSTILE_REJECTED_MESSAGE, isCaptchaAuthError } from "@/lib/turnstile/config";
-import type { MerchantProduct } from "@/lib/merchant/types";
 import { parseRedeemCode } from "@/lib/merchant/parse-redeem-code";
 import { digitsOnly, toCanonicalPhone } from "@/lib/auth/otp/phone";
 import {
@@ -220,6 +226,7 @@ export type MerchantBundle =
       dashboardStats: DashboardFilteredStats;
       customers: MerchantCustomer[];
       approvals: PendingApproval[];
+      inAppNotifications: MerchantInAppNotification[];
       entitlements: Entitlements;
       branches: Branch[];
       members: MerchantMember[];
@@ -227,6 +234,8 @@ export type MerchantBundle =
       activeBranchId: string | null;
       /** false for staff scoped to specific branches (no combined view). */
       canViewAllBranches: boolean;
+      /** empty = all products; owners always empty. */
+      memberProductIds: MerchantProduct[];
       justJoined: boolean;
     };
 
@@ -386,6 +395,8 @@ export type MerchantSessionResult =
       role: MemberRole;
       activeBranchId: string | null;
       canViewAllBranches: boolean;
+      /** empty = all products; owners always empty. */
+      memberProductIds: MerchantProduct[];
       justJoined: boolean;
     };
 
@@ -399,6 +410,7 @@ export type MerchantWorkspaceDataResult =
       dashboardStats: DashboardFilteredStats;
       customers: MerchantCustomer[];
       approvals: PendingApproval[];
+      inAppNotifications: MerchantInAppNotification[];
     };
 
 /**
@@ -478,12 +490,14 @@ export async function getMerchantBundle(activeBranchId?: string | null): Promise
       dashboardStats: workspace.dashboardStats,
       customers: workspace.customers,
       approvals: workspace.approvals,
+      inAppNotifications: workspace.inAppNotifications,
       entitlements: session.entitlements,
       branches: session.branches,
       members: session.members,
       role: session.role,
       activeBranchId: session.activeBranchId,
       canViewAllBranches: session.canViewAllBranches,
+      memberProductIds: session.memberProductIds,
       justJoined: session.justJoined,
     };
   } catch {
@@ -499,7 +513,11 @@ export async function getMerchantBundle(activeBranchId?: string | null): Promise
  * Intentionally omits short_name and created_at (unused on this path).
  */
 const MERCHANT_ACCESS_COLUMNS =
-  "id, owner_user_id, slug, business_name, owner_first_name, owner_last_name, email, phone, address, brand_color, logo_url, website_url, google_business_url, instagram_url, facebook_url, x_url, reward_title, reward_name, reward_image_url, total_stamps, avg_order_value, restart_after_reward, reward_cooldown_value, reward_cooldown_unit, min_purchase_amount, stamp_notifications, approval_notifications, marketing_emails, queue_banner, queue_banner_link, queue_open_time, queue_close_time, queue_hours_timezone, queue_open_days, queue_auto_start, queue_auto_close, reservation_description, reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes, reservation_auto_decline_hours, reservation_whatsapp_enabled, reservation_paused";
+  "id, owner_user_id, slug, business_name, owner_first_name, owner_last_name, email, phone, address, brand_color, logo_url, website_url, google_business_url, instagram_url, facebook_url, x_url, reward_title, reward_name, reward_image_url, total_stamps, restart_after_reward, reward_cooldown_value, reward_cooldown_unit, min_purchase_amount, stamp_notifications, approval_notifications, marketing_emails, queue_banner, queue_banner_link, queue_open_time, queue_close_time, queue_hours_timezone, queue_open_days, queue_auto_start, queue_auto_close, reservation_description, reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes, reservation_auto_decline_hours, reservation_whatsapp_enabled, reservation_paused";
+
+/** Optional escalation toggles — selected separately so missing migration 0064 can't take down the dashboard. */
+const MERCHANT_ESCALATION_TOGGLE_COLUMNS =
+  "notify_staff_pending_approvals, notify_manager_pending_approvals, notify_owner_pending_approvals";
 
 /**
  * Resolve the merchant this user can access — as owner or as a team member.
@@ -526,6 +544,27 @@ function selectMerchantById(
     .select(MERCHANT_ACCESS_COLUMNS)
     .eq("id", merchantId)
     .maybeSingle();
+}
+
+/**
+ * Soft-load escalation toggles from migration 0064. Missing columns must not
+ * fail the whole merchant session — defaults apply until the migration runs.
+ */
+async function loadEscalationToggles(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  merchantId: string,
+): Promise<{
+  notify_staff_pending_approvals?: boolean;
+  notify_manager_pending_approvals?: boolean;
+  notify_owner_pending_approvals?: boolean;
+}> {
+  const { data, error } = await supabase
+    .from("merchants")
+    .select(MERCHANT_ESCALATION_TOGGLE_COLUMNS)
+    .eq("id", merchantId)
+    .maybeSingle();
+  if (error || !data) return {};
+  return data;
 }
 
 async function resolveMerchantRow(
@@ -744,6 +783,139 @@ export async function getLoyaltyHistory(input?: {
   }
 }
 
+export type CustomerTimelineEventType = "joined" | "stamp" | "reward";
+
+export interface CustomerTimelineEvent {
+  id: string;
+  type: CustomerTimelineEventType;
+  label: string;
+  atMs: number;
+  staffName: string | null;
+  staffRole: MemberRole | null;
+}
+
+const CUSTOMER_TIMELINE_LIMIT = 40;
+
+/** Stamp + reward activity for one customer, newest first, plus a joined event. */
+export async function getCustomerLoyaltyTimeline(
+  customerId: string,
+): Promise<{ events: CustomerTimelineEvent[] }> {
+  const empty = { events: [] as CustomerTimelineEvent[] };
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return empty;
+
+    const ctx = await currentMerchant(supabase, user.id);
+    if (!ctx || !canViewCustomerData(ctx.role)) return empty;
+
+    const id = customerId.trim();
+    if (!id) return empty;
+
+    const [customerRes, visitsRes, redemptionsRes] = await Promise.all([
+      supabase
+        .from("customers")
+        .select("id, member_since")
+        .eq("id", id)
+        .eq("merchant_id", ctx.id)
+        .maybeSingle(),
+      supabase
+        .from("visits")
+        .select("id, created_at, performed_by_name, performed_by_role")
+        .eq("merchant_id", ctx.id)
+        .eq("customer_id", id)
+        .order("created_at", { ascending: false })
+        .limit(CUSTOMER_TIMELINE_LIMIT),
+      supabase
+        .from("redemptions")
+        .select("id, redeemed_at, performed_by_name, performed_by_role")
+        .eq("merchant_id", ctx.id)
+        .eq("customer_id", id)
+        .order("redeemed_at", { ascending: false })
+        .limit(CUSTOMER_TIMELINE_LIMIT),
+    ]);
+
+    if (!customerRes.data) return empty;
+
+    const staffOf = (row: {
+      performed_by_name: string | null;
+      performed_by_role: string | null;
+    }) => ({
+      staffName: row.performed_by_name?.trim() || null,
+      staffRole: row.performed_by_role
+        ? normalizeMemberRole(row.performed_by_role)
+        : null,
+    });
+
+    const events: CustomerTimelineEvent[] = [
+      ...(visitsRes.data ?? []).map((row) => ({
+        id: `stamp:${row.id}`,
+        type: "stamp" as const,
+        label: "Stamp collected",
+        atMs: new Date(row.created_at).getTime(),
+        ...staffOf(row),
+      })),
+      ...(redemptionsRes.data ?? []).map((row) => ({
+        id: `reward:${row.id}`,
+        type: "reward" as const,
+        label: "Reward claimed",
+        atMs: new Date(row.redeemed_at).getTime(),
+        ...staffOf(row),
+      })),
+      {
+        id: `joined:${customerRes.data.id}`,
+        type: "joined" as const,
+        label: "Joined loyalty",
+        atMs: new Date(customerRes.data.member_since).getTime(),
+        staffName: null,
+        staffRole: null,
+      },
+    ].sort((a, b) => b.atMs - a.atMs);
+
+    return { events: events.slice(0, CUSTOMER_TIMELINE_LIMIT) };
+  } catch (error) {
+    console.error("getCustomerLoyaltyTimeline exception", error);
+    return empty;
+  }
+}
+
+/** Private merchant notes on a loyalty customer. Owner/manager only. */
+export async function updateCustomerMerchantNotes(
+  customerId: string,
+  merchantNotes: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    const ctx = await currentMerchant(supabase, user.id);
+    if (!ctx) return { ok: false, error: "Merchant account not found." };
+    if (!canViewCustomerData(ctx.role)) {
+      return { ok: false, error: "Not allowed to edit customer notes." };
+    }
+
+    const id = customerId.trim();
+    if (!id) return { ok: false, error: "Customer not found." };
+
+    const notes = merchantNotes.trim().slice(0, 2000);
+    const { error } = await supabase
+      .from("customers")
+      .update({ merchant_notes: notes || null })
+      .eq("id", id)
+      .eq("merchant_id", ctx.id);
+
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch (error) {
+    console.error("updateCustomerMerchantNotes exception", error);
+    return { ok: false, error: "Could not save notes." };
+  }
+}
+
 export interface UnifiedCustomersResult {
   customers: UnifiedCustomer[];
   /** True when either source hit its fetch ceiling. */
@@ -888,7 +1060,8 @@ async function establishMerchantAccess(
 
   const merchantRow = resolved.row;
   const merchantId = merchantRow.id;
-  const profile = toMerchantProfile(merchantRow);
+  const escalationToggles = await loadEscalationToggles(supabase, merchantId);
+  const profile = toMerchantProfile({ ...merchantRow, ...escalationToggles });
 
   const [branchesRes, membersRes, productsRes] = await Promise.all([
     supabase
@@ -997,6 +1170,8 @@ async function finalizeMerchantSession(
     role: access.role,
     activeBranchId: access.branchFilter,
     canViewAllBranches: access.canViewAllBranches,
+    memberProductIds:
+      access.isOwner || access.role === "owner" ? [] : (access.me?.productIds ?? []),
     justJoined,
   };
 }
@@ -1008,7 +1183,7 @@ async function finalizeMerchantSession(
 async function loadMerchantWorkspaceData(
   access: VerifiedMerchantAccess,
 ): Promise<Extract<MerchantWorkspaceDataResult, { status: "ready" }>> {
-  const { supabase, merchantId, branchFilter, role, profile } = access;
+  const { supabase, merchantId, branchFilter, role, profile, userId } = access;
   const historyStartIso = startOfPreviousCalendarMonth().toISOString();
 
   let customersQuery = supabase
@@ -1031,6 +1206,15 @@ async function loadMerchantWorkspaceData(
     .gte("created_at", historyStartIso)
     .order("created_at", { ascending: false })
     .range(0, EVENT_FETCH_LIMIT - 1);
+  const notificationsQuery = supabase
+    .from("merchant_in_app_notifications")
+    .select(
+      "id, title, message, action_label, action_href, kind, escalation_level, read_at, created_at",
+    )
+    .eq("merchant_id", merchantId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(50);
 
   if (branchFilter) {
     customersQuery = customersQuery.eq("branch_id", branchFilter);
@@ -1039,7 +1223,7 @@ async function loadMerchantWorkspaceData(
   }
 
   const workspaceRange: DashboardDateRange = "7d";
-  const [customersRes, approvalsRes, visitsRes, lifetimeRes, rangeStats] =
+  const [customersRes, approvalsRes, visitsRes, lifetimeRes, rangeStats, notificationsRes] =
     await Promise.all([
       customersQuery,
       approvalsQuery,
@@ -1049,6 +1233,7 @@ async function loadMerchantWorkspaceData(
         p_branch_id: branchFilter ?? null,
       }),
       fetchLoyaltyRangeStats(supabase, merchantId, branchFilter, workspaceRange),
+      notificationsQuery,
     ]);
 
   warnIfTruncated(
@@ -1115,16 +1300,39 @@ async function loadMerchantWorkspaceData(
     };
   });
 
+  const inAppNotifications: MerchantInAppNotification[] = (
+    notificationsRes.error ? [] : (notificationsRes.data ?? [])
+  ).map((row) => ({
+    id: row.id,
+    title: row.title,
+    message: row.message,
+    actionLabel: row.action_label?.trim() || ESCALATION_ACTION_LABEL,
+    actionHref: row.action_href?.trim() || pendingApprovalsHref(),
+    kind: row.kind,
+    escalationLevel:
+      row.escalation_level === "3h" || row.escalation_level === "6h"
+        ? row.escalation_level
+        : null,
+    read: row.read_at != null,
+    createdAt: new Date(row.created_at).toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }),
+  }));
+
   // Staff only get enough to offer stamps via OTP — contact PII is stripped.
   const customersForRole = canViewCustomerData(role)
     ? customers
-    : customers.map((c) => ({ ...c, phone: "", email: undefined }));
+    : customers.map((c) => ({ ...c, phone: "", email: undefined, merchantNotes: "" }));
 
   return {
     status: "ready",
     dashboardStats,
     customers: customersForRole,
     approvals,
+    inAppNotifications,
   };
 }
 
@@ -2629,7 +2837,6 @@ export async function createMerchant(input: {
   rewardTitle?: string;
   rewardName: string;
   rewardImageDataUrl?: string;
-  avgOrderValue?: number;
   // Optional override; a sensible default is derived when omitted.
   totalStamps?: number;
   rewardCooldownValue?: number;
@@ -2685,7 +2892,6 @@ export async function createMerchant(input: {
           reward_name: input.rewardName.trim() || "Free reward",
           reward_image_url: input.rewardImageDataUrl ?? null,
           total_stamps: Math.min(20, Math.max(5, input.totalStamps ?? 5)),
-          avg_order_value: input.avgOrderValue ?? 0,
           restart_after_reward: true,
           reward_cooldown_value: Math.max(0, Math.floor(input.rewardCooldownValue ?? 0)),
           reward_cooldown_unit: input.rewardCooldownUnit ?? "days",
@@ -2764,7 +2970,6 @@ export async function updateMerchantProfile(
     "rewardName",
     "rewardImageDataUrl",
     "totalStamps",
-    "avgOrderValue",
     "restartAfterReward",
     "rewardCooldownValue",
     "rewardCooldownUnit",
@@ -3658,6 +3863,7 @@ export async function inviteMember(input: {
   name?: string;
   role: MemberRole;
   branchIds?: string[];
+  productIds?: MerchantProduct[];
 }): Promise<{ ok: boolean; error?: string; emailSent?: boolean }> {
   try {
     const supabase = await createClient();
@@ -3676,8 +3882,10 @@ export async function inviteMember(input: {
       return { ok: false, error: "Choose owner, manager, or staff." };
     }
     const inviteRole = input.role;
-    // Owners always get all-branch access.
+    // Owners always get all-branch / all-product access.
     const branchIds = inviteRole === "owner" ? [] : (input.branchIds ?? []);
+    const productIds =
+      inviteRole === "owner" ? [] : normalizeMemberProductIds(input.productIds);
 
     const { data: merchantMeta } = await supabase
       .from("merchants")
@@ -3736,6 +3944,7 @@ export async function inviteMember(input: {
         role: inviteRole,
         branch_id: branchIds[0] ?? null,
         branch_ids: branchIds,
+        product_ids: productIds,
         name: input.name?.trim() || null,
         email,
         invite_token: inviteToken,
@@ -3921,6 +4130,7 @@ export async function updateMemberRole(
   memberId: string,
   role: MemberRole,
   branchIds?: string[],
+  productIds?: MerchantProduct[],
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const supabase = await createClient();
@@ -3953,11 +4163,17 @@ export async function updateMemberRole(
       return { ok: false, error: "You can't change the primary account owner's role." };
     }
 
-    // Owners always get all-branch access.
+    // Owners always get all-branch / all-product access.
     const ids = role === "owner" ? [] : (branchIds ?? []);
+    const products = role === "owner" ? [] : normalizeMemberProductIds(productIds);
     const { error } = await supabase
       .from("merchant_members")
-      .update({ role, branch_id: ids[0] ?? null, branch_ids: ids })
+      .update({
+        role,
+        branch_id: ids[0] ?? null,
+        branch_ids: ids,
+        product_ids: products,
+      })
       .eq("id", memberId)
       .eq("merchant_id", ctx.id);
     return error ? { ok: false, error: error.message } : { ok: true };
@@ -4005,5 +4221,40 @@ export async function removeMember(
     return error ? { ok: false, error: error.message } : { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Could not remove member." };
+  }
+}
+
+/** Mark the signed-in user's merchant in-app notifications as read (notification centre). */
+export async function markInAppNotificationsRead(
+  notificationIds?: string[],
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    const merchantId = await resolveMerchantId(supabase, user.id);
+    if (!merchantId) return { ok: false, error: "Merchant account not found." };
+
+    let query = supabase
+      .from("merchant_in_app_notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("merchant_id", merchantId)
+      .eq("user_id", user.id)
+      .is("read_at", null);
+
+    if (notificationIds && notificationIds.length > 0) {
+      query = query.in("id", notificationIds);
+    }
+
+    const { error } = await query;
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update notifications.",
+    };
   }
 }

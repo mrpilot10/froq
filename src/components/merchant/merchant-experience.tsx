@@ -16,16 +16,18 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Menu } from "lucide-react";
 import { toast } from "sonner";
-import type { Branch, MemberRole, MerchantCustomer, MerchantEditSection, MerchantMember, MerchantProduct, MerchantProfile, MerchantTab, PendingApproval, DashboardFilteredStats } from "@/lib/merchant/types";
+import type { Branch, MemberRole, MerchantCustomer, MerchantEditSection, MerchantInAppNotification, MerchantMember, MerchantProduct, MerchantProfile, MerchantTab, PendingApproval, DashboardFilteredStats } from "@/lib/merchant/types";
 import {
   ALL_TABS,
   OWNER_WORKSPACE_TABS,
   PRODUCT_DEFAULT_TAB,
+  PRODUCTS,
   TAB_HREF,
   TAB_LABELS,
   productForPathname,
   productForTab,
   tabForPathname,
+  type ComingSoonProduct,
 } from "@/lib/merchant/nav";
 import {
   approveStamp,
@@ -35,12 +37,14 @@ import {
   deleteCustomer,
   deleteMerchantAccount,
   inviteMember,
+  markInAppNotificationsRead,
   redeemRewardByCode,
   rejectStamp,
   removeMember,
   requestOfferStampOtp,
   setCustomerBanned,
   updateBranch,
+  updateCustomerMerchantNotes,
   updateMemberRole,
   updateMerchantProfile,
 } from "@/app/merchant/actions";
@@ -53,6 +57,7 @@ import { MerchantMobileMenu } from "./merchant-mobile-menu";
 import { MerchantNotificationsDrawer } from "./notifications-drawer";
 import { OnboardingPrompt } from "./onboarding-prompt";
 import { ProductRail } from "./product-rail";
+import { ComingSoonProductDrawer } from "./coming-soon-product-drawer";
 import { MerchantProfileEditScreen } from "./profile-edit-screen";
 import { MerchantWorkspaceProvider, type MerchantWorkspaceValue } from "./merchant-workspace-context";
 import { BranchSwitcher } from "./branch-switcher";
@@ -64,6 +69,7 @@ import {
   productNeedsOnboarding,
   type Entitlements,
 } from "@/lib/merchant/entitlements";
+import { accessibleProducts, memberCanAccessProduct } from "@/lib/merchant/product-access";
 import { maxBranchesFor } from "@/lib/merchant/plan-limits";
 import { MerchantGateSplash } from "./skeletons";
 import { ProductLockedGate } from "./product-locked-gate";
@@ -122,12 +128,15 @@ interface MerchantWorkspaceProps {
   dashboardStats: DashboardFilteredStats;
   customers: MerchantCustomer[];
   approvals: PendingApproval[];
+  inAppNotifications?: MerchantInAppNotification[];
   entitlements: Entitlements;
   branches: Branch[];
   members: MerchantMember[];
   role: MemberRole;
   activeBranchId: string | null;
   canViewAllBranches?: boolean;
+  /** empty = all products; owners always empty. */
+  memberProductIds?: MerchantProduct[];
   justJoined?: boolean;
   onSelectBranch: (branchId: string | null) => void | Promise<void>;
   onRefresh: () => Promise<void>;
@@ -140,12 +149,14 @@ export function MerchantExperience({
   dashboardStats,
   customers,
   approvals,
+  inAppNotifications: initialNotifications = [],
   entitlements,
   branches,
   members,
   role,
   activeBranchId,
   canViewAllBranches = true,
+  memberProductIds = [],
   justJoined = false,
   onSelectBranch,
   onRefresh,
@@ -193,15 +204,31 @@ export function MerchantExperience({
     }
   }, [role, activeTab, activeProduct, router]);
 
+  const allowedProducts = useMemo(
+    () => accessibleProducts(role, memberProductIds, PRODUCTS.map((p) => p.id)),
+    [role, memberProductIds],
+  );
+
+  // Teammates with restricted product access can't stay on a product they weren't granted.
+  useEffect(() => {
+    if (memberCanAccessProduct(role, memberProductIds, activeProduct)) return;
+    const fallback = allowedProducts[0] ?? "loyalty";
+    setActiveProduct(fallback);
+    router.replace(TAB_HREF[PRODUCT_DEFAULT_TAB[fallback]]);
+  }, [role, memberProductIds, activeProduct, allowedProducts, router]);
+
   const [profile, setProfile] = useState<MerchantProfile>(initialProfile);
   const [qrOpen, setQrOpen] = useState(false);
   const [qrProduct, setQrProduct] = useState<MerchantProduct>("loyalty");
   const [redeemOpen, setRedeemOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [inAppNotifications, setInAppNotifications] =
+    useState<MerchantInAppNotification[]>(initialNotifications);
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editSection, setEditSection] = useState<MerchantEditSection>(null);
   const [purchaseProductTarget, setPurchaseProductTarget] = useState<MerchantProduct | null>(null);
+  const [comingSoonProduct, setComingSoonProduct] = useState<ComingSoonProduct | null>(null);
   const [manageView, setManageView] = useState<"branches" | "team" | null>(null);
 
   // Latches: mount heavy drawers after first open so cold load skips their
@@ -236,18 +263,22 @@ export function MerchantExperience({
         toast.error("Only the owner can open this page.");
         return;
       }
+      const product = productForTab(tab);
+      if (product && !memberCanAccessProduct(role, memberProductIds, product)) {
+        toast.error("You don't have access to this product.");
+        return;
+      }
       if (tab === pathTab) {
         setPendingTab(null);
         return;
       }
-      const product = productForTab(tab);
       if (product) setActiveProduct(product);
       setPendingTab(tab);
       startNavTransition(() => {
         router.push(TAB_HREF[tab]);
       });
     },
-    [router, role, pathTab],
+    [router, role, pathTab, memberProductIds],
   );
 
   const openQr = useCallback(
@@ -263,6 +294,10 @@ export function MerchantExperience({
   // Switch product from the rail and land on that product's default tab.
   const goToProduct = useCallback(
     (product: MerchantProduct) => {
+      if (!memberCanAccessProduct(role, memberProductIds, product)) {
+        toast.error("You don't have access to this product.");
+        return;
+      }
       const tab = PRODUCT_DEFAULT_TAB[product];
       setActiveProduct(product);
       if (tab === pathTab) {
@@ -274,7 +309,7 @@ export function MerchantExperience({
         router.push(TAB_HREF[tab]);
       });
     },
-    [router, pathTab],
+    [router, pathTab, role, memberProductIds],
   );
 
   // After a successful in-dashboard purchase: refresh entitlements and route to
@@ -356,6 +391,10 @@ export function MerchantExperience({
     }
   }, [justJoined, initialProfile.businessName]);
 
+  useEffect(() => {
+    setInAppNotifications(initialNotifications);
+  }, [initialNotifications]);
+
   // In-app cue when the pending queue grows while the dashboard is open.
   const [prevPending, setPrevPending] = useState(approvals.length);
   useEffect(() => {
@@ -364,6 +403,14 @@ export function MerchantExperience({
     }
     setPrevPending(approvals.length);
   }, [approvals.length, prevPending]);
+
+  const openNotifications = useCallback(() => {
+    setNotifOpen(true);
+    const unreadIds = inAppNotifications.filter((n) => !n.read).map((n) => n.id);
+    if (unreadIds.length === 0) return;
+    setInAppNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    void markInAppNotificationsRead(unreadIds);
+  }, [inAppNotifications]);
 
   // Runs a server action then refreshes the bundle, surfacing errors as toasts.
   const run = useCallback(
@@ -410,6 +457,16 @@ export function MerchantExperience({
   const handleDeleteCustomer = useCallback(
     (id: string) => void run(() => deleteCustomer(id), "Customer removed"),
     [run],
+  );
+
+  const handleSaveCustomerNotes = useCallback(
+    async (id: string, notes: string) => {
+      const res = await updateCustomerMerchantNotes(id, notes);
+      if (!res.ok) return false;
+      await onRefresh();
+      return true;
+    },
+    [onRefresh],
   );
 
   const handleRequestOfferStampOtp = useCallback(
@@ -517,6 +574,7 @@ export function MerchantExperience({
       name?: string;
       role: MemberRole;
       branchIds?: string[];
+      productIds?: MerchantProduct[];
     }): Promise<boolean> => {
       const res = await inviteMember(input);
       if (!res.ok) {
@@ -538,8 +596,12 @@ export function MerchantExperience({
     [onRefresh],
   );
   const onUpdateMemberRole = useCallback(
-    (id: string, memberRole: MemberRole, branchIds?: string[]) =>
-      run(() => updateMemberRole(id, memberRole, branchIds), "Member updated"),
+    (
+      id: string,
+      memberRole: MemberRole,
+      branchIds?: string[],
+      productIds?: MerchantProduct[],
+    ) => run(() => updateMemberRole(id, memberRole, branchIds, productIds), "Member updated"),
     [run],
   );
   const onRemoveMember = useCallback(
@@ -547,7 +609,10 @@ export function MerchantExperience({
     [run],
   );
 
-  const notifCount = activeProduct === "loyalty" ? approvals.length : 0;
+  const unreadNotifCount = inAppNotifications.filter((n) => !n.read).length;
+  // Loyalty badge = live pending workload; otherwise unread in-app items.
+  const notifCount =
+    activeProduct === "loyalty" ? Math.max(approvals.length, unreadNotifCount) : unreadNotifCount;
   const activeBranch = branches.find((b) => b.id === activeBranchId) ?? null;
 
   const ownerName = `${profile.ownerFirstName} ${profile.ownerLastName}`.trim();
@@ -576,7 +641,6 @@ export function MerchantExperience({
       role,
       activeBranchId,
       canViewAllBranches,
-      avgOrderValue: profile.avgOrderValue,
       goToTab,
       onShowQr: openQr,
       onRedeemCode: () => setRedeemOpen(true),
@@ -602,6 +666,7 @@ export function MerchantExperience({
       onRedeem: handleRedeem,
       onBanCustomer: handleBanCustomer,
       onDeleteCustomer: handleDeleteCustomer,
+      onSaveCustomerNotes: handleSaveCustomerNotes,
       onRequestOfferStampOtp: handleRequestOfferStampOtp,
       onConfirmOfferStamp: handleConfirmOfferStamp,
       onEditSection: setEditSection,
@@ -637,6 +702,7 @@ export function MerchantExperience({
       handleRedeem,
       handleBanCustomer,
       handleDeleteCustomer,
+      handleSaveCustomerNotes,
       handleRequestOfferStampOtp,
       handleConfirmOfferStamp,
       handleSaveQueueBanner,
@@ -675,7 +741,9 @@ export function MerchantExperience({
         activeProduct={activeProduct}
         activeTab={activeTab}
         isOwner={role === "owner"}
+        allowedProducts={allowedProducts}
         onProductChange={goToProduct}
+        onComingSoonProduct={setComingSoonProduct}
         onTabChange={goToTab}
         pendingCount={approvals.length}
         onLogout={onLogout}
@@ -726,7 +794,7 @@ export function MerchantExperience({
               type="button"
               className="merchant-icon-btn merchant-notif-btn"
               aria-label="Notifications"
-              onClick={() => setNotifOpen(true)}
+              onClick={openNotifications}
             >
               <Bell size={18} strokeWidth={2.2} />
               {notifCount > 0 && (
@@ -773,6 +841,7 @@ export function MerchantExperience({
         activeTab={activeTab}
         onTabChange={goToTab}
         onProductChange={goToProduct}
+        onComingSoonProduct={setComingSoonProduct}
         onScan={() => setRedeemOpen(true)}
         pendingCount={approvals.length}
       />
@@ -791,10 +860,12 @@ export function MerchantExperience({
         activeProduct={activeProduct}
         role={role}
         entitlements={entitlements}
+        allowedProducts={allowedProducts}
         canPurchase={role === "owner"}
         userName={sidebarUserName}
         onTabChange={goToTab}
         onProductChange={goToProduct}
+        onComingSoonProduct={setComingSoonProduct}
         onUpgrade={(product) => {
           if (role !== "owner") {
             toast.error("Only the owner can upgrade plans.");
@@ -814,7 +885,6 @@ export function MerchantExperience({
           product={qrProduct}
           enabled={isProductEnabled(entitlements, qrProduct)}
           branchSlug={activeBranch && !activeBranch.isDefault ? activeBranch.slug : null}
-          branchName={activeBranch && !activeBranch.isDefault ? activeBranch.name : null}
           onClose={() => setQrOpen(false)}
         />
       )}
@@ -826,6 +896,11 @@ export function MerchantExperience({
           onRedeem={handleRedeem}
         />
       )}
+
+      <ComingSoonProductDrawer
+        product={comingSoonProduct}
+        onClose={() => setComingSoonProduct(null)}
+      />
 
       {purchaseOpened && (
         <ProductPurchaseDrawer
@@ -861,6 +936,7 @@ export function MerchantExperience({
         open={notifOpen}
         product={activeProduct}
         approvals={approvals}
+        notifications={inAppNotifications}
         onViewApprovals={() => goToTab("dashboard")}
         onClose={() => setNotifOpen(false)}
       />

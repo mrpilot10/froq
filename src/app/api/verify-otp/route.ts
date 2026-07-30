@@ -20,7 +20,8 @@ export const maxDuration = 30;
 const bodySchema = z.object({
   phone: z.string().min(8).max(20),
   otp: z.string().regex(new RegExp(`^\\d{4,6}$`)),
-  captchaToken: z.string().optional(),
+  // Client may send null when Turnstile is not configured / not yet ready.
+  captchaToken: z.string().nullish(),
 });
 
 function json(body: VerifyOtpResult, status: number) {

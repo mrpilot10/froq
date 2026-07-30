@@ -25,7 +25,8 @@ export const maxDuration = 30;
 
 const bodySchema = z.object({
   phone: z.string().min(8).max(20),
-  captchaToken: z.string().optional(),
+  // Client may send null when Turnstile is not configured / not yet ready.
+  captchaToken: z.string().nullish(),
 });
 
 function json(body: SendOtpResult, status: number) {
@@ -54,11 +55,11 @@ function userFacingError(error: unknown): string {
 
 export async function POST(request: Request) {
   try {
-    let parsed: { phone: string; captchaToken?: string };
+    let parsed: { phone: string; captchaToken?: string | null };
     try {
       parsed = bodySchema.parse(await request.json());
     } catch {
-      return json({ ok: false, message: "A valid phone number is required." }, 400);
+      return json({ ok: false, message: "Enter a valid mobile number." }, 400);
     }
 
     const phone = toCanonicalPhone(parsed.phone);

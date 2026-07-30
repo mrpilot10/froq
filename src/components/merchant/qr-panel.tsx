@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Download, ExternalLink } from "lucide-react";
+import { Check, Copy, Download, ExternalLink } from "lucide-react";
+import { toast } from "sonner";
 import type { MerchantProduct, MerchantProfile } from "@/lib/merchant/types";
 import { useMerchantQr } from "./use-merchant-qr";
 import { MerchantPosterCard } from "./poster-card";
@@ -13,23 +14,29 @@ const VIEWS: { value: QrView; label: string }[] = [
   { value: "poster", label: "Poster" },
 ];
 
-const QR_COPY: Record<MerchantProduct, { title: string; caption: (name: string) => string; alt: string }> = {
+const QR_COPY: Record<
+  MerchantProduct,
+  { title: string; caption: string; openLabel: string; tip: string; alt: string }
+> = {
   loyalty: {
     title: "Loyalty QR",
-    caption: (name) =>
-      `Display this at your counter. Customers scan it to join ${name}'s loyalty program.`,
+    caption: "Customers scan this QR to join your loyalty program.",
+    openLabel: "Open Join Page",
+    tip: "Display near your counter for the best scan rate.",
     alt: "Loyalty join QR code",
   },
   queue: {
     title: "Queue QR",
-    caption: (name) =>
-      `Display this at your entrance. Guests scan it to join ${name}'s live waitlist.`,
+    caption: "Guests scan this QR to join your live waitlist.",
+    openLabel: "Open Queue Page",
+    tip: "Display at your entrance for the best scan rate.",
     alt: "Queue join QR code",
   },
   reservation: {
     title: "Reservation QR",
-    caption: (name) =>
-      `Display this at your entrance or share the link. Guests scan it to request a table at ${name}.`,
+    caption: "Guests scan this QR to request a table.",
+    openLabel: "Open Booking Page",
+    tip: "Display at your entrance or share the link with guests.",
     alt: "Reservation request QR code",
   },
 };
@@ -44,16 +51,28 @@ export function MerchantQrPanel({
   product = "loyalty",
 }: MerchantQrPanelProps) {
   const [view, setView] = useState<QrView>("qr");
-  const { qrUrl, joinUrl, download } = useMerchantQr(profile, product);
+  const [copied, setCopied] = useState(false);
+  const { qrUrl, joinUrl, displayUrl, download } = useMerchantQr(profile, product);
   const copy = QR_COPY[product];
   // The printable poster template only exists for loyalty.
   const posterAvailable = product === "loyalty";
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(joinUrl);
+      setCopied(true);
+      toast.success("Link copied");
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      toast.error("Couldn't copy the link");
+    }
+  };
 
   return (
     <div className="merchant-settings-group">
       <h3 className="merchant-settings-title">{copy.title}</h3>
       <div className="panel-card merchant-qr-panel">
-        {posterAvailable && (
+        {posterAvailable ? (
           <div className="merchant-qr-tabs" role="tablist" aria-label="QR download options">
             {VIEWS.map((item) => (
               <button
@@ -68,48 +87,66 @@ export function MerchantQrPanel({
               </button>
             ))}
           </div>
-        )}
+        ) : null}
 
         {view === "qr" || !posterAvailable ? (
           <>
-            <p className="merchant-qr-caption">{copy.caption(profile.businessName)}</p>
+            <p className="merchant-qr-caption">{copy.caption}</p>
 
-            <div className="merchant-qr-frame">
+            <div className="merchant-qr-frame merchant-qr-frame--lg">
               {qrUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   className="merchant-qr-img"
                   src={qrUrl}
                   alt={copy.alt}
-                  width={200}
-                  height={200}
+                  width={240}
+                  height={240}
                 />
               ) : (
                 <div className="merchant-qr-skeleton" aria-hidden="true" />
               )}
             </div>
 
-            <div className="merchant-qr-url">{joinUrl}</div>
+            <p className="merchant-qr-drawer-tip">{copy.tip}</p>
+
+            <div className="merchant-qr-link">
+              <span className="merchant-qr-link-text" title={displayUrl}>
+                {displayUrl}
+              </span>
+              <button
+                type="button"
+                className="merchant-qr-link-copy"
+                onClick={() => void copyLink()}
+                aria-label={copied ? "Link copied" : "Copy link"}
+              >
+                {copied ? (
+                  <Check size={15} strokeWidth={2.6} />
+                ) : (
+                  <Copy size={15} strokeWidth={2.3} />
+                )}
+              </button>
+            </div>
 
             <div className="merchant-qr-actions">
+              <button
+                type="button"
+                className="cta-btn merchant-cta-accent merchant-qr-action"
+                onClick={download}
+                disabled={!qrUrl}
+              >
+                <Download size={17} strokeWidth={2.3} />
+                Download QR
+              </button>
               <a
-                className="cta-btn merchant-view-page-btn merchant-qr-action"
+                className="cta-btn merchant-qr-open merchant-qr-action"
                 href={joinUrl}
                 target="_blank"
                 rel="noopener noreferrer"
               >
                 <ExternalLink size={17} strokeWidth={2.3} />
-                View page
+                {copy.openLabel}
               </a>
-              <button
-                type="button"
-                className="cta-btn merchant-cta-accent merchant-qr-download merchant-qr-action"
-                onClick={download}
-                disabled={!qrUrl}
-              >
-                <Download size={17} strokeWidth={2.3} />
-                Download now
-              </button>
             </div>
           </>
         ) : (

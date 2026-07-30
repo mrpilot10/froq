@@ -403,3 +403,61 @@ export async function sendEmailVerificationCode(input: {
 
   return { ok: true };
 }
+
+export async function sendPendingApprovalsEscalationEmail(input: {
+  to: string;
+  name?: string;
+  businessName: string;
+  pendingCount: number;
+  reviewUrl: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const resend = getResend();
+  if (!resend) {
+    return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
+  }
+
+  const greeting = input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
+  const business = escapeHtml(input.businessName);
+  const count = Math.max(0, Math.floor(input.pendingCount));
+  const message =
+    count === 1
+      ? "1 customer is waiting for stamp approval."
+      : `${count} customers are waiting for stamp approval.`;
+
+  const html = brandedEmailHtml({
+    title: "Pending Stamp Approvals",
+    greeting,
+    bodyHtml: `<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      <strong style="color:${BRAND};">${escapeHtml(message)}</strong>
+      Review pending stamp requests for <strong style="color:${BRAND};">${business}</strong> so customers aren't kept waiting.
+    </p>`,
+    ctaLabel: "Review Pending Approvals",
+    ctaUrl: input.reviewUrl,
+  });
+
+  const { error } = await resend.emails.send({
+    from: fromAddress(),
+    to: input.to,
+    subject: `Pending Stamp Approvals — ${input.businessName}`,
+    html,
+    text: [
+      greeting,
+      "",
+      message,
+      `Review pending stamp requests for ${input.businessName}.`,
+      "",
+      `Review Pending Approvals: ${input.reviewUrl}`,
+      "",
+      `Need help? ${HELP_URL}`,
+      "",
+      "Cheers,",
+      "The Froq Team",
+    ].join("\n"),
+  });
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true };
+}

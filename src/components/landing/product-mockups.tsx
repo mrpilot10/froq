@@ -186,20 +186,20 @@ export function MerchantDashboardMockup() {
       </div>
 
       <div className="merchant-ltv-card lpm-ltv">
-        <span className="merchant-ltv-eyebrow">Average customer LTV</span>
-        <div className="merchant-ltv-value">₹4,200</div>
+        <span className="merchant-ltv-eyebrow">Loyalty Performance</span>
+        <div className="merchant-ltv-value">642</div>
         <div className="merchant-ltv-metrics">
           <div className="merchant-ltv-tile">
-            <span className="merchant-ltv-tile-label">Total lifetime value</span>
-            <span className="merchant-ltv-tile-value">₹2.7L</span>
+            <span className="merchant-ltv-tile-label">Active members</span>
+            <span className="merchant-ltv-tile-value">486</span>
           </div>
           <div className="merchant-ltv-tile">
-            <span className="merchant-ltv-tile-label">Avg. order</span>
-            <span className="merchant-ltv-tile-value">₹500</span>
+            <span className="merchant-ltv-tile-label">Stamps this week</span>
+            <span className="merchant-ltv-tile-value">318</span>
           </div>
           <div className="merchant-ltv-tile">
-            <span className="merchant-ltv-tile-label">Total customers</span>
-            <span className="merchant-ltv-tile-value">642</span>
+            <span className="merchant-ltv-tile-label">Rewards claimed</span>
+            <span className="merchant-ltv-tile-value">54</span>
           </div>
           <div className="merchant-ltv-tile">
             <span className="merchant-ltv-tile-label">Avg. visits</span>

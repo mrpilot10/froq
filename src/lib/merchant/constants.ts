@@ -22,13 +22,15 @@ export const MERCHANT_PROFILE: MerchantProfile = {
   rewardTitle: "Buy 4 coffees, get your 5th free",
   rewardName: "Free coffee",
   totalStamps: 5,
-  avgOrderValue: 220,
   restartAfterReward: true,
   rewardCooldownValue: 0,
   rewardCooldownUnit: "days",
   minPurchaseAmount: 0,
   stampNotifications: true,
   approvalNotifications: true,
+  notifyStaffPendingApprovals: true,
+  notifyManagerPendingApprovals: true,
+  notifyOwnerPendingApprovals: false,
   marketingEmails: true,
   queueOpenTime: "10:00",
   queueCloseTime: "22:00",
@@ -71,6 +73,7 @@ export const DEMO_CUSTOMERS: MerchantCustomer[] = [
     status: "active",
     lastVisit: "Today",
     memberSince: "Jun 2026",
+    merchantNotes: "",
   },
   {
     id: "c2",
@@ -84,6 +87,7 @@ export const DEMO_CUSTOMERS: MerchantCustomer[] = [
     status: "reward_ready",
     lastVisit: "Today",
     memberSince: "May 2026",
+    merchantNotes: "",
   },
   {
     id: "c3",
@@ -96,6 +100,7 @@ export const DEMO_CUSTOMERS: MerchantCustomer[] = [
     status: "claimed",
     lastVisit: "Yesterday",
     memberSince: "Apr 2026",
+    merchantNotes: "",
   },
   {
     id: "c4",
@@ -108,6 +113,7 @@ export const DEMO_CUSTOMERS: MerchantCustomer[] = [
     status: "active",
     lastVisit: "Jun 17",
     memberSince: "Jun 2026",
+    merchantNotes: "",
   },
   {
     id: "c5",
@@ -120,6 +126,7 @@ export const DEMO_CUSTOMERS: MerchantCustomer[] = [
     status: "active",
     lastVisit: "Jun 16",
     memberSince: "May 2026",
+    merchantNotes: "",
   },
 ];
 
@@ -174,7 +181,7 @@ export const MERCHANT_PLANS: Record<MerchantProduct, MerchantPlan> = {
     features: [
       "Unlimited loyalty members",
       "Real-time approvals & QR scanner",
-      "Customer lifetime-value analytics",
+      "Visit and reward insights",
     ],
   },
   queue: {

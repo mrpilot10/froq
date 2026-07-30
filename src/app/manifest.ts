@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Froq Merchant",
     short_name: "Froq",
-    description: "Manage your loyalty program, approvals, and customer LTV with Froq.",
+    description: "Manage your loyalty program, approvals, and customers with Froq.",
     start_url: "/merchant",
     display: "standalone",
     background_color: "#ffffff",

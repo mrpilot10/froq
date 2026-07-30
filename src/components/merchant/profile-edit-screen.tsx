@@ -383,18 +383,6 @@ export function MerchantProfileEditScreen({
               />
               <span className="merchant-field-hint">How many stamps a customer collects to claim the reward (minimum 5)</span>
             </label>
-            <label className="auth-field">
-              <span className="auth-label">Order value (₹)</span>
-              <input
-                className="auth-input"
-                type="number"
-                min={0}
-                step={10}
-                value={profile.avgOrderValue}
-                onChange={(e) => updateField("avgOrderValue", Number(e.target.value))}
-              />
-              <span className="merchant-field-hint">Used to calculate customer lifetime value</span>
-            </label>
             <ToggleRow
               label="Start again after reward"
               description="Let customers collect stamps on a new card after they claim a reward"
@@ -458,16 +446,22 @@ export function MerchantProfileEditScreen({
               onChange={(v) => updateField("stampNotifications", v)}
             />
             <ToggleRow
-              label="Pending approvals"
-              description="Alert for stamps awaiting your review"
-              checked={profile.approvalNotifications}
-              onChange={(v) => updateField("approvalNotifications", v)}
+              label="Notify Staff for pending stamp approvals"
+              description="Email and in-app reminder after 3 hours if stamps are still waiting"
+              checked={profile.notifyStaffPendingApprovals}
+              onChange={(v) => updateField("notifyStaffPendingApprovals", v)}
             />
             <ToggleRow
-              label="Marketing emails"
-              description="Product updates and tips from Froq"
-              checked={profile.marketingEmails}
-              onChange={(v) => updateField("marketingEmails", v)}
+              label="Notify Managers for pending stamp approvals"
+              description="Email and in-app reminder after 6 hours if stamps are still waiting"
+              checked={profile.notifyManagerPendingApprovals}
+              onChange={(v) => updateField("notifyManagerPendingApprovals", v)}
+            />
+            <ToggleRow
+              label="Notify Owners for pending stamp approvals"
+              description="Include owners in escalation reminders"
+              checked={profile.notifyOwnerPendingApprovals}
+              onChange={(v) => updateField("notifyOwnerPendingApprovals", v)}
             />
           </>
         )}

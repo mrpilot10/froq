@@ -31,7 +31,6 @@ export interface MerchantWorkspaceValue {
   role: MemberRole;
   activeBranchId: string | null;
   canViewAllBranches: boolean;
-  avgOrderValue: number;
   goToTab: (tab: MerchantTab) => void;
   onShowQr: (product?: MerchantProduct) => void;
   onRedeemCode: () => void;
@@ -48,11 +47,13 @@ export interface MerchantWorkspaceValue {
     name?: string;
     role: MemberRole;
     branchIds?: string[];
+    productIds?: MerchantProduct[];
   }) => Promise<boolean>;
   onUpdateMemberRole: (
     id: string,
     role: MemberRole,
     branchIds?: string[],
+    productIds?: MerchantProduct[],
   ) => Promise<boolean>;
   onRemoveMember: (id: string) => Promise<boolean>;
   onApprove: (id: string) => void;
@@ -60,6 +61,7 @@ export interface MerchantWorkspaceValue {
   onRedeem: (code: string) => Promise<{ ok: boolean; error?: string }>;
   onBanCustomer: (id: string) => void;
   onDeleteCustomer: (id: string) => void;
+  onSaveCustomerNotes: (id: string, notes: string) => Promise<boolean>;
   onRequestOfferStampOtp: (customerId: string) => Promise<{
     ok: boolean;
     error?: string;

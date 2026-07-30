@@ -206,37 +206,39 @@ export function LoyaltyAnalyticsView({ stats, sort, loading }: LoyaltyAnalyticsV
         </div>
       </section>
 
-      <div className="ax-grid-2">
-        <section className="merchant-section">
-          <div className="merchant-section-head">
-            <h3 className="merchant-section-label">Customer visits</h3>
-            <span className="merchant-section-meta">
-              {rangeError ? "Unavailable" : `${display.stampsInRange} stamps`}
-            </span>
-          </div>
-          <ChartPanel
-            title={display.chartTitle}
-            sub={display.chartSub}
-            loading={loading}
-            meta={rangeError ? undefined : `${display.stampsInRange}`}
-          >
-            {rangeError ? (
-              <div className="merchant-empty" style={{ padding: "1.5rem 0" }}>
-                <p className="merchant-empty-title">Couldn&apos;t load stats</p>
-                <p className="merchant-empty-sub">
-                  Visit chart unavailable right now. Try again in a moment.
-                </p>
-              </div>
-            ) : (
-              <ActivityChart
-                buckets={chartBuckets}
-                max={maxVisits}
-                showValues={chartBuckets.length <= 10}
-              />
-            )}
-          </ChartPanel>
-        </section>
+      <section className="merchant-section">
+        <div className="merchant-section-head">
+          <h3 className="merchant-section-label">Customer visits</h3>
+          <span className="merchant-section-meta">
+            {rangeError ? "Unavailable" : `${display.stampsInRange} stamps`}
+          </span>
+        </div>
+        <ChartPanel
+          title={display.chartTitle}
+          sub={display.chartSub}
+          loading={loading}
+          meta={rangeError ? undefined : `${display.stampsInRange}`}
+        >
+          {rangeError ? (
+            <div className="merchant-empty" style={{ padding: "1.5rem 0" }}>
+              <p className="merchant-empty-title">Couldn&apos;t load stats</p>
+              <p className="merchant-empty-sub">
+                Visit chart unavailable right now. Try again in a moment.
+              </p>
+            </div>
+          ) : (
+            <ActivityChart
+              buckets={chartBuckets}
+              max={maxVisits}
+              showValues={chartBuckets.length <= 10}
+            />
+          )}
+        </ChartPanel>
+      </section>
 
+      {/* Rings + donut are similar density, so equal-height stretch stays tidy.
+          The funnel stays full-width (same as queue) so it never pads a short card. */}
+      <div className="ax-grid-2">
         <section className="merchant-section">
           <div className="merchant-section-head">
             <h3 className="merchant-section-label">Health rates</h3>
@@ -261,9 +263,7 @@ export function LoyaltyAnalyticsView({ stats, sort, loading }: LoyaltyAnalyticsV
             </div>
           </div>
         </section>
-      </div>
 
-      <div className="ax-grid-2">
         <section className="merchant-section">
           <div className="merchant-section-head">
             <h3 className="merchant-section-label">Customer mix</h3>
@@ -276,9 +276,9 @@ export function LoyaltyAnalyticsView({ stats, sort, loading }: LoyaltyAnalyticsV
             />
           </div>
         </section>
-
-        <FunnelSection title="Loyalty funnel" stages={display.funnel} />
       </div>
+
+      <FunnelSection title="Loyalty funnel" stages={display.funnel} />
 
       <TopCustomersSection customers={display.topCustomers} />
 

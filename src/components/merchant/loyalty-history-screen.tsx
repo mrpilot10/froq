@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Gift, History, Stamp, Users, type LucideIcon } from "lucide-react";
+import { ChevronDown, ChevronRight, Gift, History, Stamp, Users, type LucideIcon } from "lucide-react";
+import { toast } from "sonner";
 import { getLoyaltyHistory, type LoyaltyHistoryEvent } from "@/app/merchant/actions";
 import { useMerchantWorkspace } from "@/components/merchant/merchant-workspace-context";
-import { ActorChip } from "@/components/merchant/actor-chip";
+import { CustomerDrawer } from "@/components/merchant/customer-drawer";
+import { ROLE_LABELS } from "@/lib/merchant/roles";
+import type { MemberRole } from "@/lib/merchant/types";
 
 type RangeKey = "7d" | "30d" | "6m" | "all";
 type SortKey = "newest" | "oldest";
@@ -33,6 +36,15 @@ function initials(name: string) {
   if (parts.length === 0) return "?";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
+
+function staffLine(name: string | null, role: MemberRole | null) {
+  const trimmed = name?.trim();
+  if (!trimmed) return null;
+  return {
+    name: trimmed,
+    roleLabel: role ? ROLE_LABELS[role] : null,
+  };
 }
 
 /** Summary tile that shows a shimmer instead of a misleading 0 while loading. */
@@ -100,11 +112,22 @@ interface HistorySnapshot {
 }
 
 export function LoyaltyHistoryScreen() {
-  const { profile, activeBranchId } = useMerchantWorkspace();
+  const {
+    profile,
+    activeBranchId,
+    customers,
+    role,
+    onBanCustomer,
+    onDeleteCustomer,
+    onSaveCustomerNotes,
+    onRequestOfferStampOtp,
+    onConfirmOfferStamp,
+  } = useMerchantWorkspace();
   const [range, setRange] = useState<RangeKey>("7d");
   const [sort, setSort] = useState<SortKey>("newest");
   const [type, setType] = useState<TypeKey>("all");
   const [snapshot, setSnapshot] = useState<HistorySnapshot | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const days = RANGES.find((r) => r.id === range)?.days ?? null;
   const requestKey = `${activeBranchId ?? "all"}:${days ?? "all"}`;
@@ -140,10 +163,10 @@ export function LoyaltyHistoryScreen() {
   const totals = useMemo(() => {
     const stamps = events.filter((e) => e.type === "stamp").length;
     const rewards = events.filter((e) => e.type === "reward").length;
-    const customers = new Set(
+    const uniqueCustomers = new Set(
       events.map((e) => e.customerId).filter((id): id is string => Boolean(id)),
     ).size;
-    return { stamps, rewards, customers };
+    return { stamps, rewards, customers: uniqueCustomers };
   }, [events]);
 
   // Insert a day heading whenever the calendar day changes down the list.
@@ -160,6 +183,21 @@ export function LoyaltyHistoryScreen() {
     }
     return out;
   }, [visible, now]);
+
+  const selected = customers.find((c) => c.id === selectedId) ?? null;
+
+  const openCustomer = (event: LoyaltyHistoryEvent) => {
+    if (!event.customerId) {
+      toast.error("Customer record is no longer available");
+      return;
+    }
+    const match = customers.find((c) => c.id === event.customerId);
+    if (!match) {
+      toast.error("Customer record is no longer available");
+      return;
+    }
+    setSelectedId(match.id);
+  };
 
   return (
     <div className="tab-screen">
@@ -262,33 +300,77 @@ export function LoyaltyHistoryScreen() {
                 {heading}
               </div>
             ) : event ? (
-              <div key={key} className="panel-card lhist-item">
-                <span className={`lhist-icon lhist-icon--${event.type}`}>
-                  {event.type === "stamp" ? (
-                    <Stamp size={17} strokeWidth={2.3} />
-                  ) : (
-                    <Gift size={17} strokeWidth={2.3} />
-                  )}
-                </span>
-                <div className="lhist-copy">
-                  <div className="lhist-title">
-                    <span className="lhist-avatar">{initials(event.customerName)}</span>
-                    {event.customerName}
-                  </div>
-                  <div className="lhist-sub">
-                    {event.type === "stamp" ? "Stamp collected" : "Reward redeemed"}
-                    {" · "}
-                    {formatWhen(event.atMs)}
-                  </div>
-                </div>
-                {/* Nothing trails rows from before attribution — the icon and
-                    subtitle already say what happened and when. */}
-                <ActorChip name={event.staffName} role={event.staffRole} />
-              </div>
+              (() => {
+                const staff = staffLine(event.staffName, event.staffRole);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className="panel-card lhist-item lhist-item--clickable"
+                    onClick={() => openCustomer(event)}
+                  >
+                    <span className={`lhist-icon lhist-icon--${event.type}`}>
+                      {event.type === "stamp" ? (
+                        <Stamp size={17} strokeWidth={2.3} />
+                      ) : (
+                        <Gift size={17} strokeWidth={2.3} />
+                      )}
+                    </span>
+
+                    <div className="lhist-copy">
+                      <div className="lhist-title">{event.customerName}</div>
+                      {staff ? (
+                        <div className="lhist-actor">
+                          <span className="lhist-actor-avatar" aria-hidden>
+                            {initials(staff.name)}
+                          </span>
+                          <span className="lhist-actor-text">
+                            <span className="lhist-actor-by">By </span>
+                            <span className="lhist-actor-name">{staff.name}</span>
+                            {staff.roleLabel ? (
+                              <span className="lhist-actor-role">{staff.roleLabel}</span>
+                            ) : null}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="lhist-actor lhist-actor--muted">Staff not recorded</div>
+                      )}
+                    </div>
+
+                    <div className="lhist-meta">
+                      <span className={`lhist-meta-action lhist-meta-action--${event.type}`}>
+                        {event.type === "stamp" ? "Stamp collected" : "Reward claimed"}
+                      </span>
+                      <span className="lhist-meta-when">{formatWhen(event.atMs)}</span>
+                    </div>
+
+                    <ChevronRight
+                      size={16}
+                      strokeWidth={2.2}
+                      className="lhist-chevron"
+                      aria-hidden
+                    />
+                  </button>
+                );
+              })()
             ) : null,
           )}
         </div>
       )}
+
+      <CustomerDrawer
+        customer={selected}
+        role={role}
+        onClose={() => setSelectedId(null)}
+        onBan={onBanCustomer}
+        onDelete={(id) => {
+          onDeleteCustomer(id);
+          setSelectedId(null);
+        }}
+        onSaveNotes={onSaveCustomerNotes}
+        onRequestOfferStampOtp={onRequestOfferStampOtp}
+        onConfirmOfferStamp={onConfirmOfferStamp}
+      />
     </div>
   );
 }
