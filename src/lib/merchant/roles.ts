@@ -25,6 +25,11 @@ export function canViewAnalytics(role: MemberRole): boolean {
   return role === "owner" || role === "manager";
 }
 
+/** Global business settings (`/merchant/settings`) — owners and managers only. */
+export function canViewBusinessSettings(role: MemberRole): boolean {
+  return role === "owner" || role === "manager";
+}
+
 /** Roles assignable when inviting or editing a teammate. */
 export const ASSIGNABLE_ROLES: MemberRole[] = ["owner", "manager", "staff"];
 
@@ -36,8 +41,8 @@ export const ROLE_LABELS: Record<MemberRole, string> = {
 
 export const ROLE_HINTS: Record<MemberRole, string> = {
   owner: "Full access — team, settings, customers, analytics, and billing.",
-  manager: "Sees customer details, analytics, and can offer stamps via OTP.",
-  staff: "Can offer stamps via OTP only — contact details and analytics stay hidden.",
+  manager: "Sees customer details, analytics, business settings, and can offer stamps via OTP.",
+  staff: "Can offer stamps via OTP only — contact details, analytics, and business settings stay hidden.",
 };
 
 export function normalizeMemberRole(role: string | null | undefined): MemberRole {

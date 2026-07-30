@@ -117,6 +117,9 @@ export const OWNER_WORKSPACE_TABS: MerchantTab[] = ["customers"];
 /** Tabs only owners and managers may open. */
 export const ANALYTICS_WORKSPACE_TABS: MerchantTab[] = ["analytics"];
 
+/** Global business settings — owners and managers only. */
+export const BUSINESS_SETTINGS_TABS: MerchantTab[] = ["profile"];
+
 const WORKSPACE_TABS = new Set<MerchantTab>(WORKSPACE_NAV.map((i) => i.id));
 
 /** True for product-agnostic hubs: analytics, all customers, business settings. */
