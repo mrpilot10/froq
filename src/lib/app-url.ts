@@ -16,7 +16,7 @@
  * QRs), use getPublicAppOrigin() — it never returns localhost.
  */
 const LOCAL_HOST = /localhost|127\.0\.0\.1/i;
-const DEFAULT_PUBLIC_ORIGIN = "https://froq.io";
+const DEFAULT_PUBLIC_ORIGIN = "https://www.froq.io";
 
 function normalizeOrigin(raw: string): string {
   const trimmed = raw.trim().replace(/\/$/, "");
@@ -67,11 +67,14 @@ export function getPublicAppOrigin(): string {
     const origin = normalizeOrigin(raw);
     if (!origin || LOCAL_HOST.test(origin)) continue;
     try {
-      if (/\.vercel\.app$/i.test(new URL(origin).hostname)) continue;
+      const host = new URL(origin).hostname;
+      if (/\.vercel\.app$/i.test(host)) continue;
+      // Prefer www — apex froq.io 308-redirects, which breaks email images.
+      if (host === "froq.io") return DEFAULT_PUBLIC_ORIGIN;
+      return origin;
     } catch {
       continue;
     }
-    return origin;
   }
 
   return DEFAULT_PUBLIC_ORIGIN;
@@ -79,11 +82,14 @@ export function getPublicAppOrigin(): string {
 
 /**
  * Rewrite any localhost (host or redirect_to query) to the public origin.
+ * Also normalizes apex froq.io → www so email clients don't hit 308 redirects.
  * Used for email CTA + "having trouble" footer links.
  */
 export function toPublicEmailUrl(url: string): string {
   const origin = getPublicAppOrigin();
-  return url.replace(/https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/gi, origin);
+  return url
+    .replace(/https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/gi, origin)
+    .replace(/https?:\/\/froq\.io(?![\w.])/gi, DEFAULT_PUBLIC_ORIGIN);
 }
 
 /** Absolute customer hub URL for the permanent publicToken. */

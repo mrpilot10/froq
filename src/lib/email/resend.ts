@@ -5,10 +5,12 @@ import { getPublicAppOrigin, toPublicEmailUrl } from "@/lib/app-url";
 
 const BRAND = "#004353";
 const ACCENT = "#00f47b";
+/** Apex froq.io 308s to www — many clients won't load redirected images. */
+const EMAIL_ASSET_ORIGIN = "https://www.froq.io";
 function logoUrl() {
-  return `${getPublicAppOrigin()}/froq-mark.png`;
+  return `${EMAIL_ASSET_ORIGIN}/froq-mark.png`;
 }
-const HELP_URL = "https://www.froq.io/help";
+const HELP_URL = `${EMAIL_ASSET_ORIGIN}/help`;
 const YEAR = new Date().getFullYear();
 
 function getResend() {
