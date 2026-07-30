@@ -66,6 +66,7 @@ import { sendPasswordResetEmail, sendTeamInviteEmail } from "@/lib/email/resend"
 import { getPublicAppOrigin } from "@/lib/app-url";
 import {
   ASSIGNABLE_ROLES,
+  canViewAnalytics,
   canViewCustomerData,
   normalizeMemberRole,
 } from "@/lib/merchant/roles";
@@ -258,8 +259,10 @@ export async function getDashboardStats(
     } = await supabase.auth.getUser();
     if (!user) return null;
 
-    const merchantId = await resolveMerchantId(supabase, user.id);
-    if (!merchantId) return null;
+    const ctx = await currentMerchant(supabase, user.id);
+    if (!ctx || !canViewAnalytics(ctx.role)) return null;
+
+    const merchantId = ctx.id;
 
     const { data: merchantRow } = await supabase
       .from("merchants")

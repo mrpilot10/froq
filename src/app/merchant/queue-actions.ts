@@ -13,6 +13,7 @@ import {
 } from "@/lib/merchant/server-context";
 import { resolveBranchFilterForUser } from "@/lib/merchant/branch-access";
 import { dashboardRangeStart } from "@/lib/merchant/analytics";
+import { canViewAnalytics } from "@/lib/merchant/roles";
 import {
   computeQueueAnalytics,
   filterQueueDataByStaff,
@@ -916,10 +917,15 @@ export async function getQueueAnalytics(input?: {
     } = await supabase.auth.getUser();
     if (!user) return { ok: false, error: "Not authenticated.", ...EMPTY_QUEUE_ANALYTICS };
 
-    const merchantId = await resolveMerchantId(supabase, user.id);
-    if (!merchantId) {
-      return { ok: false, error: "Merchant account not found.", ...EMPTY_QUEUE_ANALYTICS };
+    const ctx = await requireMerchantContext();
+    if (!ctx.ok) {
+      return { ok: false, error: ctx.error, ...EMPTY_QUEUE_ANALYTICS };
     }
+    if (!canViewAnalytics(ctx.role)) {
+      return { ok: false, error: "You do not have access to analytics.", ...EMPTY_QUEUE_ANALYTICS };
+    }
+
+    const merchantId = ctx.merchantId;
 
     const branchFilter = await resolveBranchFilterForUser(
       supabase,

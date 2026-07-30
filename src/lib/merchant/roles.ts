@@ -15,9 +15,14 @@ export function canManageTeam(role: MemberRole): boolean {
   return role === "owner";
 }
 
-/** Workspace-level All customers / All analytics hubs (owners only). */
+/** Workspace-level All customers hub (owners only). */
 export function canViewWorkspaceHubs(role: MemberRole): boolean {
   return role === "owner";
+}
+
+/** Analytics hub — owners and managers only. */
+export function canViewAnalytics(role: MemberRole): boolean {
+  return role === "owner" || role === "manager";
 }
 
 /** Roles assignable when inviting or editing a teammate. */
@@ -30,9 +35,9 @@ export const ROLE_LABELS: Record<MemberRole, string> = {
 };
 
 export const ROLE_HINTS: Record<MemberRole, string> = {
-  owner: "Full access — team, settings, customers, and billing.",
-  manager: "Sees customer details and can offer stamps via OTP.",
-  staff: "Can offer stamps via OTP only — contact details stay hidden.",
+  owner: "Full access — team, settings, customers, analytics, and billing.",
+  manager: "Sees customer details, analytics, and can offer stamps via OTP.",
+  staff: "Can offer stamps via OTP only — contact details and analytics stay hidden.",
 };
 
 export function normalizeMemberRole(role: string | null | undefined): MemberRole {

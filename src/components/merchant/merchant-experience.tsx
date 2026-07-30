@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import type { Branch, MemberRole, MerchantCustomer, MerchantEditSection, MerchantInAppNotification, MerchantMember, MerchantProduct, MerchantProfile, MerchantTab, PendingApproval, DashboardFilteredStats } from "@/lib/merchant/types";
 import {
   ALL_TABS,
+  ANALYTICS_WORKSPACE_TABS,
   OWNER_WORKSPACE_TABS,
   PRODUCT_DEFAULT_TAB,
   PRODUCTS,
@@ -71,6 +72,7 @@ import {
   type Entitlements,
 } from "@/lib/merchant/entitlements";
 import { accessibleProducts, memberCanAccessProduct } from "@/lib/merchant/product-access";
+import { canViewAnalytics } from "@/lib/merchant/roles";
 import { maxBranchesFor } from "@/lib/merchant/plan-limits";
 import { MerchantGateSplash } from "./skeletons";
 import { ProductLockedGate } from "./product-locked-gate";
@@ -227,6 +229,14 @@ export function MerchantExperience({
     goToAllowedProductHome();
   }, [role, activeTab, goToAllowedProductHome]);
 
+  // Analytics is managers + owners only.
+  useEffect(() => {
+    if (!ANALYTICS_WORKSPACE_TABS.includes(activeTab)) return;
+    if (canViewAnalytics(role)) return;
+    setAccessDeniedOpen(true);
+    goToAllowedProductHome();
+  }, [role, activeTab, goToAllowedProductHome]);
+
   // Teammates with restricted product access can't stay on a product they weren't granted.
   useEffect(() => {
     const pathBlocked =
@@ -327,6 +337,10 @@ export function MerchantExperience({
         return;
       }
       if (OWNER_WORKSPACE_TABS.includes(tab) && role !== "owner") {
+        setAccessDeniedOpen(true);
+        return;
+      }
+      if (ANALYTICS_WORKSPACE_TABS.includes(tab) && !canViewAnalytics(role)) {
         setAccessDeniedOpen(true);
         return;
       }

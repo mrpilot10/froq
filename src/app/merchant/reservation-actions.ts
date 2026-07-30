@@ -10,6 +10,7 @@ import {
 } from "@/lib/merchant/server-context";
 import { resolveBranchFilterForUser } from "@/lib/merchant/branch-access";
 import { dashboardRangeStart } from "@/lib/merchant/analytics";
+import { canViewAnalytics } from "@/lib/merchant/roles";
 import type { DashboardDateRange } from "@/lib/merchant/types";
 import {
   addDays,
@@ -685,6 +686,9 @@ export async function getReservationAnalytics(input?: {
   try {
     const ctx = await requireMerchantContext();
     if (!ctx.ok) return { ok: false, error: ctx.error };
+    if (!canViewAnalytics(ctx.role)) {
+      return { ok: false, error: "You do not have access to analytics." };
+    }
 
     const branchId = await scopedBranchId(ctx, input?.branchId);
     const start = dashboardRangeStart(input?.range ?? "30d");

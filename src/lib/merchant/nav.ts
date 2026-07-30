@@ -110,10 +110,12 @@ export const WORKSPACE_NAV: NavItem[] = [
 ];
 
 /**
- * Owner-only workspace hubs. Analytics stays open to every role — it hosts the
- * loyalty analytics that used to live under the loyalty product nav.
+ * Owner-only workspace hubs. Analytics is gated separately for managers + owners.
  */
 export const OWNER_WORKSPACE_TABS: MerchantTab[] = ["customers"];
+
+/** Tabs only owners and managers may open. */
+export const ANALYTICS_WORKSPACE_TABS: MerchantTab[] = ["analytics"];
 
 const WORKSPACE_TABS = new Set<MerchantTab>(WORKSPACE_NAV.map((i) => i.id));
 
