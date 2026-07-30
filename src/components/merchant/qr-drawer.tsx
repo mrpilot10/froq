@@ -34,7 +34,7 @@ const DRAWER_COPY: Record<
     sub: "Use this QR to enroll customers.",
     lockedSub: "Customers will scan this to join your loyalty program.",
     tip: "Display near your counter for the best scan rate.",
-    openLabel: "Open Join Page",
+    openLabel: "Open Loyalty Page",
     alt: "Loyalty join QR code",
   },
   queue: {
@@ -144,7 +144,12 @@ export function MerchantQrDrawer({
           <p className="merchant-qr-drawer-sub">
             {product === "loyalty"
               ? branchName
-                ? `Use this QR to enroll customers. Every branch has its own code — this one is for ${branchName}.`
+                ? (
+                    <>
+                      Use this QR to enroll customers. Every branch has its own code — this one is
+                      for <strong>{branchName}</strong>.
+                    </>
+                  )
                 : "Use this QR to enroll customers. Every branch has its own code — download the correct one."
               : copy.sub}
           </p>
@@ -228,9 +233,14 @@ export function MerchantQrDrawer({
         ) : (
           <MerchantPosterCard
             caption={
-              branchName
-                ? `Poster for ${branchName}. Every branch has its own QR — download the correct one.`
-                : "Every branch has its own QR — download the correct one. Ready to print on the Froq template."
+              branchName ? (
+                <>
+                  Poster for <strong>{branchName}</strong>. Every branch has its own QR — download
+                  the correct one.
+                </>
+              ) : (
+                "Every branch has its own QR — download the correct one. Ready to print on the Froq template."
+              )
             }
           />
         )}

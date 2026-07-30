@@ -21,7 +21,7 @@ const QR_COPY: Record<
   loyalty: {
     title: "Loyalty QR",
     caption: "Use this QR to enroll customers.",
-    openLabel: "Open Join Page",
+    openLabel: "Open Loyalty Page",
     tip: "Display near your counter for the best scan rate.",
     alt: "Loyalty join QR code",
   },
@@ -127,7 +127,12 @@ export function MerchantQrPanel({
             <p className="merchant-qr-caption">
               {product === "loyalty"
                 ? branchName
-                  ? `Use this QR to enroll customers. Every branch has its own code — this one is for ${branchName}.`
+                  ? (
+                      <>
+                        Use this QR to enroll customers. Every branch has its own code — this one is
+                        for <strong>{branchName}</strong>.
+                      </>
+                    )
                   : "Use this QR to enroll customers. Every branch has its own code — download the correct one."
                 : copy.caption}
             </p>
@@ -191,9 +196,14 @@ export function MerchantQrPanel({
         ) : (
           <MerchantPosterCard
             caption={
-              branchName
-                ? `Poster for ${branchName}. Every branch has its own QR — download the correct one.`
-                : "Every branch has its own QR — download the correct one. Ready to print on the Froq template."
+              branchName ? (
+                <>
+                  Poster for <strong>{branchName}</strong>. Every branch has its own QR — download
+                  the correct one.
+                </>
+              ) : (
+                "Every branch has its own QR — download the correct one. Ready to print on the Froq template."
+              )
             }
           />
         )}

@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Plus_Jakarta_Sans } from "next/font/google";
-import { Toaster } from "sonner";
+import { AppToaster } from "@/components/app-toaster";
 import { KeyboardAware } from "@/components/shared/keyboard-aware";
 import { PwaBoot } from "@/components/shared/pwa-boot";
 import { FROQ_LOGO_192_SRC, FROQ_LOGO_512_SRC, FROQ_LOGO_SRC } from "@/lib/brand";
@@ -55,10 +55,7 @@ export default function RootLayout({
         <PwaBoot />
         {children}
         <KeyboardAware />
-        <Toaster
-          position="bottom-center"
-          toastOptions={{ className: "froq-toast" }}
-        />
+        <AppToaster />
         <SpeedInsights />
       </body>
     </html>

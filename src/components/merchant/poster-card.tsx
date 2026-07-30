@@ -1,10 +1,11 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Download, Loader2, RefreshCw } from "lucide-react";
 import { useMerchantPoster } from "./use-merchant-poster";
 
 interface MerchantPosterCardProps {
-  caption?: string;
+  caption?: ReactNode;
 }
 
 export function MerchantPosterCard({ caption }: MerchantPosterCardProps) {

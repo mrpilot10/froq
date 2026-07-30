@@ -2433,7 +2433,8 @@ body {
 }
 
 /* Real input sits transparently over the boxes so a single tap focuses it and
-   iOS one-time-code auto-fill targets one field. */
+   iOS one-time-code auto-fill targets one field.
+   Keep opacity at 1 — iOS Safari suppresses long-press Paste on opacity:0 inputs. */
 .auth-otp-field {
   position: absolute;
   inset: 0;
@@ -2443,11 +2444,15 @@ body {
   background: transparent;
   color: transparent;
   caret-color: transparent;
+  -webkit-text-fill-color: transparent;
   font-size: 16px; /* >=16px avoids iOS zoom-on-focus */
-  text-align: center;
+  letter-spacing: 0.5em;
+  text-align: left;
   outline: none;
-  opacity: 0;
+  opacity: 1;
   z-index: 2;
+  -webkit-user-select: text;
+  user-select: text;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -13512,6 +13517,12 @@ body {
   color: color-mix(in srgb, var(--brand-deep) 62%, transparent);
 }
 
+.merchant-qr-caption strong,
+.merchant-qr-drawer-sub strong {
+  font-weight: 800;
+  color: var(--brand-deep);
+}
+
 .merchant-qr-panel-biz {
   margin: 0;
   font-size: 0.95rem;
@@ -13664,14 +13675,22 @@ body {
 
 .merchant-qr-actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: stretch;
   gap: 8px;
   width: 100%;
 }
 
-.merchant-qr-action {
-  width: 100%;
+.merchant-qr-actions .merchant-qr-action {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
   text-decoration: none;
+  box-sizing: border-box;
+  padding-left: 10px;
+  padding-right: 10px;
+  font-size: 0.88rem;
+  white-space: nowrap;
 }
 
 .merchant-qr-action:disabled {
