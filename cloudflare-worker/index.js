@@ -1,10 +1,15 @@
 /**
  * Cloudflare Worker — Google Places search endpoint.
  *
- * Deploy / paste into the Cloudflare Dashboard Workers editor for
- * https://froq-api.capt-tanmay10.workers.dev
+ * Deployed as the `froq-apoi` Worker:
+ * https://froq-apoi.capt-tanmay10.workers.dev
  *
- * Requires a Secret named GOOGLE_API_KEY.
+ * Deploy with:
+ *   npx wrangler deploy cloudflare-worker/index.js --name froq-apoi \
+ *     --compatibility-date 2024-11-01
+ *
+ * Requires a Secret named GOOGLE_API_KEY. The key must have NO HTTP-referrer
+ * restriction — Workers call Google server-side and send no referer.
  *
  * If this Worker already has other routes, merge the `/places/search` branch
  * (and CORS helpers) into your existing fetch handler.
@@ -101,7 +106,7 @@ async function handlePlacesSearch(request, env) {
     const status = googleRes.status;
 
     if (status === 401 || status === 403) {
-      return error(502, "Invalid or unauthorized Google API key.", "invalid_api_key");
+      return error(502, googleMessage, "invalid_api_key");
     }
     if (status === 429) {
       return error(429, "Google Places rate limit exceeded. Try again shortly.", "rate_limited");

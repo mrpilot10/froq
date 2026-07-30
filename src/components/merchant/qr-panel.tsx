@@ -194,18 +194,7 @@ export function MerchantQrPanel({
             </div>
           </>
         ) : (
-          <MerchantPosterCard
-            caption={
-              branchName ? (
-                <>
-                  Poster for <strong>{branchName}</strong>. Every branch has its own QR — download
-                  the correct one.
-                </>
-              ) : (
-                "Every branch has its own QR — download the correct one. Ready to print on the Froq template."
-              )
-            }
-          />
+          <MerchantPosterCard />
         )}
       </div>
     </div>

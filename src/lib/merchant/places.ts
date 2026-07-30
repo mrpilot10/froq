@@ -5,7 +5,7 @@ export type GooglePlaceResult = {
   googleMapsUrl: string;
 };
 
-const PLACES_SEARCH_URL = "https://froq-api.capt-tanmay10.workers.dev/places/search";
+const PLACES_SEARCH_URL = "https://froq-apoi.capt-tanmay10.workers.dev/places/search";
 
 export class PlacesSearchError extends Error {
   status: number;
