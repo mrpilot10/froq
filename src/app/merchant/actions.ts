@@ -1079,6 +1079,7 @@ async function establishMerchantAccess(
   const escalationToggles = await loadEscalationToggles(supabase, merchantId);
   const profile = toMerchantProfile({ ...merchantRow, ...escalationToggles });
 
+  const admin = createAdminClient();
   const [branchesRes, membersRes, productsRes] = await Promise.all([
     supabase
       .from("branches")
@@ -1091,7 +1092,10 @@ async function establishMerchantAccess(
       .select("*")
       .eq("merchant_id", merchantId)
       .order("created_at", { ascending: true }),
-    supabase
+    // Entitlements are merchant-scoped; staff RLS historically blocked this
+    // table (owner-only). Use service role after membership is verified so
+    // invited teammates see the same enabled products as the owner.
+    admin
       .from("merchant_products")
       .select(
         "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at, trial_started_at, trial_ends_at",
@@ -3768,7 +3772,8 @@ export async function createBranch(input: {
 
     // Branches are shared by both products, so the merchant gets whichever
     // allowance is larger — including the Queue trial's.
-    const { data: productRows } = await supabase
+    const admin = createAdminClient();
+    const { data: productRows } = await admin
       .from("merchant_products")
       .select(
         "product, plan_id, status, onboarded_at, trial_started_at, trial_ends_at",
