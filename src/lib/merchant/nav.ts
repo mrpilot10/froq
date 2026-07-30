@@ -122,10 +122,9 @@ export function isWorkspaceTab(tab: MerchantTab): boolean {
   return WORKSPACE_TABS.has(tab);
 }
 
-/** Workspace nav visible for the given role. */
-export function workspaceNavForRole(isOwner: boolean): NavItem[] {
-  if (isOwner) return WORKSPACE_NAV;
-  return WORKSPACE_NAV.filter((item) => !OWNER_WORKSPACE_TABS.includes(item.id));
+/** Workspace nav — full list for every role; access is gated on click. */
+export function workspaceNavForRole(_isOwner?: boolean): NavItem[] {
+  return WORKSPACE_NAV;
 }
 
 /** First tab shown when a product is selected. */

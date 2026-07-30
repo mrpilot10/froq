@@ -28,8 +28,9 @@ import type { ComingSoonProduct } from "@/lib/merchant/nav";
 interface ProductRailProps {
   activeProduct: MerchantProduct;
   activeTab: MerchantTab;
+  /** @deprecated Full catalog is always shown; access is gated on click. */
   isOwner?: boolean;
-  /** Products this teammate may switch to. Defaults to the full catalog. */
+  /** @deprecated Full catalog is always shown; access is gated on click. */
   allowedProducts?: MerchantProduct[];
   /** When true, show icon + name labels instead of icon-only. */
   expanded?: boolean;
@@ -51,8 +52,6 @@ const SHARED_ITEMS: RailItem[] = [
 export function ProductRail({
   activeProduct,
   activeTab,
-  isOwner = false,
-  allowedProducts,
   expanded = false,
   onToggleExpand,
   onProductChange,
@@ -61,13 +60,9 @@ export function ProductRail({
   pendingCount = 0,
   onLogout,
 }: ProductRailProps) {
-  const sharedItems = SHARED_ITEMS.filter((item) => isOwner || !item.ownerOnly);
+  const sharedItems = SHARED_ITEMS;
   // Keep the last product lit on workspace pages (analytics, all customers, etc.).
   const highlightedProduct = activeProduct;
-  const visibleProducts =
-    allowedProducts && allowedProducts.length > 0
-      ? PRODUCTS.filter((p) => allowedProducts.includes(p.id))
-      : PRODUCTS;
   const tip = (label: string) => (expanded ? undefined : label);
 
   return (
@@ -123,7 +118,7 @@ export function ProductRail({
               </button>
             );
           })}
-          {visibleProducts.map(({ id, name, Icon }) => {
+          {PRODUCTS.map(({ id, name, Icon }) => {
             const isActive = highlightedProduct === id;
             const showBadge = id === "loyalty" && pendingCount > 0;
             return (

@@ -800,8 +800,6 @@ export function MerchantExperience({
       <ProductRail
         activeProduct={activeProduct}
         activeTab={activeTab}
-        isOwner={role === "owner"}
-        allowedProducts={allowedProducts}
         expanded={railExpanded}
         onToggleExpand={toggleRailExpanded}
         onProductChange={goToProduct}
@@ -922,7 +920,6 @@ export function MerchantExperience({
         activeProduct={activeProduct}
         role={role}
         entitlements={entitlements}
-        allowedProducts={allowedProducts}
         canPurchase={role === "owner"}
         userName={sidebarUserName}
         onTabChange={goToTab}

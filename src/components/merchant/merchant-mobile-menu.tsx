@@ -41,8 +41,6 @@ interface MerchantMobileMenuProps {
   activeProduct: MerchantProduct;
   role: MemberRole;
   entitlements: Entitlements;
-  /** Products this teammate may switch to. Defaults to the full catalog. */
-  allowedProducts?: MerchantProduct[];
   canPurchase?: boolean;
   userName?: string;
   onTabChange: (tab: MerchantTab) => void;
@@ -60,7 +58,6 @@ export function MerchantMobileMenu({
   activeProduct,
   role,
   entitlements,
-  allowedProducts,
   canPurchase = true,
   userName = "",
   onTabChange,
@@ -86,12 +83,8 @@ export function MerchantMobileMenu({
     : enabled
       ? "Active"
       : "Not enabled";
-  const workspaceItems = workspaceNavForRole(role === "owner");
+  const workspaceItems = workspaceNavForRole();
   const displayName = userName.trim() || "Team member";
-  const visibleProducts =
-    allowedProducts && allowedProducts.length > 0
-      ? PRODUCTS.filter((p) => allowedProducts.includes(p.id))
-      : PRODUCTS;
   const initials = getInitials(displayName);
 
   useEffect(() => setMounted(true), []);
@@ -243,7 +236,7 @@ export function MerchantMobileMenu({
                   </button>
                 );
               })}
-              {visibleProducts.map(({ id, name, tagline, Icon }) => {
+              {PRODUCTS.map(({ id, name, tagline, Icon }) => {
                 const isActive = activeProduct === id;
                 return (
                   <Fragment key={id}>
