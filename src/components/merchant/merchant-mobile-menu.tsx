@@ -208,6 +208,29 @@ export function MerchantMobileMenu({
               aria-labelledby="merchant-menu-tab-business"
               aria-label="My Business"
             >
+              <button
+                type="button"
+                className="merchant-side-user merchant-menu-user"
+                onClick={() => {
+                  onOpenAccount?.();
+                  onClose();
+                }}
+                aria-label="Account settings"
+              >
+                <span className="merchant-avatar merchant-side-user-avatar" aria-hidden="true">
+                  {initials}
+                </span>
+                <span className="merchant-side-user-copy">
+                  <span className="merchant-side-user-name">{displayName}</span>
+                  <span className="merchant-side-user-role">{ROLE_LABELS[role]}</span>
+                </span>
+                <ChevronRight
+                  size={15}
+                  strokeWidth={2.4}
+                  className="merchant-side-user-chevron"
+                  aria-hidden="true"
+                />
+              </button>
               {workspaceItems.map(renderNavItem)}
             </nav>
           ) : (
@@ -344,30 +367,6 @@ export function MerchantMobileMenu({
               </button>
             ) : null}
           </div>
-
-          <button
-            type="button"
-            className="merchant-side-user"
-            onClick={() => {
-              onOpenAccount?.();
-              onClose();
-            }}
-            aria-label="Account settings"
-          >
-            <span className="merchant-avatar merchant-side-user-avatar" aria-hidden="true">
-              {initials}
-            </span>
-            <span className="merchant-side-user-copy">
-              <span className="merchant-side-user-name">{displayName}</span>
-              <span className="merchant-side-user-role">{ROLE_LABELS[role]}</span>
-            </span>
-            <ChevronRight
-              size={15}
-              strokeWidth={2.4}
-              className="merchant-side-user-chevron"
-              aria-hidden="true"
-            />
-          </button>
 
           <Link href="/help" className="merchant-menu-item" onClick={onClose}>
             <span className="merchant-menu-item-icon">
