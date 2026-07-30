@@ -1,7 +1,7 @@
 import "server-only";
 
 import { Resend } from "resend";
-import { getPublicAppOrigin } from "@/lib/app-url";
+import { getPublicAppOrigin, toPublicEmailUrl } from "@/lib/app-url";
 
 const BRAND = "#004353";
 const ACCENT = "#00f47b";
@@ -38,7 +38,8 @@ function brandedEmailHtml(input: {
   ctaUrl: string;
   footnoteHtml?: string;
 }) {
-  const actionUrl = escapeHtml(input.ctaUrl);
+  // CTA + "having trouble" footer share this URL — never leave localhost in either.
+  const actionUrl = escapeHtml(toPublicEmailUrl(input.ctaUrl));
   const greeting = escapeHtml(input.greeting);
 
   return `<!DOCTYPE html>
@@ -138,6 +139,7 @@ export async function sendPasswordResetEmail(input: {
     return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
   }
 
+  const resetUrl = toPublicEmailUrl(input.resetUrl);
   const greeting = input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
   const html = brandedEmailHtml({
     title: "Reset your Froq password",
@@ -148,7 +150,7 @@ export async function sendPasswordResetEmail(input: {
       <strong style="color:${BRAND};">This password reset is only valid for the next 24 hours.</strong>
     </p>`,
     ctaLabel: "Reset your password",
-    ctaUrl: input.resetUrl,
+    ctaUrl: resetUrl,
   });
 
   const { error } = await resend.emails.send({
@@ -162,7 +164,7 @@ export async function sendPasswordResetEmail(input: {
       "You recently requested to reset your password for your Froq account.",
       "This password reset is only valid for the next 24 hours.",
       "",
-      `Reset your password: ${input.resetUrl}`,
+      `Reset your password: ${resetUrl}`,
       "",
       `Need help? ${HELP_URL}`,
       "",
@@ -194,6 +196,7 @@ export async function sendTeamInviteEmail(input: {
   const business = escapeHtml(input.businessName);
   const branch = escapeHtml(input.branchLabel);
   const subject = `You're invited to manage ${input.branchLabel} of ${input.businessName}`;
+  const inviteUrl = toPublicEmailUrl(input.inviteUrl);
 
   const html = brandedEmailHtml({
     title: subject,
@@ -205,7 +208,7 @@ export async function sendTeamInviteEmail(input: {
       <strong style="color:${BRAND};">This link will expire in 7 days.</strong>
     </p>`,
     ctaLabel: "Accept invite",
-    ctaUrl: input.inviteUrl,
+    ctaUrl: inviteUrl,
   });
 
   const { error } = await resend.emails.send({
@@ -219,7 +222,7 @@ export async function sendTeamInviteEmail(input: {
       `You are invited to manage ${input.branchLabel} of ${input.businessName}.`,
       "This link will expire in 7 days.",
       "",
-      `Accept invite: ${input.inviteUrl}`,
+      `Accept invite: ${inviteUrl}`,
       "",
       `Need help? ${HELP_URL}`,
       "",
@@ -413,6 +416,7 @@ export async function sendPendingApprovalsEscalationEmail(input: {
     count === 1
       ? "1 customer is waiting for stamp approval."
       : `${count} customers are waiting for stamp approval.`;
+  const reviewUrl = toPublicEmailUrl(input.reviewUrl);
 
   const html = brandedEmailHtml({
     title: "Pending Stamp Approvals",
@@ -422,7 +426,7 @@ export async function sendPendingApprovalsEscalationEmail(input: {
       Review pending stamp requests for <strong style="color:${BRAND};">${business}</strong> so customers aren't kept waiting.
     </p>`,
     ctaLabel: "Review Pending Approvals",
-    ctaUrl: input.reviewUrl,
+    ctaUrl: reviewUrl,
   });
 
   const { error } = await resend.emails.send({
@@ -436,7 +440,7 @@ export async function sendPendingApprovalsEscalationEmail(input: {
       message,
       `Review pending stamp requests for ${input.businessName}.`,
       "",
-      `Review Pending Approvals: ${input.reviewUrl}`,
+      `Review Pending Approvals: ${reviewUrl}`,
       "",
       `Need help? ${HELP_URL}`,
       "",

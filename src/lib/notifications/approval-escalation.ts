@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getAppOrigin } from "@/lib/app-url";
+import { getPublicAppOrigin } from "@/lib/app-url";
 import { sendPendingApprovalsEscalationEmail } from "@/lib/email/resend";
 import {
   ESCALATION_ACTION_LABEL,
@@ -119,11 +119,7 @@ function oldestOverdue(
 }
 
 function reviewUrlAbsolute(): string {
-  try {
-    return `${getAppOrigin()}${pendingApprovalsHref()}`;
-  } catch {
-    return `https://froq.io${pendingApprovalsHref()}`;
-  }
+  return `${getPublicAppOrigin()}${pendingApprovalsHref()}`;
 }
 
 /**

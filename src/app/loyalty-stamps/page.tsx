@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { LandingPage } from "@/components/landing/landing-page";
-import { SupportChat } from "@/components/landing/support-chat";
 
 export const metadata: Metadata = {
   title: "Loyalty Stamps — Froq",
@@ -9,10 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function LoyaltyStampsPage() {
-  return (
-    <>
-      <LandingPage />
-      <SupportChat />
-    </>
-  );
+  return <LandingPage />;
 }

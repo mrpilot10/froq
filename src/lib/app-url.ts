@@ -51,13 +51,39 @@ export function getAppOrigin(): string {
 
 /**
  * Origin safe for outbound email / SMS / printed links.
- * Skips localhost even when APP_URL is set for local development.
+ * Skips localhost (and Vercel preview hosts) so invitees always get the
+ * canonical production domain when local/preview env vars are set.
  */
 export function getPublicAppOrigin(): string {
-  for (const origin of configuredOrigins()) {
-    if (!LOCAL_HOST.test(origin)) return origin;
+  const candidates = [
+    process.env.PUBLIC_APP_URL,
+    process.env.APP_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.NEXT_PUBLIC_SITE_URL,
+  ];
+
+  for (const raw of candidates) {
+    if (!raw?.trim()) continue;
+    const origin = normalizeOrigin(raw);
+    if (!origin || LOCAL_HOST.test(origin)) continue;
+    try {
+      if (/\.vercel\.app$/i.test(new URL(origin).hostname)) continue;
+    } catch {
+      continue;
+    }
+    return origin;
   }
+
   return DEFAULT_PUBLIC_ORIGIN;
+}
+
+/**
+ * Rewrite any localhost (host or redirect_to query) to the public origin.
+ * Used for email CTA + "having trouble" footer links.
+ */
+export function toPublicEmailUrl(url: string): string {
+  const origin = getPublicAppOrigin();
+  return url.replace(/https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/gi, origin);
 }
 
 /** Absolute customer hub URL for the permanent publicToken. */
