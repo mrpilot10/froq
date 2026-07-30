@@ -3134,12 +3134,13 @@ function loyaltyNotifyLog(
 /**
  * Loyalty templates are WhatsApp-first with SMS fallback, so the customer's
  * stored channel prefs only decide the SMS body — never whether WhatsApp runs.
+ * publicToken may be empty for templates with no URL button (reward claimed).
  */
 function toLoyaltyNotifiable(customer: StampNotifCustomer) {
   return {
     phone: customer.phone as string,
     name: (customer.name ?? "").trim() || "there",
-    publicToken: customer.public_token as string,
+    publicToken: (customer.public_token ?? "").trim(),
     whatsappAvailable: true,
     preferredNotificationChannel: "whatsapp" as const,
   };
@@ -3150,6 +3151,9 @@ function toLoyaltyNotifiable(customer: StampNotifCustomer) {
  *
  * Runs in `after()` so the send completes once the response has flushed — a bare
  * floating promise is killed when the serverless invocation ends.
+ *
+ * loyaltycard_reward_claimed has no URL button, so a missing publicToken must
+ * not skip the WhatsApp send.
  */
 function notifyRewardClaimed(input: {
   customer: StampNotifCustomer;
@@ -3157,7 +3161,12 @@ function notifyRewardClaimed(input: {
   rewardTitle: string;
 }) {
   const { customer, businessName, rewardTitle } = input;
-  if (!customer.phone?.trim() || !customer.public_token) return;
+  if (!customer.phone?.trim()) {
+    loyaltyNotifyLog("error", "reward_redeemed_skipped", {
+      reason: "missing_phone",
+    });
+    return;
+  }
 
   const notifiable = toLoyaltyNotifiable(customer);
 
@@ -3580,6 +3589,9 @@ export async function redeemReward(customerId: string, code: string) {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not authenticated." };
 
+  const merchantId = await resolveMerchantId(supabase, user.id);
+  if (!merchantId) return { ok: false, error: "Merchant account not found." };
+
   const [{ data: customer }, { data: merchant }] = await Promise.all([
     supabase
       .from("customers")
@@ -3591,9 +3603,14 @@ export async function redeemReward(customerId: string, code: string) {
     supabase
       .from("merchants")
       .select("id, business_name, reward_title, reward_name")
-      .eq("owner_user_id", user.id)
+      .eq("id", merchantId)
       .maybeSingle(),
   ]);
+
+  if (!merchant) return { ok: false, error: "Merchant account not found." };
+  if (customer && customer.merchant_id !== merchant.id) {
+    return { ok: false, error: "Customer not found." };
+  }
 
   const { error } = await supabase.rpc("redeem_reward", {
     p_customer_id: customerId,
@@ -3601,7 +3618,8 @@ export async function redeemReward(customerId: string, code: string) {
   });
   if (error) return { ok: false, error: error.message };
 
-  if (customer?.phone && customer.public_token && merchant) {
+  // loyaltycard_reward_claimed has no URL button — phone is enough to notify.
+  if (customer?.phone) {
     notifyRewardClaimed({
       customer,
       businessName: merchant.business_name,
@@ -3628,10 +3646,14 @@ export async function redeemRewardByCode(
     } = await supabase.auth.getUser();
     if (!user) return { ok: false, error: "Not authenticated. Please log in again." };
 
+    // Owner or teammate — same resolve path as the rest of the merchant workspace.
+    const merchantId = await resolveMerchantId(supabase, user.id);
+    if (!merchantId) return { ok: false, error: "Merchant account not found." };
+
     const { data: merchant } = await supabase
       .from("merchants")
       .select("id, business_name, reward_title, reward_name")
-      .eq("owner_user_id", user.id)
+      .eq("id", merchantId)
       .maybeSingle();
     if (!merchant) return { ok: false, error: "Merchant account not found." };
 
@@ -3674,13 +3696,19 @@ export async function redeemRewardByCode(
     });
     if (error) return { ok: false, error: error.message };
 
-    if (customer?.phone && customer.public_token) {
+    // loyaltycard_reward_claimed has no URL button — don't gate on public_token.
+    if (customer?.phone) {
       notifyRewardClaimed({
         customer,
         businessName: merchant.business_name,
         rewardTitle:
           (merchant.reward_title || merchant.reward_name || "Reward").trim() ||
           "Reward",
+      });
+    } else {
+      loyaltyNotifyLog("error", "reward_redeemed_skipped", {
+        reason: "missing_phone",
+        customerId: target.customer_id,
       });
     }
 

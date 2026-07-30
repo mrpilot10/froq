@@ -28,6 +28,8 @@ export interface HistoryEntry {
   date: string;
   label: string;
   status: "approved" | "pending" | "redeemed";
+  /** Newest reward claim — keep visually emphasized in the activity list. */
+  highlight?: boolean;
 }
 
 export interface RewardCardGroup {
@@ -44,6 +46,8 @@ export interface RewardCardGroup {
   rewardReady?: boolean;
   /** Date the reward was redeemed (completed cards only). */
   redeemedDate?: string;
+  /** Most recent claim — shown with stronger emphasis. */
+  highlight?: boolean;
 }
 
 export interface LoyaltyState {

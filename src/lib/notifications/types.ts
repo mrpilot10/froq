@@ -200,36 +200,50 @@ export function isReservationNotificationTemplate(
   return template.startsWith("reservation_");
 }
 
-/** Plain-text SMS bodies (include hub URL). Keep short for SMS. */
+/** Plain-text SMS bodies (include hub URL when a public token exists). Keep short for SMS. */
 export function buildSmsBody(
   template: CustomerNotificationTemplate,
   customer: NotifiableCustomer,
   data: CustomerNotificationDataMap[CustomerNotificationTemplate],
 ): string {
-  const publicToken = requireCustomerPublicToken(customer.publicToken);
-  const hub = loyaltyCardUrl(publicToken);
   const name = customer.name.trim() || "there";
+  let hub = "";
+  try {
+    hub = loyaltyCardUrl(requireCustomerPublicToken(customer.publicToken));
+  } catch {
+    hub = "";
+  }
 
   switch (template) {
     case "stamp_verified": {
       const d = data as StampVerifiedData;
-      return `Hi ${name}, stamp verified at ${d.businessName}: ${d.currentStamps}/${d.requiredStamps} toward ${d.rewardTitle}. View card: ${hub}`;
+      return hub
+        ? `Hi ${name}, stamp verified at ${d.businessName}: ${d.currentStamps}/${d.requiredStamps} toward ${d.rewardTitle}. View card: ${hub}`
+        : `Hi ${name}, stamp verified at ${d.businessName}: ${d.currentStamps}/${d.requiredStamps} toward ${d.rewardTitle}.`;
     }
     case "reward_unlocked": {
       const d = data as RewardUnlockedData;
-      return `Hi ${name}, reward unlocked at ${d.businessName}: ${d.rewardTitle}. Redeem: ${hub}`;
+      return hub
+        ? `Hi ${name}, reward unlocked at ${d.businessName}: ${d.rewardTitle}. Redeem: ${hub}`
+        : `Hi ${name}, reward unlocked at ${d.businessName}: ${d.rewardTitle}.`;
     }
     case "stamp_collected_last_wait_time": {
       const d = data as StampCollectedLastWaitTimeData;
-      return `Hi ${name}, last stamp at ${d.businessName}! ${d.rewardTitle} unlocks in ${d.waitLabel}. Card: ${hub}`;
+      return hub
+        ? `Hi ${name}, last stamp at ${d.businessName}! ${d.rewardTitle} unlocks in ${d.waitLabel}. Card: ${hub}`
+        : `Hi ${name}, last stamp at ${d.businessName}! ${d.rewardTitle} unlocks in ${d.waitLabel}.`;
     }
     case "reward_ready_wait_time": {
       const d = data as RewardReadyWaitTimeData;
-      return `Hi ${name}, your reward at ${d.businessName} is ready: ${d.rewardTitle}. Redeem: ${hub}`;
+      return hub
+        ? `Hi ${name}, your reward at ${d.businessName} is ready: ${d.rewardTitle}. Redeem: ${hub}`
+        : `Hi ${name}, your reward at ${d.businessName} is ready: ${d.rewardTitle}.`;
     }
     case "reward_redeemed": {
       const d = data as RewardRedeemedData;
-      return `Hi ${name}, your reward ${d.rewardTitle} has been claimed at ${d.businessName}. Card: ${hub}`;
+      return hub
+        ? `Hi ${name}, your reward ${d.rewardTitle} has been claimed at ${d.businessName}. Card: ${hub}`
+        : `Hi ${name}, your reward ${d.rewardTitle} has been claimed at ${d.businessName}.`;
     }
     case "waitlist_called": {
       const d = data as WaitlistCalledData;

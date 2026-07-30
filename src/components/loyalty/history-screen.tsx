@@ -21,12 +21,12 @@ function HistoryStatusIcon({ status }: { status: HistoryEntry["status"] }) {
 
 function statusLabel(status: HistoryEntry["status"]) {
   if (status === "pending") return "Pending approval";
-  if (status === "redeemed") return "Reward redeemed";
+  if (status === "redeemed") return "Claimed";
   return "Approved";
 }
 
 function cardStatusText(card: RewardCardGroup) {
-  if (card.status === "completed") return `Redeemed · ${card.redeemedDate}`;
+  if (card.status === "completed") return `Claimed · ${card.redeemedDate}`;
   if (card.rewardReady) return "Ready to redeem";
   if (card.pending) return "Stamp awaiting approval";
   return "In progress";
@@ -39,9 +39,10 @@ function RewardCardItem({ card }: { card: RewardCardGroup }) {
       : card.rewardReady
         ? "is-ready"
         : "is-active";
+  const highlightClass = card.highlight ? " is-highlighted" : "";
 
   return (
-    <div className={`reward-card-group ${stateClass}`}>
+    <div className={`reward-card-group ${stateClass}${highlightClass}`}>
       <div className="reward-card-group-head">
         <div className="reward-card-group-titles">
           <span className="reward-card-group-name">Card {card.index}</span>
@@ -63,7 +64,7 @@ function RewardCardItem({ card }: { card: RewardCardGroup }) {
 
       <div className="reward-card-count">
         {card.status === "completed"
-          ? `${card.totalStamps}/${card.totalStamps} stamps collected`
+          ? `${card.totalStamps}/${card.totalStamps} stamps · reward claimed`
           : `${card.stampsCollected}/${card.totalStamps} stamps collected`}
       </div>
     </div>
@@ -86,7 +87,12 @@ export function HistoryScreen({ entries, rewardCards }: HistoryScreenProps) {
         ) : (
           <ul className="history-list">
             {entries.map((entry) => (
-              <li key={entry.id} className="history-item">
+              <li
+                key={entry.id}
+                className={`history-item history-item--${entry.status}${
+                  entry.highlight ? " is-highlighted" : ""
+                }`}
+              >
                 <div className={`history-icon history-icon--${entry.status}`}>
                   <HistoryStatusIcon status={entry.status} />
                 </div>

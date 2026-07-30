@@ -151,6 +151,8 @@ async function buildReadyHome(
   const totalStamps = merchant.total_stamps;
   const rewardReady = (card?.status ?? "active") === "reward_ready";
   const hasLoyaltyCard = !!card;
+  const rewardLabel =
+    (merchant.reward_title || merchant.reward_name || "Reward").trim() || "Reward";
 
   const completedCards: RewardCardGroup[] = redemptions.map((r, i) => ({
     id: r.id,
@@ -158,8 +160,10 @@ async function buildReadyHome(
     status: "completed",
     stampsCollected: totalStamps,
     totalStamps,
-    rewardName: merchant.reward_name,
+    rewardName: rewardLabel,
     redeemedDate: shortDate(r.redeemed_at),
+    // Newest claim first in the list — keep it visually emphasized.
+    highlight: i === 0,
   }));
 
   const currentCard: RewardCardGroup = {
@@ -168,29 +172,42 @@ async function buildReadyHome(
     status: "active",
     stampsCollected: filled,
     totalStamps,
-    rewardName: merchant.reward_name,
+    rewardName: rewardLabel,
     pending,
     rewardReady,
   };
 
   const rewardCards: RewardCardGroup[] = [currentCard, ...completedCards];
 
-  const history: HistoryEntry[] = [
+  type HistoryRow = HistoryEntry & { at: number };
+  const historyRows: HistoryRow[] = [
     ...approvals
       .filter((a) => a.status === "pending" || a.status === "approved")
       .map((a) => ({
         id: a.id,
         date: a.status === "pending" ? "Today" : shortDate(a.requested_at),
         label: a.status === "pending" ? "Stamp request submitted" : "Stamp collected",
-        status: a.status === "pending" ? ("pending" as const) : ("approved" as const),
+        status: (a.status === "pending" ? "pending" : "approved") as HistoryEntry["status"],
+        at: new Date(a.requested_at).getTime() || 0,
       })),
-    ...redemptions.map((r) => ({
+    ...redemptions.map((r, i) => ({
       id: r.id,
       date: shortDate(r.redeemed_at),
-      label: `${merchant.reward_name} redeemed`,
+      label: `${rewardLabel} claimed`,
       status: "redeemed" as const,
+      highlight: i === 0,
+      at: new Date(r.redeemed_at).getTime() || 0,
     })),
-  ].sort((a, b) => (a.status === "pending" ? -1 : b.status === "pending" ? 1 : 0));
+  ];
+
+  // Pending first, then newest activity (so a fresh claim sits at the top).
+  historyRows.sort((a, b) => {
+    if (a.status === "pending" && b.status !== "pending") return -1;
+    if (b.status === "pending" && a.status !== "pending") return 1;
+    return b.at - a.at;
+  });
+
+  const history: HistoryEntry[] = historyRows.map(({ at: _at, ...entry }) => entry);
 
   return {
     status: "ready",

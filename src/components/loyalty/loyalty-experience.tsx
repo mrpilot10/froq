@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Gift, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { requestStamp, type CardData } from "@/app/actions/customer";
@@ -80,10 +80,12 @@ export function LoyaltyExperience({
   const isLocked = Boolean(lockMessage) && !isRewardReady;
   const redeemCode = card.rewardCode || `FROQ-${card.customerId.slice(0, 5).toUpperCase()}`;
 
-  // Live updates: refetch when the merchant approves a stamp or redeems.
+  // Live updates: stamp approve/redeem updates loyalty_cards; claim also inserts
+  // a redemptions row (works even before replica-identity migrations land).
   const filter = `customer_id=eq.${card.customerId}`;
   useRealtime("approvals", filter, onRefresh);
   useRealtime("loyalty_cards", filter, onRefresh);
+  useRealtime("redemptions", filter, onRefresh);
 
   // Celebrate when a stamp lands (filled increased while we were on the card).
   const [prevFilled, setPrevFilled] = useState(card.filled);
@@ -92,25 +94,53 @@ export function LoyaltyExperience({
     setPrevFilled(card.filled);
   }, [card.filled, prevFilled]);
 
-  // Celebrate when the merchant redeems: the card transitions out of
-  // reward_ready (the DB resets it to active with 0 stamps). Show the claimed
-  // celebration + confetti and close any open reward sheet so the customer never
-  // sees the "almost there" state right after their reward was approved.
+  // Celebrate when the merchant redeems: status leaves reward_ready, or stamps
+  // reset to 0 after a full card (restart_after_reward keeps status as active).
   const [prevStatus, setPrevStatus] = useState(card.status);
   useEffect(() => {
-    if (prevStatus === "reward_ready" && card.status !== "reward_ready") {
+    const leftRewardReady =
+      prevStatus === "reward_ready" && card.status !== "reward_ready";
+    const stampsResetAfterReward =
+      prevStatus === "reward_ready" && card.filled === 0 && prevFilled > 0;
+    if (leftRewardReady || stampsResetAfterReward) {
       setRewardSheetOpen(false);
       setShowClaimed(true);
       setShowConfetti(true);
+      setScreen("card");
+      // Land on Rewards so the new claimed entry is visible and highlighted.
+      setActiveTab("history");
     }
     setPrevStatus(card.status);
-  }, [card.status, prevStatus]);
+  }, [card.status, card.filled, prevStatus, prevFilled]);
 
-  // Refetch on focus as a fallback to realtime.
+  // Safety net when the realtime socket is suspended (phone lock) or blocked.
+  const lastRefreshRef = useRef(0);
   useEffect(() => {
-    const onFocus = () => void onRefresh();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    const REFRESH_THROTTLE_MS = 8_000;
+    const POLL_MS = 20_000;
+
+    const maybeRefresh = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return;
+      }
+      const now = Date.now();
+      if (now - lastRefreshRef.current < REFRESH_THROTTLE_MS) return;
+      lastRefreshRef.current = now;
+      void onRefresh();
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") maybeRefresh();
+    };
+
+    window.addEventListener("focus", maybeRefresh);
+    document.addEventListener("visibilitychange", onVisibility);
+    const poll = setInterval(maybeRefresh, POLL_MS);
+    return () => {
+      window.removeEventListener("focus", maybeRefresh);
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(poll);
+    };
   }, [onRefresh]);
 
   // Jump to the top (no animation) on tab switch so each page starts at its header.
@@ -263,7 +293,7 @@ export function LoyaltyExperience({
         onStartAgain={() => {
           setShowClaimed(false);
           setScreen("card");
-          setActiveTab("collect");
+          setActiveTab("history");
         }}
       />
 

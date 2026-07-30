@@ -297,14 +297,18 @@ export async function sendCustomerNotification<T extends CustomerNotificationTem
     publicToken: customer.publicToken,
   });
 
-  // Fail fast if a non-token slipped through (slug / uuid / sample).
-  try {
-    const { requireCustomerPublicToken } = await import("@/lib/customer/hub");
-    requireCustomerPublicToken(customer.publicToken);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "invalid publicToken";
-    notifLog("error", "invalid_public_token", { template, reason });
-    return { ok: false, channel, error: reason };
+  // Fail fast if a non-token slipped through — except templates with no URL button
+  // (loyaltycard_reward_claimed), which must still send when publicToken is missing.
+  const needsPublicToken = template !== "reward_redeemed";
+  if (needsPublicToken) {
+    try {
+      const { requireCustomerPublicToken } = await import("@/lib/customer/hub");
+      requireCustomerPublicToken(customer.publicToken);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "invalid publicToken";
+      notifLog("error", "invalid_public_token", { template, reason });
+      return { ok: false, channel, error: reason };
+    }
   }
 
   try {

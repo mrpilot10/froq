@@ -2680,7 +2680,20 @@ body {
 }
 
 .reward-card-group.is-completed {
-  background: var(--bg);
+  border-color: color-mix(in srgb, #c79a3e 55%, var(--line));
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, #f3dca0 28%, var(--paper)) 0%,
+      var(--paper) 70%
+    );
+}
+
+.reward-card-group.is-completed.is-highlighted {
+  border-color: #c79a3e;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #c79a3e 35%, transparent),
+    0 14px 32px -22px rgba(199, 154, 62, 0.7);
 }
 
 .reward-card-group-head {
@@ -2728,8 +2741,8 @@ body {
 }
 
 .reward-card-group-badge.is-completed {
-  background: color-mix(in srgb, var(--brand) 14%, var(--paper));
-  color: var(--brand-deep);
+  background: linear-gradient(145deg, #f3dca0 0%, #d4a64a 55%, #c79a3e 100%);
+  color: #fff;
 }
 
 .reward-card-dots {
@@ -2798,6 +2811,20 @@ body {
 
 .history-item:last-child {
   border-bottom: none;
+}
+
+.history-item--redeemed {
+  background: color-mix(in srgb, #f3dca0 18%, var(--paper));
+}
+
+.history-item--redeemed.is-highlighted {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, #f3dca0 42%, var(--paper)) 0%,
+      color-mix(in srgb, #f3dca0 12%, var(--paper)) 100%
+    );
+  box-shadow: inset 3px 0 0 #c79a3e;
 }
 
 .history-icon {
