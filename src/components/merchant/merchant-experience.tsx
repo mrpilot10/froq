@@ -734,6 +734,9 @@ export function MerchantExperience({
   const me = currentUserId
     ? members.find((m) => m.userId === currentUserId)
     : undefined;
+  /** Primary store owner (`merchants.owner_user_id`) — only they can wipe the business. */
+  const isPrimaryOwnerAccount =
+    me?.isPrimaryOwner === true || (role === "owner" && me == null);
 
   const resolveAccountNames = useCallback(() => {
     // Owners: prefer merchant profile owner fields (updated immediately from
@@ -1024,6 +1027,14 @@ export function MerchantExperience({
           // the previous name on the user card.
           void onRefresh();
         }}
+        onDeleteAccount={
+          isPrimaryOwnerAccount
+            ? undefined
+            : () => {
+                setEditSection(null);
+                setDeleteOpen(true);
+              }
+        }
       />
 
       <MerchantMobileMenu
@@ -1120,12 +1131,20 @@ export function MerchantExperience({
       <DeleteAccountDrawer
         open={deleteOpen}
         accountName={profile.businessName}
-        description="This permanently deletes your store, customers, loyalty data, and QR code. This cannot be undone."
+        title={isPrimaryOwnerAccount ? "Delete account" : "Delete your account"}
+        description={
+          isPrimaryOwnerAccount
+            ? "This permanently deletes your store, customers, loyalty data, and QR code. This cannot be undone."
+            : "This removes you from this store and permanently deletes your Froq login. The store and its data stay with the owner."
+        }
+        confirmLabel={isPrimaryOwnerAccount ? "Delete account" : "Delete my account"}
         onClose={() => setDeleteOpen(false)}
         onConfirm={async () => {
           const res = await deleteMerchantAccount();
           if (res.ok) {
-            toast.success("Account deleted");
+            toast.success(
+              isPrimaryOwnerAccount ? "Account deleted" : "Your account was deleted",
+            );
             onLogout?.();
           }
           return res;

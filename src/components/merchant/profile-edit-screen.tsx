@@ -32,6 +32,8 @@ interface MerchantProfileEditScreenProps {
   onClose: () => void;
   onSave: () => void;
   onAccountNameUpdated?: (firstName: string, lastName: string) => void;
+  /** Non-owners use this to leave the store and delete their login. */
+  onDeleteAccount?: () => void;
 }
 
 const SECTION_META: Record<
@@ -154,6 +156,7 @@ export function MerchantProfileEditScreen({
   onClose,
   onSave,
   onAccountNameUpdated,
+  onDeleteAccount,
 }: MerchantProfileEditScreenProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rewardImageInputRef = useRef<HTMLInputElement>(null);
@@ -325,10 +328,11 @@ export function MerchantProfileEditScreen({
         {section === "google" && (
           <GoogleBusinessSearch
             selected={
-              profile.googlePlaceId
+              profile.googlePlaceId || profile.googleMapsUrl
                 ? {
                     placeId: profile.googlePlaceId,
                     name: profile.businessName,
+                    address: profile.address,
                     googleMapsUrl: profile.googleMapsUrl,
                   }
                 : null
@@ -339,6 +343,7 @@ export function MerchantProfileEditScreen({
                 googlePlaceId: place.placeId,
                 googleMapsUrl: place.googleMapsUrl,
                 businessName: place.name,
+                ...(place.address.trim() ? { address: place.address } : {}),
               })
             }
             onClear={() =>
@@ -550,6 +555,7 @@ export function MerchantProfileEditScreen({
             branchNameById={Object.fromEntries(branches.map((b) => [b.id, b.name]))}
             onPhoneUpdated={(phone) => onChange({ ...profile, phone })}
             onNameUpdated={onAccountNameUpdated}
+            onDeleteAccount={onDeleteAccount}
           />
         )}
           </div>

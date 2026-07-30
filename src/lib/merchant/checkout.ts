@@ -4,10 +4,11 @@ const CHECKOUT_DRAFT_KEY = "froq-merchant-checkout-draft";
 /**
  * Account-step input kept across the Google OAuth round-trip.
  * Signing up with Google reloads the page, which would otherwise wipe the
- * business name, mobile number and city the merchant had already typed.
+ * mobile number and city the merchant had already typed.
  */
 export interface CheckoutDraft {
-  businessName: string;
+  /** @deprecated Kept for older session payloads; business name is collected in onboarding. */
+  businessName?: string;
   firstName: string;
   lastName: string;
   phone: string;
@@ -46,7 +47,8 @@ export function clearCheckoutDraft() {
 
 export interface CheckoutAccount {
   planId: string;
-  businessName: string;
+  /** Optional — business name is collected during onboarding / Google Places. */
+  businessName?: string;
   firstName: string;
   lastName: string;
   /** @deprecated Prefer firstName + lastName; kept for older session payloads. */

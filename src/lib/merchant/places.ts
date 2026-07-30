@@ -5,6 +5,11 @@ export type GooglePlaceResult = {
   googleMapsUrl: string;
 };
 
+export type PlacesSearchLocation = {
+  latitude: number;
+  longitude: number;
+};
+
 const PLACES_SEARCH_URL = "https://froq-apoi.capt-tanmay10.workers.dev/places/search";
 
 export class PlacesSearchError extends Error {
@@ -21,18 +26,32 @@ export class PlacesSearchError extends Error {
 
 /**
  * Search Google Places via the Froq Cloudflare Worker.
+ * Pass device coords when available so results bias to the merchant's area.
  * Throws PlacesSearchError with a user-facing message on failure.
  */
-export async function searchGooglePlaces(query: string): Promise<GooglePlaceResult[]> {
+export async function searchGooglePlaces(
+  query: string,
+  location?: PlacesSearchLocation | null,
+): Promise<GooglePlaceResult[]> {
   const textQuery = query.trim();
   if (textQuery.length < 3) return [];
+
+  const body: Record<string, unknown> = { textQuery, regionCode: "IN" };
+  if (
+    location &&
+    Number.isFinite(location.latitude) &&
+    Number.isFinite(location.longitude)
+  ) {
+    body.latitude = location.latitude;
+    body.longitude = location.longitude;
+  }
 
   let res: Response;
   try {
     res = await fetch(PLACES_SEARCH_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ textQuery }),
+      body: JSON.stringify(body),
     });
   } catch {
     throw new PlacesSearchError("Could not reach Places search. Check your connection.", 0);
@@ -46,11 +65,11 @@ export async function searchGooglePlaces(query: string): Promise<GooglePlaceResu
   }
 
   if (!res.ok) {
-    const body = payload as { error?: string; code?: string } | null;
+    const errBody = payload as { error?: string; code?: string } | null;
     throw new PlacesSearchError(
-      body?.error || "Places search failed. Try again.",
+      errBody?.error || "Places search failed. Try again.",
       res.status,
-      body?.code,
+      errBody?.code,
     );
   }
 

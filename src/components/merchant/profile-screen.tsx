@@ -31,7 +31,7 @@ const SETTINGS_GROUPS: Array<{
         id: "google",
         label: "Google Business",
         value: (profile) =>
-          profile.googlePlaceId
+          profile.googlePlaceId || profile.googleMapsUrl
             ? profile.businessName || "Linked"
             : "Find your business on Google",
         Icon: MapPin,

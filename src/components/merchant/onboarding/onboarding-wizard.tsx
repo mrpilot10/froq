@@ -90,7 +90,7 @@ const STEP_HEAD: Record<
   google: {
     Icon: MapPin,
     title: "Find your business on Google",
-    desc: "This helps customers leave reviews and unlocks future AI-powered features.",
+    desc: "Search your listing, or enter your name and Google Maps link manually.",
   },
   verify: {
     Icon: ShieldCheck,
@@ -443,10 +443,11 @@ export function OnboardingWizard({
                 <GoogleBusinessSearch
                   autoFocus
                   selected={
-                    draft.googlePlaceId
+                    draft.googlePlaceId || draft.googleMapsUrl
                       ? {
                           placeId: draft.googlePlaceId,
                           name: draft.businessName,
+                          address: draft.address,
                           googleMapsUrl: draft.googleMapsUrl,
                         }
                       : null
@@ -457,6 +458,7 @@ export function OnboardingWizard({
                       googlePlaceId: place.placeId,
                       googleMapsUrl: place.googleMapsUrl,
                       businessName: place.name,
+                      ...(place.address.trim() ? { address: place.address } : {}),
                     }));
                   }}
                   onClear={() => {

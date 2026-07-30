@@ -37,7 +37,6 @@ interface CheckoutExperienceProps {
 export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
   const router = useRouter();
   const [step, setStep] = useState<Step>("account");
-  const [businessName, setBusinessName] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -73,7 +72,6 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
     setFirstName((prev) => prev || draft?.firstName || identity.firstName);
     setLastName((prev) => prev || draft?.lastName || identity.lastName);
     if (draft) {
-      setBusinessName((prev) => prev || draft.businessName);
       setPhone((prev) => prev || draft.phone);
       setCity((prev) => prev || draft.city);
       setState((prev) => prev || draft.state);
@@ -107,14 +105,13 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
 
   const saveDraft = useCallback(() => {
     writeCheckoutDraft({
-      businessName: businessName.trim(),
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       phone,
       city,
       state,
     });
-  }, [businessName, firstName, lastName, phone, city, state]);
+  }, [firstName, lastName, phone, city, state]);
 
   // One Tap and Google's button sign in on this page, so they reuse the
   // checkout's own progress step instead of a separate spinner.
@@ -140,7 +137,6 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
 
     writeCheckoutAccount({
       planId: plan.id,
-      businessName: businessName.trim(),
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       ownerName,
@@ -158,7 +154,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
     }
 
     router.replace("/merchant");
-  }, [plan.id, plan.product, businessName, firstName, lastName, ownerName, email, phone, city, state, router]);
+  }, [plan.id, plan.product, firstName, lastName, ownerName, email, phone, city, state, router]);
 
   const completeCheckout = useCallback(async () => {
     setError("");
@@ -215,10 +211,6 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
 
   const handleCreateAccount = useCallback(async () => {
     setError("");
-    if (!businessName.trim()) {
-      setError("Enter your business name.");
-      return;
-    }
     if (!firstName.trim()) {
       setError("Enter your first name.");
       return;
@@ -274,7 +266,6 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
     }
     setStep("payment");
   }, [
-    businessName,
     firstName,
     lastName,
     email,
@@ -331,7 +322,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                   <h2 className="auth-title">Create your account</h2>
                   <p className="auth-sub">
                     {googleEmail
-                      ? `Signed in as ${googleEmail}. Add your business details to continue.`
+                      ? `Signed in as ${googleEmail}. Confirm your details to continue.`
                       : "Continue with Google, or use email and password to access your Froq business dashboard."}
                   </p>
                 </div>
@@ -385,20 +376,6 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                     />
                   </label>
                 </div>
-
-                <label className="auth-field">
-                  <span className="auth-label">Business name</span>
-                  <input
-                    className="auth-input"
-                    type="text"
-                    placeholder="Bloom Coffee Co."
-                    value={businessName}
-                    onChange={(e) => {
-                      setBusinessName(e.target.value);
-                      setError("");
-                    }}
-                  />
-                </label>
 
                 <label className="auth-field">
                   <span className="auth-label">Work email</span>

@@ -32,7 +32,7 @@ export function BusinessHeader({ business }: BusinessHeaderProps) {
           key: "phone",
           href: phoneLink,
           label: "Call store",
-          icon: <Phone size={14} strokeWidth={1.7} />,
+          icon: <Phone size={18} strokeWidth={2.1} />,
           external: false,
         }
       : null,
@@ -41,7 +41,7 @@ export function BusinessHeader({ business }: BusinessHeaderProps) {
           key: "website",
           href: website,
           label: "Visit website",
-          icon: <Globe size={14} strokeWidth={1.7} />,
+          icon: <Globe size={18} strokeWidth={2.1} />,
           external: true,
         }
       : null,
@@ -50,7 +50,7 @@ export function BusinessHeader({ business }: BusinessHeaderProps) {
           key: "map",
           href: mapLink,
           label: "Open map",
-          icon: <MapPin size={14} strokeWidth={1.7} />,
+          icon: <MapPin size={18} strokeWidth={2.1} />,
           external: true,
         }
       : null,

@@ -18,6 +18,15 @@
 const PLACES_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
 const FIELD_MASK =
   "places.id,places.displayName,places.formattedAddress,places.googleMapsUri";
+/** Default bias when the client cannot share device location (Froq is India-first). */
+const DEFAULT_REGION_CODE = "IN";
+/** ~50km — max circle radius Places allows. */
+const DEFAULT_BIAS_RADIUS_METERS = 50000;
+/** Approximate India viewport used when device location is unavailable. */
+const INDIA_VIEWPORT = {
+  low: { latitude: 6.5, longitude: 68.0 },
+  high: { latitude: 35.5, longitude: 97.5 },
+};
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -46,6 +55,15 @@ function placeIdFromResource(id) {
   return id.startsWith("places/") ? id.slice("places/".length) : id;
 }
 
+function parseCoordinate(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
 async function handlePlacesSearch(request, env) {
   if (!env.GOOGLE_API_KEY) {
     return error(500, "GOOGLE_API_KEY is not configured.", "missing_api_key");
@@ -72,6 +90,40 @@ async function handlePlacesSearch(request, env) {
     return error(400, "Query must be at least 3 characters.", "query_too_short");
   }
 
+  const regionCode =
+    typeof body?.regionCode === "string" && /^[A-Za-z]{2}$/.test(body.regionCode.trim())
+      ? body.regionCode.trim().toUpperCase()
+      : DEFAULT_REGION_CODE;
+
+  const latitude = parseCoordinate(body?.latitude ?? body?.lat);
+  const longitude = parseCoordinate(body?.longitude ?? body?.lng);
+  const hasLocation =
+    latitude != null &&
+    longitude != null &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180;
+
+  const googleBody = {
+    textQuery,
+    languageCode: "en",
+    regionCode,
+  };
+
+  if (hasLocation) {
+    googleBody.locationBias = {
+      circle: {
+        center: { latitude, longitude },
+        radius: DEFAULT_BIAS_RADIUS_METERS,
+      },
+    };
+  } else {
+    // Hard-bound to India when device location is unavailable so results
+    // don't drift to the Worker’s European edge location.
+    googleBody.locationRestriction = { rectangle: INDIA_VIEWPORT };
+  }
+
   let googleRes;
   try {
     googleRes = await fetch(PLACES_SEARCH_URL, {
@@ -81,7 +133,7 @@ async function handlePlacesSearch(request, env) {
         "X-Goog-Api-Key": env.GOOGLE_API_KEY,
         "X-Goog-FieldMask": FIELD_MASK,
       },
-      body: JSON.stringify({ textQuery }),
+      body: JSON.stringify(googleBody),
     });
   } catch (err) {
     return error(

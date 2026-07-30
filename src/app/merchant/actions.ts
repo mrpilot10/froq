@@ -3873,21 +3873,57 @@ export async function deleteMerchantAccount(): Promise<{ ok: boolean; error?: st
     } = await supabase.auth.getUser();
     if (!user) return { ok: false, error: "Not authenticated." };
 
-    const { data: merchant } = await supabase
+    const admin = createAdminClient();
+
+    // Primary owner: delete the whole store (cascades to members, cards, etc.).
+    const { data: ownedMerchant } = await supabase
       .from("merchants")
       .select("id")
       .eq("owner_user_id", user.id)
       .maybeSingle();
-    if (!merchant) return { ok: false, error: "Merchant account not found." };
 
-    const { error: pushError } = await supabase
-      .from("push_subscriptions")
+    if (ownedMerchant) {
+      const { error: pushError } = await admin
+        .from("push_subscriptions")
+        .delete()
+        .eq("merchant_id", ownedMerchant.id);
+      if (pushError) return { ok: false, error: pushError.message };
+
+      const { error } = await admin.from("merchants").delete().eq("id", ownedMerchant.id);
+      if (error) return { ok: false, error: error.message };
+
+      // Remove the auth user so the login can't be reused against a deleted store.
+      await admin.auth.admin.deleteUser(user.id);
+      return { ok: true };
+    }
+
+    // Manager / staff / co-owner: leave the team and delete this login only.
+    const { data: memberships, error: membershipLookupError } = await admin
+      .from("merchant_members")
+      .select("id, merchant_id")
+      .eq("user_id", user.id);
+    if (membershipLookupError) return { ok: false, error: membershipLookupError.message };
+    if (!memberships || memberships.length === 0) {
+      return { ok: false, error: "Merchant account not found." };
+    }
+
+    const merchantIds = [...new Set(memberships.map((row) => row.merchant_id))];
+
+    const { error: notifError } = await admin
+      .from("merchant_in_app_notifications")
       .delete()
-      .eq("merchant_id", merchant.id);
-    if (pushError) return { ok: false, error: pushError.message };
+      .eq("user_id", user.id)
+      .in("merchant_id", merchantIds);
+    if (notifError) return { ok: false, error: notifError.message };
 
-    const { error } = await supabase.from("merchants").delete().eq("id", merchant.id);
-    if (error) return { ok: false, error: error.message };
+    const { error: memberError } = await admin
+      .from("merchant_members")
+      .delete()
+      .eq("user_id", user.id);
+    if (memberError) return { ok: false, error: memberError.message };
+
+    const { error: authError } = await admin.auth.admin.deleteUser(user.id);
+    if (authError) return { ok: false, error: authError.message };
 
     return { ok: true };
   } catch (error) {

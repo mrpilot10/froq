@@ -47,6 +47,8 @@ interface AccountSettingsPanelProps {
   branchNameById?: Record<string, string>;
   onPhoneUpdated: (phone: string) => void;
   onNameUpdated?: (firstName: string, lastName: string) => void;
+  /** Shown for managers/staff so they can leave the store and delete their login. */
+  onDeleteAccount?: () => void;
 }
 
 function AccessChipGroup({
@@ -92,6 +94,7 @@ export const AccountSettingsPanel = forwardRef<
     branchNameById = {},
     onPhoneUpdated,
     onNameUpdated,
+    onDeleteAccount,
   },
   ref,
 ) {
@@ -294,6 +297,12 @@ export const AccountSettingsPanel = forwardRef<
               <span className="merchant-account-action-sub">Update your sign-in password</span>
             </span>
           </button>
+
+          {onDeleteAccount ? (
+            <button type="button" className="profile-delete" onClick={onDeleteAccount}>
+              Delete account
+            </button>
+          ) : null}
         </>
       ) : null}
 
