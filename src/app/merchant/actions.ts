@@ -825,7 +825,8 @@ export async function getCustomerLoyaltyTimeline(
     if (!user) return empty;
 
     const ctx = await currentMerchant(supabase, user.id);
-    if (!ctx || !canViewCustomerData(ctx.role)) return empty;
+    // Any teammate with product access can view stamp/reward history; contact PII stays gated in the UI.
+    if (!ctx) return empty;
 
     const id = customerId.trim();
     if (!id) return empty;

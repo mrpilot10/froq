@@ -111,7 +111,7 @@ export function CustomerDrawer({
   }, [customer?.id, customer?.merchantNotes]);
 
   useEffect(() => {
-    if (!customer?.id || !showData) return;
+    if (!customer?.id) return;
     let cancelled = false;
     setTimelineLoading(true);
     void getCustomerLoyaltyTimeline(customer.id).then((result) => {
@@ -122,7 +122,7 @@ export function CustomerDrawer({
     return () => {
       cancelled = true;
     };
-  }, [customer?.id, showData]);
+  }, [customer?.id]);
 
   const canOfferStamp =
     allowOfferStamp &&
@@ -142,6 +142,96 @@ export function CustomerDrawer({
       ? timeline
       : timeline.slice(0, TIMELINE_PREVIEW);
   const hiddenCount = Math.max(0, timeline.length - TIMELINE_PREVIEW);
+
+  const timelineSection = (
+    <div className="merchant-settings-group">
+      <h3 className="merchant-settings-title">Timeline</h3>
+      {timelineLoading ? (
+        <div className="cust-timeline" aria-busy="true">
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="cust-timeline-step">
+              <div className="cust-timeline-rail">
+                <span className="sk" style={{ width: 22, height: 22, borderRadius: 999 }} />
+                {index < 2 ? <span className="cust-timeline-line" aria-hidden /> : null}
+              </div>
+              <div className="cust-timeline-copy">
+                <div className="sk sk-line" style={{ width: 120 }} />
+                <div className="sk sk-line" style={{ width: 80, marginTop: 6 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : timeline.length === 0 ? (
+        <p className="cust-timeline-empty">No activity yet</p>
+      ) : (
+        <div
+          className={`cust-timeline-wrap${
+            !timelineExpanded && hiddenCount > 0 ? " is-collapsed" : ""
+          }`}
+        >
+          <div className="cust-timeline">
+            {visibleTimeline.map((event, index) => {
+              const by = timelineActor(event);
+              const Icon =
+                event.type === "reward"
+                  ? Gift
+                  : event.type === "joined"
+                    ? UserRound
+                    : Stamp;
+              return (
+                <div key={event.id} className="cust-timeline-step is-done">
+                  <div className="cust-timeline-rail">
+                    <span
+                      className={`cust-timeline-dot cust-timeline-dot--${event.type}`}
+                      aria-hidden
+                    >
+                      {event.type === "joined" ? (
+                        <Check size={12} strokeWidth={3} />
+                      ) : (
+                        <Icon size={12} strokeWidth={2.6} />
+                      )}
+                    </span>
+                    {index < visibleTimeline.length - 1 ? (
+                      <span className="cust-timeline-line" aria-hidden />
+                    ) : null}
+                  </div>
+                  <div className="cust-timeline-copy">
+                    <div className="cust-timeline-label">{event.label}</div>
+                    <div className="cust-timeline-time">
+                      {timelineTime(event.atMs)}
+                      {by ? ` · ${by}` : ""}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {hiddenCount > 0 ? (
+            <div className="cust-timeline-more-bar">
+              <button
+                type="button"
+                className="cust-timeline-more"
+                onClick={() => setTimelineExpanded((open) => !open)}
+              >
+                {timelineExpanded ? (
+                  <>
+                    Show less
+                    <ChevronUp size={14} strokeWidth={2.4} aria-hidden />
+                  </>
+                ) : (
+                  <>
+                    Show more
+                    <span className="cust-timeline-more-count">{hiddenCount}</span>
+                    <ChevronDown size={14} strokeWidth={2.4} aria-hidden />
+                  </>
+                )}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <BottomSheet
@@ -212,93 +302,7 @@ export function CustomerDrawer({
                 ) : null}
               </div>
 
-              <div className="merchant-settings-group">
-                <h3 className="merchant-settings-title">Timeline</h3>
-                {timelineLoading ? (
-                  <div className="cust-timeline" aria-busy="true">
-                    {[0, 1, 2].map((index) => (
-                      <div key={index} className="cust-timeline-step">
-                        <div className="cust-timeline-rail">
-                          <span className="sk" style={{ width: 22, height: 22, borderRadius: 999 }} />
-                          {index < 2 ? <span className="cust-timeline-line" aria-hidden /> : null}
-                        </div>
-                        <div className="cust-timeline-copy">
-                          <div className="sk sk-line" style={{ width: 120 }} />
-                          <div className="sk sk-line" style={{ width: 80, marginTop: 6 }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : timeline.length === 0 ? (
-                  <p className="cust-timeline-empty">No activity yet</p>
-                ) : (
-                  <div
-                    className={`cust-timeline-wrap${
-                      !timelineExpanded && hiddenCount > 0 ? " is-collapsed" : ""
-                    }`}
-                  >
-                    <div className="cust-timeline">
-                      {visibleTimeline.map((event, index) => {
-                        const by = timelineActor(event);
-                        const Icon =
-                          event.type === "reward"
-                            ? Gift
-                            : event.type === "joined"
-                              ? UserRound
-                              : Stamp;
-                        return (
-                          <div key={event.id} className="cust-timeline-step is-done">
-                            <div className="cust-timeline-rail">
-                              <span
-                                className={`cust-timeline-dot cust-timeline-dot--${event.type}`}
-                                aria-hidden
-                              >
-                                {event.type === "joined" ? (
-                                  <Check size={12} strokeWidth={3} />
-                                ) : (
-                                  <Icon size={12} strokeWidth={2.6} />
-                                )}
-                              </span>
-                              {index < visibleTimeline.length - 1 ? (
-                                <span className="cust-timeline-line" aria-hidden />
-                              ) : null}
-                            </div>
-                            <div className="cust-timeline-copy">
-                              <div className="cust-timeline-label">{event.label}</div>
-                              <div className="cust-timeline-time">
-                                {timelineTime(event.atMs)}
-                                {by ? ` · ${by}` : ""}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {hiddenCount > 0 ? (
-                      <div className="cust-timeline-more-bar">
-                        <button
-                          type="button"
-                          className="cust-timeline-more"
-                          onClick={() => setTimelineExpanded((open) => !open)}
-                        >
-                          {timelineExpanded ? (
-                            <>
-                              Show less
-                              <ChevronUp size={14} strokeWidth={2.4} aria-hidden />
-                            </>
-                          ) : (
-                            <>
-                              Show more
-                              <span className="cust-timeline-more-count">{hiddenCount}</span>
-                              <ChevronDown size={14} strokeWidth={2.4} aria-hidden />
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                )}
-              </div>
+              {timelineSection}
 
               <label className="auth-field">
                 <span className="auth-label">Merchant notes</span>
@@ -331,17 +335,27 @@ export function CustomerDrawer({
               </label>
             </>
           ) : (
-            <div className="merchant-customer-profile-head">
-              <div className="merchant-avatar merchant-avatar--lg" aria-hidden>
-                {getInitials(customer.name)}
+            <>
+              <div className="merchant-customer-profile-head">
+                <div className="merchant-avatar merchant-avatar--lg" aria-hidden>
+                  {getInitials(customer.name)}
+                </div>
+                <div className="merchant-customer-profile-identity">
+                  <h3 id="customer-drawer-name" className="merchant-customer-profile-name">
+                    {customer.name}
+                  </h3>
+                  <p className="merchant-customer-profile-since">
+                    {customer.stamps}/{customer.totalStamps} stamps · {customer.lifetimeVisits}{" "}
+                    visits
+                  </p>
+                  {badge ? (
+                    <span className={`merchant-badge ${badge.className}`}>{badge.label}</span>
+                  ) : null}
+                </div>
               </div>
-              <div className="merchant-customer-profile-identity">
-                <h3 id="customer-drawer-name" className="merchant-customer-profile-name">
-                  {customer.name}
-                </h3>
-                <p className="merchant-customer-profile-since">Offer a stamp with OTP</p>
-              </div>
-            </div>
+
+              {timelineSection}
+            </>
           )}
 
           {confirm && canModerate ? (
