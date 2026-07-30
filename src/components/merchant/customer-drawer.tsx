@@ -345,8 +345,7 @@ export function CustomerDrawer({
                     {customer.name}
                   </h3>
                   <p className="merchant-customer-profile-since">
-                    {customer.stamps}/{customer.totalStamps} stamps · {customer.lifetimeVisits}{" "}
-                    visits
+                    Member since {customer.memberSince}
                   </p>
                   {badge ? (
                     <span className={`merchant-badge ${badge.className}`}>{badge.label}</span>

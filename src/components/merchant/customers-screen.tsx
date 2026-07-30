@@ -286,15 +286,9 @@ export function CustomersScreen({
                             {branchNameById?.get(customer.branchId) ?? "Branch"}
                           </span>
                         ) : null}
-                        {showData ? (
-                          <span className="merchant-list-sub">
-                            Member since {customer.memberSince}
-                          </span>
-                        ) : (
-                          <span className="merchant-list-sub">
-                            {hideOfferStamp ? "View only in All branches" : "Tap to offer stamp"}
-                          </span>
-                        )}
+                        <span className="merchant-list-sub">
+                          Member since {customer.memberSince}
+                        </span>
                       </div>
 
                       {showData ? (
