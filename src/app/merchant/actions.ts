@@ -62,13 +62,14 @@ import {
   isValidPhone,
   normalizeEmail,
 } from "@/lib/auth/format";
-import { sendPasswordResetEmail, sendTeamInviteEmail } from "@/lib/email/resend";
+import { sendPasswordResetEmail, sendTeamAccessChangedEmail, sendTeamInviteEmail } from "@/lib/email/resend";
 import { getPublicAppOrigin } from "@/lib/app-url";
 import {
   ASSIGNABLE_ROLES,
   canViewAnalytics,
   canViewCustomerData,
   normalizeMemberRole,
+  ROLE_LABELS,
 } from "@/lib/merchant/roles";
 import { resolveBranchFilterForUser } from "@/lib/merchant/branch-access";
 import { mergeUnifiedCustomers } from "@/lib/merchant/unified-customers";
@@ -4184,13 +4185,13 @@ export async function updateMemberRole(
 
     const { data: merchant } = await supabase
       .from("merchants")
-      .select("owner_user_id")
+      .select("owner_user_id, business_name")
       .eq("id", ctx.id)
       .maybeSingle();
 
     const { data: target } = await supabase
       .from("merchant_members")
-      .select("id, user_id, role")
+      .select("id, user_id, role, email, name, branch_ids, product_ids")
       .eq("id", memberId)
       .eq("merchant_id", ctx.id)
       .maybeSingle();
@@ -4212,7 +4213,85 @@ export async function updateMemberRole(
       })
       .eq("id", memberId)
       .eq("merchant_id", ctx.id);
-    return error ? { ok: false, error: error.message } : { ok: true };
+    if (error) return { ok: false, error: error.message };
+
+    const notifyEmail = target.email?.trim();
+    if (notifyEmail) {
+      const prevRole = normalizeMemberRole(target.role);
+      const prevBranches = target.branch_ids ?? [];
+      const prevProducts = normalizeMemberProductIds(target.product_ids);
+      const changes: Array<{ label: string; from: string; to: string }> = [];
+
+      if (prevRole !== role) {
+        changes.push({
+          label: "Role",
+          from: ROLE_LABELS[prevRole],
+          to: ROLE_LABELS[role],
+        });
+      }
+
+      const sameSorted = (a: string[], b: string[]) => {
+        if (a.length !== b.length) return false;
+        const left = [...a].sort();
+        const right = [...b].sort();
+        return left.every((value, index) => value === right[index]);
+      };
+
+      if (!sameSorted(prevBranches, ids)) {
+        const allBranchIds = [...new Set([...prevBranches, ...ids])];
+        const nameById = new Map<string, string>();
+        if (allBranchIds.length > 0) {
+          const { data: branchRows } = await supabase
+            .from("branches")
+            .select("id, name")
+            .eq("merchant_id", ctx.id)
+            .in("id", allBranchIds);
+          for (const row of branchRows ?? []) nameById.set(row.id, row.name);
+        }
+        const labelBranches = (list: string[]) =>
+          list.length === 0
+            ? "All branches"
+            : list.map((id) => nameById.get(id) ?? "Branch").join(", ");
+        changes.push({
+          label: "Branches",
+          from: labelBranches(prevBranches),
+          to: labelBranches(ids),
+        });
+      }
+
+      if (!sameSorted(prevProducts, products)) {
+        const PRODUCT_LABELS: Record<MerchantProduct, string> = {
+          loyalty: "Loyalty Stamps",
+          queue: "Queue Management",
+          reservation: "Reservations",
+        };
+        const labelProducts = (list: MerchantProduct[]) =>
+          list.length === 0
+            ? "All products"
+            : list.map((id) => PRODUCT_LABELS[id]).join(", ");
+        changes.push({
+          label: "Product access",
+          from: labelProducts(prevProducts),
+          to: labelProducts(products),
+        });
+      }
+
+      if (changes.length > 0) {
+        try {
+          await sendTeamAccessChangedEmail({
+            to: notifyEmail,
+            businessName: merchant?.business_name?.trim() || "your store",
+            changes,
+            dashboardUrl: `${getPublicAppOrigin()}/merchant`,
+            name: target.name?.trim() || undefined,
+          });
+        } catch {
+          /* non-fatal: access already updated */
+        }
+      }
+    }
+
+    return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Could not update member." };
   }

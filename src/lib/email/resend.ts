@@ -240,6 +240,87 @@ export async function sendTeamInviteEmail(input: {
   return { ok: true };
 }
 
+export async function sendTeamAccessChangedEmail(input: {
+  to: string;
+  businessName: string;
+  changes: Array<{ label: string; from: string; to: string }>;
+  dashboardUrl: string;
+  name?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const resend = getResend();
+  if (!resend) {
+    return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
+  }
+  if (input.changes.length === 0) return { ok: true };
+
+  const greeting = input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
+  const business = escapeHtml(input.businessName);
+  const subject = `Your access at ${input.businessName} was updated`;
+  const dashboardUrl = toPublicEmailUrl(input.dashboardUrl);
+
+  const changeRows = input.changes
+    .map(
+      (change) => `<tr>
+        <td style="padding:10px 0;border-bottom:1px solid #e6ebe9;vertical-align:top;">
+          <div style="font-size:12px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;color:#7a9088;">
+            ${escapeHtml(change.label)}
+          </div>
+          <div style="margin-top:4px;font-size:15px;line-height:1.5;color:#3d5c52;">
+            <span style="text-decoration:line-through;color:#8a9e97;">${escapeHtml(change.from)}</span>
+            <span style="margin:0 6px;color:#8a9e97;">→</span>
+            <strong style="color:${BRAND};">${escapeHtml(change.to)}</strong>
+          </div>
+        </td>
+      </tr>`,
+    )
+    .join("");
+
+  const html = brandedEmailHtml({
+    title: subject,
+    greeting,
+    bodyHtml: `<p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      Your access for <strong style="color:${BRAND};">${business}</strong> was updated by the account owner.
+      Here is what changed:
+    </p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+      ${changeRows}
+    </table>`,
+    ctaLabel: "Open dashboard",
+    ctaUrl: dashboardUrl,
+  });
+
+  const textChanges = input.changes
+    .map((change) => `- ${change.label}: ${change.from} → ${change.to}`)
+    .join("\n");
+
+  const { error } = await resend.emails.send({
+    from: fromAddress(),
+    to: input.to,
+    subject,
+    html,
+    text: [
+      greeting,
+      "",
+      `Your access for ${input.businessName} was updated by the account owner.`,
+      "Here is what changed:",
+      textChanges,
+      "",
+      `Open dashboard: ${dashboardUrl}`,
+      "",
+      `Need help? ${HELP_URL}`,
+      "",
+      "Cheers,",
+      "The Froq Team",
+    ].join("\n"),
+  });
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  return { ok: true };
+}
+
 function supportInbox() {
   return process.env.SUPPORT_INBOX_EMAIL?.trim() || "hello@froq.io";
 }
