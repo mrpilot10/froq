@@ -30,7 +30,7 @@ function json(body: VerifyOtpResult, status: number) {
 
 export async function POST(request: Request) {
   try {
-    let parsed: { phone: string; otp: string; captchaToken?: string };
+    let parsed: { phone: string; otp: string; captchaToken?: string | null };
     try {
       parsed = bodySchema.parse(await request.json());
     } catch {
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
     // The session is minted with a phone+password grant, which GoTrue guards
     // with its CAPTCHA check — hence a second token here, distinct from the one
     // spent on /api/send-otp. It also rate-limits code-guessing at the last step.
-    const session = await establishPhoneSession(phone, parsed.captchaToken);
+    const session = await establishPhoneSession(phone, parsed.captchaToken ?? undefined);
     if (!session.ok) {
       const err = session.error ?? "";
       otpLog.error("verify_session_failed", { phone: maskPhone(phone), reason: err });
