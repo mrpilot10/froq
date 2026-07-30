@@ -217,7 +217,14 @@ export function useDeviceSetup(): DeviceSetupState {
   };
 }
 
-export function DeviceSetupRows({ state }: { state: DeviceSetupState }) {
+export function DeviceSetupRows({
+  state,
+  variant = "cards",
+}: {
+  state: DeviceSetupState;
+  /** `cards` = separate tiles (onboarding). `merged` = single panel rows. */
+  variant?: "cards" | "merged";
+}) {
   const {
     notifState,
     installed,
@@ -243,9 +250,20 @@ export function DeviceSetupRows({ state }: { state: DeviceSetupState }) {
           ? "Install Froq first, then open it to enable"
           : "Real-time approval & reward alerts";
 
+  const installSubText = installed
+    ? "Installed on this device"
+    : installEvent
+      ? "Add Froq to your home screen"
+      : isIOS
+        ? "Add Froq to your iPhone home screen"
+        : "Add Froq from your browser menu";
+
+  const rowClass =
+    variant === "merged" ? "merchant-device-merged-row" : "merchant-onboard-row";
+
   return (
-    <div className="merchant-onboard-list">
-      <div className="merchant-onboard-row">
+    <div className={variant === "merged" ? "merchant-device-merged-list" : "merchant-onboard-list"}>
+      <div className={rowClass}>
         <div className="profile-row-icon">
           <Bell size={18} strokeWidth={2.2} />
         </div>
@@ -268,21 +286,13 @@ export function DeviceSetupRows({ state }: { state: DeviceSetupState }) {
         )}
       </div>
 
-      <div className="merchant-onboard-row">
+      <div className={rowClass}>
         <div className="profile-row-icon">
           <Download size={18} strokeWidth={2.2} />
         </div>
         <div className="merchant-onboard-copy">
           <div className="merchant-onboard-row-title">Install app</div>
-          <div className="merchant-onboard-row-sub">
-            {installed
-              ? "Installed on this device"
-              : installEvent
-                ? "Add Froq to your home screen"
-                : isIOS
-                  ? "Add Froq to your iPhone home screen"
-                  : "Add Froq from your browser menu"}
-          </div>
+          <div className="merchant-onboard-row-sub">{installSubText}</div>
         </div>
         {installed ? (
           <span className="merchant-onboard-done">
@@ -363,6 +373,23 @@ export function DeviceSetupRows({ state }: { state: DeviceSetupState }) {
           </ol>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Merged install + notifications block for the bottom of product settings. */
+export function DeviceSetupPanel() {
+  const state = useDeviceSetup();
+
+  return (
+    <div className="merchant-settings-group">
+      <h3 className="merchant-settings-title">This device</h3>
+      <div className="panel-card merchant-device-panel">
+        <DeviceSetupRows state={state} variant="merged" />
+        <p className="merchant-device-panel-hint">
+          Install Froq and allow notifications on each device where you want approval alerts.
+        </p>
+      </div>
     </div>
   );
 }

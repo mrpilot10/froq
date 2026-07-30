@@ -68,6 +68,7 @@ export function JoinScreen({
   const [error, setError] = useState("");
   const [isReturningMember, setIsReturningMember] = useState(false);
   const [deliveryMessage, setDeliveryMessage] = useState("");
+  const [sendingCode, setSendingCode] = useState(false);
   const resend = useResendCooldown();
   // Both OTP steps need their own token: sending the code is verified by us,
   // while minting the session goes through Supabase's captcha-protected grant.
@@ -117,6 +118,7 @@ export function JoinScreen({
   }, [slug, router, nextPath]);
 
   const sendCode = useCallback(async () => {
+    if (sendingCode) return;
     if (!isValidPhone(phone)) {
       setError("Enter a valid 10-digit mobile number.");
       return;
@@ -127,19 +129,24 @@ export function JoinScreen({
       return;
     }
     setError("");
+    setSendingCode(true);
     setStep("checking");
-    const result = await sendOtp(phone, captcha.token);
-    captcha.reset();
-    if (!result.ok) {
-      setError(result.message);
-      setStep(step === "otp" ? "otp" : "phone");
-      if (result.retryAfter) resend.start(result.retryAfter);
-      return;
+    try {
+      const result = await sendOtp(phone, captcha.token);
+      captcha.reset();
+      if (!result.ok) {
+        setError(result.message);
+        setStep(step === "otp" ? "otp" : "phone");
+        if (result.retryAfter) resend.start(result.retryAfter);
+        return;
+      }
+      setDeliveryMessage(result.message);
+      resend.start(result.retryAfter ?? RESEND_SECONDS);
+      setStep("otp");
+    } finally {
+      setSendingCode(false);
     }
-    setDeliveryMessage(result.message);
-    resend.start(result.retryAfter ?? RESEND_SECONDS);
-    setStep("otp");
-  }, [phone, resend, step, captcha]);
+  }, [phone, resend, step, captcha, sendingCode]);
 
   const verify = useCallback(async () => {
     if (otp.length !== OTP_LENGTH) {
@@ -274,9 +281,9 @@ export function JoinScreen({
                 type="button"
                 className="cta-btn auth-submit"
                 onClick={sendCode}
-                disabled={!captcha.ready}
+                disabled={!captcha.ready || sendingCode}
               >
-                Send Verification Code
+                {sendingCode ? "Sending…" : "Send Verification Code"}
               </button>
               <p className="merchant-auth-note">
                 By continuing, you agree to our Terms &amp; Conditions
@@ -336,7 +343,12 @@ export function JoinScreen({
                     Resend code in <strong>{resend.secondsLeft}s</strong>
                   </>
                 ) : (
-                  <button type="button" className="auth-link" onClick={sendCode}>
+                  <button
+                    type="button"
+                    className="auth-link"
+                    disabled={sendingCode || !resend.canResend}
+                    onClick={sendCode}
+                  >
                     Resend code
                   </button>
                 )}

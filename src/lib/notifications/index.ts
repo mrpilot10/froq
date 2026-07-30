@@ -14,6 +14,7 @@ export type { QueueCallReminderResult } from "./queue-call-reminders";
 export {
   CustomerNotificationTemplate,
   shouldSendWhatsApp,
+  isLoyaltyNotificationTemplate,
   isQueueNotificationTemplate,
   buildSmsBody,
   type NotifiableCustomer,

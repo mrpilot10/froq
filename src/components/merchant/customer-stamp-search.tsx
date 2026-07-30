@@ -199,6 +199,7 @@ export function CustomerStampSearch({
         >
           {selected && onRequestOfferStampOtp && onConfirmOfferStamp ? (
             <OfferStampOtp
+              customerId={selected.id}
               customerName={selected.name}
               autoSend
               onRequestCode={() => onRequestOfferStampOtp(selected.id)}

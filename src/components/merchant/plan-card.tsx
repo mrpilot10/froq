@@ -1,21 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowUpRight, BellRing, Check, Download, Lock, Sparkles } from "lucide-react";
+import { ArrowUpRight, Check, Lock, Sparkles } from "lucide-react";
 import { MERCHANT_PLANS } from "@/lib/merchant/constants";
 import type { MerchantProduct } from "@/lib/merchant/types";
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-}
-
-function detectInstalled() {
-  if (typeof window === "undefined") return false;
-  const standalone = window.matchMedia?.("(display-mode: standalone)").matches;
-  const iosStandalone = (window.navigator as { standalone?: boolean }).standalone === true;
-  return Boolean(standalone || iosStandalone);
-}
 
 interface MerchantPlanCardProps {
   product?: MerchantProduct;
@@ -33,55 +20,6 @@ export function MerchantPlanCard({
 }: MerchantPlanCardProps) {
   const catalog = MERCHANT_PLANS[product];
   const plan = { ...catalog, enabled: enabled ?? catalog.enabled };
-  const [notifState, setNotifState] = useState<NotificationPermission | "unsupported">("default");
-  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installed, setInstalled] = useState(false);
-
-  useEffect(() => {
-    const notifSupported = typeof window !== "undefined" && "Notification" in window;
-    setNotifState(notifSupported ? Notification.permission : "unsupported");
-    setInstalled(detectInstalled());
-
-    const handleBeforeInstall = (event: Event) => {
-      event.preventDefault();
-      setInstallEvent(event as BeforeInstallPromptEvent);
-    };
-    const handleInstalled = () => {
-      setInstalled(true);
-      setInstallEvent(null);
-    };
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstall);
-    window.addEventListener("appinstalled", handleInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
-      window.removeEventListener("appinstalled", handleInstalled);
-    };
-  }, []);
-
-  const notifGranted = notifState === "granted";
-  const notifBlocked = notifState === "denied";
-
-  const handleEnableNotifications = async () => {
-    if (!("Notification" in window)) {
-      setNotifState("unsupported");
-      return;
-    }
-    try {
-      const result = await Notification.requestPermission();
-      setNotifState(result);
-    } catch {
-      setNotifState("denied");
-    }
-  };
-
-  const handleInstall = async () => {
-    if (!installEvent) return;
-    await installEvent.prompt();
-    const choice = await installEvent.userChoice;
-    if (choice.outcome === "accepted") setInstalled(true);
-    setInstallEvent(null);
-  };
 
   // Products that aren't enabled yet show an upgrade/enable placeholder only.
   if (!plan.enabled) {
@@ -169,60 +107,6 @@ export function MerchantPlanCard({
             </button>
           ) : null}
         </div>
-      </div>
-
-      <div className="merchant-cta-pair">
-        <button
-          type="button"
-          className={`merchant-app-cta${installed ? " is-done" : ""}`}
-          onClick={handleInstall}
-          disabled={installed || !installEvent}
-        >
-          <span className="merchant-app-cta-icon">
-            {installed ? <Check size={18} strokeWidth={2.6} /> : <Download size={18} strokeWidth={2.2} />}
-          </span>
-          <span className="merchant-app-cta-copy">
-            <span className="merchant-app-cta-title">
-              {installed ? "App installed" : "Install app"}
-            </span>
-            <span className="merchant-app-cta-sub">
-              {installed
-                ? "On this device"
-                : installEvent
-                  ? "Add to home screen"
-                  : "Use browser menu → Add to Home Screen"}
-            </span>
-          </span>
-        </button>
-
-        <button
-          type="button"
-          className={`merchant-app-cta${notifGranted ? " is-done" : ""}`}
-          onClick={handleEnableNotifications}
-          disabled={notifGranted || notifState === "unsupported"}
-        >
-          <span className="merchant-app-cta-icon">
-            {notifGranted ? (
-              <Check size={18} strokeWidth={2.6} />
-            ) : (
-              <BellRing size={18} strokeWidth={2.2} />
-            )}
-          </span>
-          <span className="merchant-app-cta-copy">
-            <span className="merchant-app-cta-title">
-              {notifGranted ? "Notifications on" : "Enable notifications"}
-            </span>
-            <span className="merchant-app-cta-sub">
-              {notifGranted
-                ? "Alerts are active"
-                : notifBlocked
-                  ? "Blocked in browser settings"
-                  : notifState === "unsupported"
-                    ? "Not available here"
-                    : "Approval & reward alerts"}
-            </span>
-          </span>
-        </button>
       </div>
     </div>
   );

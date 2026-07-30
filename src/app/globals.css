@@ -10552,6 +10552,41 @@ body {
   margin-bottom: 4px;
 }
 
+.merchant-device-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 6px 0 14px;
+}
+
+.merchant-device-merged-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.merchant-device-merged-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+}
+
+.merchant-device-merged-row + .merchant-device-merged-row {
+  border-top: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+}
+
+.merchant-device-merged-list .merchant-install-steps {
+  margin: 4px 14px 8px;
+}
+
+.merchant-device-panel-hint {
+  margin: 4px 18px 0;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
 .merchant-drawer-actions {
   display: flex;
   gap: 10px;
@@ -13471,8 +13506,8 @@ body {
 }
 
 .merchant-qr-caption {
-  font-size: 0.86rem;
-  line-height: 1.5;
+  font-size: 0.8rem;
+  line-height: 1.45;
   font-weight: 500;
   color: color-mix(in srgb, var(--brand-deep) 62%, transparent);
 }
@@ -13780,7 +13815,7 @@ body {
 
 .merchant-qr-drawer-sub {
   margin: 2px 0 0;
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   line-height: 1.4;
   font-weight: 500;
   color: var(--ink-soft);

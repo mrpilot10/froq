@@ -164,6 +164,20 @@ export function shouldSendWhatsApp(customer: NotifiableCustomer): boolean {
   );
 }
 
+/** Loyalty Meta templates — always attempt WhatsApp (SMS fallback when configured). */
+export function isLoyaltyNotificationTemplate(
+  template: CustomerNotificationTemplate,
+): boolean {
+  return (
+    template === "stamp_verified" ||
+    template === "reward_unlocked" ||
+    template === "stamp_collected_last_wait_time" ||
+    template === "reward_ready_wait_time" ||
+    template === "reward_redeemed" ||
+    template === "birthday_bonus_stamps"
+  );
+}
+
 /** Queue Meta templates — WhatsApp only (no SMS fallback). */
 export function isQueueNotificationTemplate(
   template: CustomerNotificationTemplate,

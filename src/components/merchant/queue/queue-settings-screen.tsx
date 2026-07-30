@@ -26,6 +26,7 @@ import {
 import { fileToBannerDataUrl } from "@/lib/merchant/image";
 import type { MerchantProfile } from "@/lib/merchant/types";
 import { MerchantPlanCard } from "../plan-card";
+import { DeviceSetupPanel } from "../device-setup-rows";
 import { MerchantQrPanel } from "../qr-panel";
 import {
   hoursFromProfile,
@@ -252,6 +253,8 @@ export function QueueSettingsScreen({
         onGetStarted={onGetStarted}
         onManagePlan={onManagePlan}
       />
+
+      <DeviceSetupPanel />
 
       <BottomSheet
         open={sheet !== null}

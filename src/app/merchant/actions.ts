@@ -3085,6 +3085,11 @@ export async function updateMerchantProfile(
     return { ok: false, error: "Only the owner can edit the loyalty program." };
   }
 
+  // Owner-escalation alerts are owner-controlled.
+  if (patch.notifyOwnerPendingApprovals !== undefined && ctx.role !== "owner") {
+    return { ok: false, error: "Only the owner can change owner approval alerts." };
+  }
+
   const { error } = await supabase
     .from("merchants")
     .update(toMerchantRowPatch(patch))
@@ -3309,8 +3314,8 @@ export async function requestOfferStampOtp(customerId: string): Promise<{
     const { generateOtp, hashOtp } = await import("@/lib/auth/otp/hash");
     const { deliverOtp } = await import("@/lib/auth/otp/deliver");
     const {
+      claimOtpSendSlot,
       countRecentRequests,
-      lastRequestAt,
       persistOtp,
       purgeExpired,
       clearOtps,
@@ -3364,20 +3369,18 @@ export async function requestOfferStampOtp(customerId: string): Promise<{
     const key = stampOfferOtpKey(customerId);
     await purgeExpired();
 
-    const last = await lastRequestAt(key);
-    if (last) {
-      const waitMs = RESEND_SECONDS * 1000 - (Date.now() - last);
-      if (waitMs > 0) {
-        return {
-          ok: false,
-          error: `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another code.`,
-          retryAfter: Math.ceil(waitMs / 1000),
-        };
-      }
+    const slot = await claimOtpSendSlot(key, RESEND_SECONDS);
+    if (!slot.ok) {
+      return {
+        ok: false,
+        error: `Please wait ${slot.retryAfter}s before requesting another code.`,
+        retryAfter: slot.retryAfter,
+      };
     }
 
     const recent = await countRecentRequests(key);
     if (recent >= MAX_REQUESTS_PER_MINUTE) {
+      await clearOtps(key);
       return {
         ok: false,
         error: "Too many attempts. Please try again in a minute.",
@@ -3399,6 +3402,11 @@ export async function requestOfferStampOtp(customerId: string): Promise<{
       requestId: delivery.requestId,
       channel: delivery.channel,
     });
+
+    if (delivery.channel === "whatsapp") {
+      const { markWhatsAppAvailableForPhone } = await import("@/lib/notifications/prefs");
+      await markWhatsAppAvailableForPhone({ phone });
+    }
 
     const via = delivery.channel === "whatsapp" ? "WhatsApp" : "SMS";
     return {

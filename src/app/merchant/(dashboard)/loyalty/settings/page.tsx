@@ -25,6 +25,7 @@ export default function LoyaltySettingsPage() {
       onManagePlan={isOwner ? () => router.push("/merchant/loyalty/plan") : undefined}
       branchSlug={branchSlug}
       branchSelected={activeBranchId !== null}
+      branchName={activeBranch?.name ?? null}
     />
   );
 }

@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useState,
+} from "react";
 import { Eye, EyeOff, KeyRound, Phone, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -22,6 +28,11 @@ import { useTurnstile } from "@/lib/turnstile/use-turnstile";
 
 type Panel = "idle" | "password" | "phone";
 type PhoneStep = "edit" | "otp";
+
+export interface AccountSettingsHandle {
+  /** Persist dirty name changes. Returns false if save failed. */
+  flushName: () => Promise<boolean>;
+}
 
 interface AccountSettingsPanelProps {
   email: string;
@@ -66,18 +77,24 @@ function AccessChipGroup({
   );
 }
 
-export function AccountSettingsPanel({
-  email,
-  phone,
-  firstName: initialFirstName = "",
-  lastName: initialLastName = "",
-  role,
-  productIds = [],
-  branchIds = [],
-  branchNameById = {},
-  onPhoneUpdated,
-  onNameUpdated,
-}: AccountSettingsPanelProps) {
+export const AccountSettingsPanel = forwardRef<
+  AccountSettingsHandle,
+  AccountSettingsPanelProps
+>(function AccountSettingsPanel(
+  {
+    email,
+    phone,
+    firstName: initialFirstName = "",
+    lastName: initialLastName = "",
+    role,
+    productIds = [],
+    branchIds = [],
+    branchNameById = {},
+    onPhoneUpdated,
+    onNameUpdated,
+  },
+  ref,
+) {
   const [panel, setPanel] = useState<Panel>("idle");
   const [accountEmail, setAccountEmail] = useState(email);
   const [accountPhone, setAccountPhone] = useState(phone);
@@ -111,13 +128,17 @@ export function AccountSettingsPanel({
       const resolved = metaPhone || user.phone || phone;
       if (resolved) setAccountPhone(resolved);
 
+      // Props from the workspace are the source of truth once loaded. Only
+      // hydrate from auth metadata when first/last were never set on the member.
+      if (initialFirstName.trim() || initialLastName.trim()) return;
+
       const metaFirst = typeof meta.first_name === "string" ? meta.first_name.trim() : "";
       const metaLast = typeof meta.last_name === "string" ? meta.last_name.trim() : "";
       if (metaFirst || metaLast) {
-        setFirstName(metaFirst || initialFirstName);
-        setLastName(metaLast || initialLastName);
-        setSavedFirstName(metaFirst || initialFirstName);
-        setSavedLastName(metaLast || initialLastName);
+        setFirstName(metaFirst);
+        setLastName(metaLast);
+        setSavedFirstName(metaFirst);
+        setSavedLastName(metaLast);
       } else if (typeof meta.full_name === "string" && meta.full_name.trim()) {
         const parts = meta.full_name.trim().split(/\s+/);
         const first = parts[0] ?? "";
@@ -138,13 +159,13 @@ export function AccountSettingsPanel({
   const nameDirty =
     firstName.trim() !== savedFirstName.trim() || lastName.trim() !== savedLastName.trim();
 
-  async function saveName() {
+  async function saveName(options?: { silent?: boolean }): Promise<boolean> {
     setSavingName(true);
     try {
       const result = await updateAccountName({ firstName, lastName });
       if (!result.ok) {
         toast.error(result.error ?? "Could not update your name.");
-        return;
+        return false;
       }
       const nextFirst = firstName.trim();
       const nextLast = lastName.trim();
@@ -153,11 +174,19 @@ export function AccountSettingsPanel({
       setFirstName(nextFirst);
       setLastName(nextLast);
       onNameUpdated?.(nextFirst, nextLast);
-      toast.success("Name updated");
+      if (!options?.silent) toast.success("Name updated");
+      return true;
     } finally {
       setSavingName(false);
     }
   }
+
+  useImperativeHandle(ref, () => ({
+    flushName: async () => {
+      if (!nameDirty) return true;
+      return saveName({ silent: true });
+    },
+  }));
 
   return (
     <div className="merchant-account-panel">
@@ -172,6 +201,7 @@ export function AccountSettingsPanel({
                 autoComplete="given-name"
                 maxLength={40}
                 value={firstName}
+                disabled={savingName}
                 onChange={(event) => setFirstName(event.target.value)}
                 placeholder="First name"
               />
@@ -184,21 +214,12 @@ export function AccountSettingsPanel({
                 autoComplete="family-name"
                 maxLength={40}
                 value={lastName}
+                disabled={savingName}
                 onChange={(event) => setLastName(event.target.value)}
                 placeholder="Last name"
               />
             </label>
           </div>
-          {nameDirty ? (
-            <button
-              type="button"
-              className="merchant-action-btn merchant-action-btn--reject"
-              disabled={savingName}
-              onClick={() => void saveName()}
-            >
-              {savingName ? "Saving…" : "Save name"}
-            </button>
-          ) : null}
 
           {role ? (
             <div className="merchant-account-access" aria-label="Your access">
@@ -293,7 +314,7 @@ export function AccountSettingsPanel({
       ) : null}
     </div>
   );
-}
+});
 
 function ReadOnlyField({ label, value }: { label: string; value: string }) {
   return (

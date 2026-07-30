@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { Check, ImagePlus, Trash2 } from "lucide-react";
 import Image from "next/image";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
@@ -13,8 +13,10 @@ import type {
   MerchantProduct,
   MerchantProfile,
 } from "@/lib/merchant/types";
-import { AccountSettingsPanel } from "./account-settings-panel";
-import { DeviceSetupRows, useDeviceSetup } from "./device-setup-rows";
+import {
+  AccountSettingsPanel,
+  type AccountSettingsHandle,
+} from "./account-settings-panel";
 
 interface MerchantProfileEditScreenProps {
   section: MerchantEditSection;
@@ -150,9 +152,29 @@ export function MerchantProfileEditScreen({
 }: MerchantProfileEditScreenProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rewardImageInputRef = useRef<HTMLInputElement>(null);
-  const device = useDeviceSetup();
+  const accountRef = useRef<AccountSettingsHandle>(null);
+  const [closingAccount, setClosingAccount] = useState(false);
 
   const meta = section ? SECTION_META[section] : null;
+
+  async function handleAccountDone() {
+    setClosingAccount(true);
+    try {
+      const ok = await accountRef.current?.flushName();
+      if (ok === false) return;
+      onClose();
+    } finally {
+      setClosingAccount(false);
+    }
+  }
+
+  function handleSheetClose() {
+    if (section === "account") {
+      void handleAccountDone();
+      return;
+    }
+    onClose();
+  }
 
   function updateField<K extends keyof MerchantProfile>(key: K, value: MerchantProfile[K]) {
     onChange({ ...profile, [key]: value });
@@ -179,7 +201,7 @@ export function MerchantProfileEditScreen({
   return (
     <BottomSheet
       open={section !== null}
-      onClose={onClose}
+      onClose={handleSheetClose}
       labelledBy="merchant-edit-title"
       className="merchant-theme merchant-edit-drawer"
     >
@@ -458,13 +480,6 @@ export function MerchantProfileEditScreen({
 
         {section === "notifications" && (
           <>
-            <div className="merchant-device-block">
-              <span className="auth-label">This device</span>
-              <DeviceSetupRows state={device} />
-              <span className="merchant-field-hint">
-                Install Froq and allow notifications on each device where you want approval alerts.
-              </span>
-            </div>
             <ToggleRow
               label="Stamp requests"
               description="Notify when a customer collects a stamp"
@@ -483,17 +498,20 @@ export function MerchantProfileEditScreen({
               checked={profile.notifyManagerPendingApprovals}
               onChange={(v) => updateField("notifyManagerPendingApprovals", v)}
             />
-            <ToggleRow
-              label="Notify Owners for pending stamp approvals"
-              description="Include owners in escalation reminders"
-              checked={profile.notifyOwnerPendingApprovals}
-              onChange={(v) => updateField("notifyOwnerPendingApprovals", v)}
-            />
+            {role === "owner" ? (
+              <ToggleRow
+                label="Notify Owners for pending stamp approvals"
+                description="Include owners in escalation reminders"
+                checked={profile.notifyOwnerPendingApprovals}
+                onChange={(v) => updateField("notifyOwnerPendingApprovals", v)}
+              />
+            ) : null}
           </>
         )}
 
         {section === "account" && (
           <AccountSettingsPanel
+            ref={accountRef}
             email={profile.email}
             phone={profile.phone}
             firstName={accountFirstName}
@@ -510,8 +528,13 @@ export function MerchantProfileEditScreen({
 
           {section === "account" ? (
             <div className="merchant-edit-sheet-actions">
-              <button type="button" className="cta-btn merchant-cta-accent" onClick={onClose}>
-                Done
+              <button
+                type="button"
+                className="cta-btn merchant-cta-accent"
+                disabled={closingAccount}
+                onClick={() => void handleAccountDone()}
+              >
+                {closingAccount ? "Saving…" : "Done"}
               </button>
             </div>
           ) : (

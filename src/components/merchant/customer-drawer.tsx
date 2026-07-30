@@ -387,6 +387,7 @@ export function CustomerDrawer({
             </div>
           ) : offering && canOfferStamp ? (
             <OfferStampOtp
+              customerId={customer.id}
               customerName={customer.name}
               autoSend
               onRequestCode={() => onRequestOfferStampOtp!(customer.id)}

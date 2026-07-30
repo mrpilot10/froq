@@ -12,6 +12,7 @@ import {
 } from "@/lib/merchant/reservations";
 import type { MerchantProfile } from "@/lib/merchant/types";
 import { MerchantPlanCard } from "../plan-card";
+import { DeviceSetupPanel } from "../device-setup-rows";
 import { MerchantQrPanel } from "../qr-panel";
 import { ReservationSettingsFields } from "./reservation-settings-fields";
 
@@ -175,6 +176,8 @@ export function ReservationSettingsScreen({
         onGetStarted={onGetStarted}
         onManagePlan={onManagePlan}
       />
+
+      <DeviceSetupPanel />
 
       <BottomSheet
         open={sheet !== null}

@@ -31,7 +31,7 @@ const DRAWER_COPY: Record<
   loyalty: {
     title: "Loyalty QR",
     productName: "Loyalty Stamps",
-    sub: "Customers scan this QR to join your loyalty program.",
+    sub: "Use this QR to enroll customers.",
     lockedSub: "Customers will scan this to join your loyalty program.",
     tip: "Display near your counter for the best scan rate.",
     openLabel: "Open Join Page",
@@ -63,6 +63,7 @@ interface MerchantQrDrawerProps {
   product?: MerchantProduct;
   enabled?: boolean;
   branchSlug?: string | null;
+  branchName?: string | null;
   onClose: () => void;
 }
 
@@ -72,6 +73,7 @@ export function MerchantQrDrawer({
   product = "loyalty",
   enabled = true,
   branchSlug = null,
+  branchName = null,
   onClose,
 }: MerchantQrDrawerProps) {
   const { qrUrl, joinUrl, displayUrl, download } = useMerchantQr(
@@ -139,7 +141,13 @@ export function MerchantQrDrawer({
           <h3 id="merchant-qr-title" className="merchant-qr-drawer-title">
             {copy.title}
           </h3>
-          <p className="merchant-qr-drawer-sub">{copy.sub}</p>
+          <p className="merchant-qr-drawer-sub">
+            {product === "loyalty"
+              ? branchName
+                ? `Use this QR to enroll customers. Every branch has its own code — this one is for ${branchName}.`
+                : "Use this QR to enroll customers. Every branch has its own code — download the correct one."
+              : copy.sub}
+          </p>
         </div>
 
         {posterAvailable ? (
@@ -218,7 +226,13 @@ export function MerchantQrDrawer({
             </div>
           </>
         ) : (
-          <MerchantPosterCard caption="A ready-to-print poster with your loyalty QR placed on the Froq template." />
+          <MerchantPosterCard
+            caption={
+              branchName
+                ? `Poster for ${branchName}. Every branch has its own QR — download the correct one.`
+                : "Every branch has its own QR — download the correct one. Ready to print on the Froq template."
+            }
+          />
         )}
       </div>
     </BottomSheet>

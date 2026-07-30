@@ -32,10 +32,72 @@ export async function countRecentRequests(phone: string): Promise<number> {
       .select("*", { count: "exact", head: true })
       .eq("phone", phone)
       .gte("created_at", since);
-    if (error) return 0;
+    // Fail closed — treat lookup errors as "at limit" so we never flood SMS/WA.
+    if (error) return Number.MAX_SAFE_INTEGER;
     return count ?? 0;
   } catch {
-    return 0;
+    return Number.MAX_SAFE_INTEGER;
+  }
+}
+
+/**
+ * Reserves a send slot so concurrent requests can't both call the provider.
+ * Inserts a short-lived claim row; only the earliest claim in the interval wins.
+ */
+export async function claimOtpSendSlot(
+  phone: string,
+  minIntervalSeconds: number,
+): Promise<{ ok: true } | { ok: false; retryAfter: number; error?: string }> {
+  try {
+    const admin = createAdminClient();
+    const last = await lastRequestAt(phone);
+    if (last) {
+      const waitMs = minIntervalSeconds * 1000 - (Date.now() - last);
+      if (waitMs > 0) {
+        return { ok: false, retryAfter: Math.max(1, Math.ceil(waitMs / 1000)) };
+      }
+    }
+
+    const claimHash = `claim:${crypto.randomUUID()}`;
+    const { error: insertError } = await admin.from(TABLE).insert({
+      phone,
+      otp_hash: claimHash,
+      expires_at: new Date(Date.now() + OTP_TTL_MS).toISOString(),
+    });
+    if (insertError) {
+      return { ok: false, retryAfter: minIntervalSeconds, error: insertError.message };
+    }
+
+    const since = new Date(Date.now() - minIntervalSeconds * 1000).toISOString();
+    const { data: rows, error } = await admin
+      .from(TABLE)
+      .select("otp_hash, created_at")
+      .eq("phone", phone)
+      .gte("created_at", since)
+      .order("created_at", { ascending: true });
+
+    if (error || !rows?.length) {
+      await admin.from(TABLE).delete().eq("otp_hash", claimHash);
+      return {
+        ok: false,
+        retryAfter: minIntervalSeconds,
+        error: error?.message ?? "Could not reserve OTP slot.",
+      };
+    }
+
+    if (rows[0].otp_hash !== claimHash) {
+      await admin.from(TABLE).delete().eq("otp_hash", claimHash);
+      const age = Date.now() - new Date(rows[0].created_at).getTime();
+      const retryAfter = Math.max(
+        1,
+        Math.ceil((minIntervalSeconds * 1000 - age) / 1000),
+      );
+      return { ok: false, retryAfter };
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, retryAfter: minIntervalSeconds, error: storeError(error) };
   }
 }
 

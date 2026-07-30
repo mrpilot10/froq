@@ -701,38 +701,52 @@ export function MerchantExperience({
     activeProduct === "loyalty" ? Math.max(approvals.length, unreadNotifCount) : unreadNotifCount;
   const activeBranch = branches.find((b) => b.id === activeBranchId) ?? null;
 
-  const ownerName = `${profile.ownerFirstName} ${profile.ownerLastName}`.trim();
   const me = currentUserId
     ? members.find((m) => m.userId === currentUserId)
     : undefined;
-  const myName =
-    [me?.firstName, me?.lastName].filter(Boolean).join(" ").trim() ||
-    me?.name.trim() ||
-    "";
-  const memberLooksLikePerson =
-    myName.length > 0 &&
-    myName.toLowerCase() !== profile.businessName.trim().toLowerCase();
-  const sidebarUserName =
-    (memberLooksLikePerson ? myName : "") ||
-    (role === "owner" ? ownerName : "") ||
-    me?.email ||
-    profile.email;
+
+  const resolveAccountNames = useCallback(() => {
+    // Owners: prefer merchant profile owner fields (updated immediately from
+    // Account settings). Staff/managers: prefer membership row.
+    let first =
+      (role === "owner" ? profile.ownerFirstName : "") || me?.firstName || "";
+    let last =
+      (role === "owner" ? profile.ownerLastName : "") || me?.lastName || "";
+    if (!first && !last) {
+      const parts = (me?.name || "").trim().split(/\s+/).filter(Boolean);
+      first = parts[0] ?? "";
+      last = parts.slice(1).join(" ");
+    }
+    return { first: first.trim(), last: last.trim() };
+  }, [
+    role,
+    profile.ownerFirstName,
+    profile.ownerLastName,
+    me?.firstName,
+    me?.lastName,
+    me?.name,
+  ]);
 
   const [accountFirstName, setAccountFirstName] = useState(
-    me?.firstName || (role === "owner" ? profile.ownerFirstName : "") || "",
+    () => resolveAccountNames().first,
   );
   const [accountLastName, setAccountLastName] = useState(
-    me?.lastName || (role === "owner" ? profile.ownerLastName : "") || "",
+    () => resolveAccountNames().last,
   );
 
   useEffect(() => {
-    setAccountFirstName(
-      me?.firstName || (role === "owner" ? profile.ownerFirstName : "") || "",
-    );
-    setAccountLastName(
-      me?.lastName || (role === "owner" ? profile.ownerLastName : "") || "",
-    );
-  }, [me?.firstName, me?.lastName, role, profile.ownerFirstName, profile.ownerLastName]);
+    const next = resolveAccountNames();
+    setAccountFirstName(next.first);
+    setAccountLastName(next.last);
+  }, [resolveAccountNames]);
+
+  // Live account name drives the sidebar/mobile user card for every role.
+  const accountFullName = [accountFirstName, accountLastName]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const sidebarUserName =
+    accountFullName || me?.name.trim() || me?.email || profile.email;
 
   const workspaceValue = useMemo<MerchantWorkspaceValue>(
     () => ({
@@ -976,6 +990,8 @@ export function MerchantExperience({
               ownerLastName: lastName,
             }));
           }
+          // Keep the signed-in member row in sync so refresh races can't flash
+          // the previous name on the user card.
           void onRefresh();
         }}
       />
@@ -1010,6 +1026,7 @@ export function MerchantExperience({
           product={qrProduct}
           enabled={isProductEnabled(entitlements, qrProduct)}
           branchSlug={activeBranch && !activeBranch.isDefault ? activeBranch.slug : null}
+          branchName={activeBranch?.name ?? null}
           onClose={() => setQrOpen(false)}
         />
       )}

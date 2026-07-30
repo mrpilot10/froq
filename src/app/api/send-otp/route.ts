@@ -7,8 +7,8 @@ import {
 import { generateOtp, hashOtp } from "@/lib/auth/otp/hash";
 import { deliverOtp } from "@/lib/auth/otp/deliver";
 import {
+  claimOtpSendSlot,
   countRecentRequests,
-  lastRequestAt,
   persistOtp,
   purgeExpired,
   clearOtps,
@@ -116,21 +116,21 @@ export async function POST(request: Request) {
 
     await purgeExpired();
 
-    const last = await lastRequestAt(phone);
-    if (last) {
-      const elapsed = Date.now() - last;
-      const waitMs = RESEND_SECONDS * 1000 - elapsed;
-      if (waitMs > 0) {
-        const retryAfter = Math.ceil(waitMs / 1000);
-        return json(
-          { ok: false, message: `Please wait ${retryAfter}s before requesting another code.`, retryAfter },
-          429,
-        );
-      }
+    const slot = await claimOtpSendSlot(phone, RESEND_SECONDS);
+    if (!slot.ok) {
+      return json(
+        {
+          ok: false,
+          message: `Please wait ${slot.retryAfter}s before requesting another code.`,
+          retryAfter: slot.retryAfter,
+        },
+        429,
+      );
     }
 
     const recent = await countRecentRequests(phone);
     if (recent >= MAX_REQUESTS_PER_MINUTE) {
+      await clearOtps(phone);
       otpLog.warn("rate_limited", { phone: maskPhone(phone), recent });
       return json(
         { ok: false, message: "Too many attempts. Please try again in a minute.", retryAfter: 60 },

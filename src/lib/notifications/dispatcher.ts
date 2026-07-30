@@ -22,6 +22,7 @@ import {
 } from "@/lib/notifications/sms";
 import {
   buildSmsBody,
+  isLoyaltyNotificationTemplate,
   isQueueNotificationTemplate,
   isReservationNotificationTemplate,
   shouldSendWhatsApp,
@@ -264,9 +265,10 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
 /**
  * Single entry point for all customer notifications.
  *
- * - Loyalty / general: WhatsApp only when whatsappAvailable + preferred WhatsApp.
+ * - Loyalty templates: WhatsApp first (Meta templates), SMS fallback when configured.
  * - Queue templates: WhatsApp only (Meta templates; no SMS fallback).
- * - Other templates: SMS fallback when transactional SMS env is configured.
+ * - Reservation templates: WhatsApp first, SMS fallback.
+ * - Other: WhatsApp only when whatsappAvailable + preferred WhatsApp; else SMS.
  */
 export async function sendCustomerNotification<T extends CustomerNotificationTemplate>(input: {
   customer: NotifiableCustomer;
@@ -275,11 +277,13 @@ export async function sendCustomerNotification<T extends CustomerNotificationTem
 }): Promise<SendCustomerNotificationResult> {
   const { customer, template, data } = input;
   const queueTemplate = isQueueNotificationTemplate(template);
+  const loyaltyTemplate = isLoyaltyNotificationTemplate(template);
   // Reservation guests are messaged on WhatsApp by default (that is the product
   // promise), but unlike queue they keep the SMS fallback.
   const useWhatsApp =
     shouldSendWhatsApp(customer) ||
     queueTemplate ||
+    loyaltyTemplate ||
     isReservationNotificationTemplate(template);
   const channel: NotificationChannel = useWhatsApp ? "whatsapp" : "sms";
 
@@ -287,6 +291,7 @@ export async function sendCustomerNotification<T extends CustomerNotificationTem
     template,
     channel,
     queueTemplate,
+    loyaltyTemplate,
     whatsappAvailable: customer.whatsappAvailable,
     preferred: customer.preferredNotificationChannel,
     publicToken: customer.publicToken,

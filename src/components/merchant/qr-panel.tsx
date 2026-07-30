@@ -20,7 +20,7 @@ const QR_COPY: Record<
 > = {
   loyalty: {
     title: "Loyalty QR",
-    caption: "Customers scan this QR to join your loyalty program.",
+    caption: "Use this QR to enroll customers.",
     openLabel: "Open Join Page",
     tip: "Display near your counter for the best scan rate.",
     alt: "Loyalty join QR code",
@@ -52,6 +52,8 @@ interface MerchantQrPanelProps {
    */
   needsBranch?: boolean;
   branchSelected?: boolean;
+  /** Active branch name — shown so merchants download the right code. */
+  branchName?: string | null;
 }
 
 export function MerchantQrPanel({
@@ -60,6 +62,7 @@ export function MerchantQrPanel({
   branchSlug = null,
   needsBranch = false,
   branchSelected = true,
+  branchName = null,
 }: MerchantQrPanelProps) {
   const [view, setView] = useState<QrView>("qr");
   const [copied, setCopied] = useState(false);
@@ -121,7 +124,13 @@ export function MerchantQrPanel({
 
         {view === "qr" || !posterAvailable ? (
           <>
-            <p className="merchant-qr-caption">{copy.caption}</p>
+            <p className="merchant-qr-caption">
+              {product === "loyalty"
+                ? branchName
+                  ? `Use this QR to enroll customers. Every branch has its own code — this one is for ${branchName}.`
+                  : "Use this QR to enroll customers. Every branch has its own code — download the correct one."
+                : copy.caption}
+            </p>
 
             <div className="merchant-qr-frame merchant-qr-frame--lg">
               {qrUrl ? (
@@ -180,7 +189,13 @@ export function MerchantQrPanel({
             </div>
           </>
         ) : (
-          <MerchantPosterCard caption="A ready-to-print poster with your loyalty QR placed on the Froq template." />
+          <MerchantPosterCard
+            caption={
+              branchName
+                ? `Poster for ${branchName}. Every branch has its own QR — download the correct one.`
+                : "Every branch has its own QR — download the correct one. Ready to print on the Froq template."
+            }
+          />
         )}
       </div>
     </div>
