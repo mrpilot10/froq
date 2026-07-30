@@ -468,6 +468,36 @@ export function MerchantExperience({
   useRealtime("approvals", merchantFilter, refreshFn);
   useRealtime("redemptions", merchantFilter, refreshFn);
 
+  // Safety net for the realtime socket: phones suspend it on lock, and captive
+  // or corporate Wi-Fi can drop the websocket entirely. Without this a pending
+  // stamp only appears on a manual reload.
+  const lastRefreshRef = useRef(0);
+  useEffect(() => {
+    const REFRESH_THROTTLE_MS = 10_000;
+    const POLL_MS = 60_000;
+
+    const maybeRefresh = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastRefreshRef.current < REFRESH_THROTTLE_MS) return;
+      lastRefreshRef.current = now;
+      void onRefresh();
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") maybeRefresh();
+    };
+
+    window.addEventListener("focus", maybeRefresh);
+    document.addEventListener("visibilitychange", onVisibility);
+    const poll = setInterval(maybeRefresh, POLL_MS);
+    return () => {
+      window.removeEventListener("focus", maybeRefresh);
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(poll);
+    };
+  }, [onRefresh]);
+
   // Welcome an invited teammate the first time they land on the dashboard.
   const welcomedRef = useRef(false);
   useEffect(() => {

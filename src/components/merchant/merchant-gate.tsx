@@ -88,6 +88,10 @@ export function MerchantGate({ children }: { children: ReactNode }) {
   // Used only to prefill the wizard for merchants arriving from checkout.
   const checkoutAccount = clientReady ? readCheckoutAccount() : null;
 
+  const handleRefresh = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
+
   const handleLogout = useCallback(async () => {
     await supabase.auth.signOut();
     setEntering(false);
@@ -159,9 +163,7 @@ export function MerchantGate({ children }: { children: ReactNode }) {
       justJoined={bundle.justJoined}
       currentUserId={bundle.currentUserId}
       onSelectBranch={handleSelectBranch}
-      onRefresh={async () => {
-        await refresh();
-      }}
+      onRefresh={handleRefresh}
       onLogout={handleLogout}
     >
       {children}
