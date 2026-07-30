@@ -5016,7 +5016,7 @@ body {
   margin: 0 auto 8px;
   padding: 4px;
   width: calc(100% - 32px);
-  max-width: 400px;
+  max-width: 240px;
   max-height: 48px;
   overflow: hidden;
   border-radius: 999px;
