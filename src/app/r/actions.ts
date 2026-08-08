@@ -377,8 +377,8 @@ export async function acceptSuggestedTime(
 
 /**
  * Guest changes their own booking in place — same reservation number and
- * token, new slot. Does not cancel. Confirmed stays confirmed; pending stays
- * pending. Any merchant proposal in flight is withdrawn.
+ * token, new slot. Does not cancel. Any change returns the booking to
+ * pending for restaurant approval. Any merchant proposal in flight is withdrawn.
  */
 export async function updatePublicReservation(input: {
   token: string;
@@ -440,7 +440,8 @@ export async function updatePublicReservation(input: {
       found.reservation.date === input.date &&
       found.reservation.time === time &&
       found.reservation.partySize === partySize &&
-      !hasOpenSuggestion(found.reservation);
+      !hasOpenSuggestion(found.reservation) &&
+      found.reservation.status === "pending";
     if (sameSlot) {
       return {
         ok: true,
@@ -456,6 +457,11 @@ export async function updatePublicReservation(input: {
         reservation_date: input.date,
         reservation_time: time,
         party_size: partySize,
+        // Guest changed the booking — restaurant must approve again.
+        status: "pending",
+        confirmed_at: null,
+        dining_table_id: null,
+        table_number: null,
         // Guest took a new slot — any merchant proposal is moot.
         suggested_at: null,
         suggested_date: null,
@@ -486,17 +492,11 @@ export async function updatePublicReservation(input: {
       merchantId: found.merchantId,
       event: "rescheduled",
       actor: { kind: "guest" },
-      detail: `${input.date} at ${time}, ${partySize} guest${partySize === 1 ? "" : "s"}`,
+      detail: `${input.date} at ${time}, ${partySize} guest${partySize === 1 ? "" : "s"} — awaiting approval`,
     });
 
-    // Drop the old hold, then recreate if this booking is still confirmed today.
+    // Pending bookings don't hold a queue slot.
     await releaseQueueHoldForReservation(updated.id, "rescheduled");
-    if (updated.status === "confirmed") {
-      await ensureHeldQueueEntryForReservation({
-        ...row,
-        merchant_id: found.merchantId,
-      });
-    }
 
     return {
       ok: true,

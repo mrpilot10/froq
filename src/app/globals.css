@@ -22776,13 +22776,20 @@ body {
   display: grid;
   grid-template-columns: 116px 1fr;
   gap: 10px;
-  align-items: end;
+  align-items: start;
+}
+
+.resv-duo--compact {
+  grid-template-columns: minmax(112px, max-content) max-content;
+  align-items: start;
+  justify-content: start;
 }
 
 .resv-label-row {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  min-height: 1.2em;
 }
 
 .resv-cap {
@@ -22791,6 +22798,10 @@ body {
   letter-spacing: 0;
   text-transform: none;
   color: var(--ink-faint);
+}
+
+.resv-cap--spacer {
+  visibility: hidden;
 }
 
 /* Match .auth-input: same border, radius, fill and height. */
@@ -22807,6 +22818,15 @@ body {
 
 .resv-duo .auth-input {
   min-height: 52px;
+}
+
+.auth-field--date-compact {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.auth-input--date-compact {
+  width: min(100%, 10.75rem);
 }
 
 .resv-stepper-btn {

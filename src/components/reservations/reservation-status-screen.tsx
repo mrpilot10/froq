@@ -129,12 +129,36 @@ export function ReservationStatusScreen({
     const sync = async () => {
       const result = await getPublicReservation(token);
       if (cancelled || !result.ok || !result.reservation) return;
-      setReservation(result.reservation);
+      setReservation((prev) => {
+        const next = result.reservation!;
+        if (
+          prev.status === next.status &&
+          prev.confirmedAtMs === next.confirmedAtMs &&
+          prev.suggestedAtMs === next.suggestedAtMs &&
+          prev.suggestionAcceptedAtMs === next.suggestionAcceptedAtMs &&
+          prev.date === next.date &&
+          prev.time === next.time &&
+          prev.partySize === next.partySize &&
+          prev.declineReason === next.declineReason &&
+          prev.aiMenuEnabled === next.aiMenuEnabled
+        ) {
+          return prev;
+        }
+        return next;
+      });
     };
-    const id = window.setInterval(() => void sync(), 20_000);
+    void sync();
+    const id = window.setInterval(() => void sync(), 4_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void sync();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
     return () => {
       cancelled = true;
       window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
     };
   }, [token, status]);
 
@@ -217,7 +241,11 @@ export function ReservationStatusScreen({
       }
       setReservation(result.reservation);
       setModifyOpen(false);
-      toast.success("Reservation updated");
+      toast.success(
+        result.reservation.status === "pending"
+          ? "Changes submitted — awaiting approval"
+          : "Reservation updated",
+      );
     } finally {
       setBusy(false);
     }
@@ -475,7 +503,7 @@ export function ReservationStatusScreen({
               </p>
             ) : (
               <>
-                <div className="resv-duo">
+                <div className="resv-duo resv-duo--compact">
                   <div className="auth-field">
                     <span className="resv-label-row">
                       <span className="auth-label">Guests</span>
@@ -510,6 +538,7 @@ export function ReservationStatusScreen({
                     date={editDate}
                     minDate={form.minDate}
                     maxDate={form.maxDate}
+                    compact
                     onDateChange={(next) => {
                       setEditDate(next);
                       setFormError("");

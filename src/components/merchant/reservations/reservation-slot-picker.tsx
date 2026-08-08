@@ -33,12 +33,21 @@ export function ReservationDateField({
   minDate,
   maxDate,
   label = "Date",
-}: ReservationDateFieldProps) {
+  /** Narrow width + label-row spacer so it lines up beside Guests. */
+  compact = false,
+}: ReservationDateFieldProps & { compact?: boolean }) {
   return (
-    <label className="auth-field">
-      <span className="auth-label">{label}</span>
+    <label className={`auth-field${compact ? " auth-field--date-compact" : ""}`}>
+      <span className="resv-label-row">
+        <span className="auth-label">{label}</span>
+        {compact ? <span className="resv-cap resv-cap--spacer" aria-hidden="true">·</span> : null}
+      </span>
       <input
-        className="auth-input"
+        className={
+          compact
+            ? "auth-input auth-input--date auth-input--date-compact"
+            : "auth-input"
+        }
         type="date"
         value={date}
         min={minDate}
