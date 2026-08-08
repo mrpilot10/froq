@@ -566,7 +566,7 @@ export function QueueJoinScreen({
                   <p className="qjoin-hint">
                     <Phone size={15} strokeWidth={2.2} />
                     We&apos;ll text {formatPhoneDisplay(ticket.phone.replace("+91", ""))} when
-                    your table is ready. Keep this page handy.
+                    your table is ready.
                   </p>
                 </>
               )}

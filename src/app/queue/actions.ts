@@ -230,6 +230,11 @@ export async function joinLiveQueue(input: {
     };
     const entryId = entry.id;
 
+    // Resolve the template before `after()` — same pattern as merchant
+    // queue-actions — so the AI Menu gate isn't re-run in a detached context.
+    const { queueJoinNotifyTemplate } = await import("@/lib/queue/ai-menu");
+    const joinTemplate = await queueJoinNotifyTemplate(merchant.id);
+
     // TODO(queue-notify-recovery): If `after()` dies mid-send (isolate kill /
     // timeout after the response returns), the guest stays in the queue with
     // `notified_joined_at` still null and nothing retries `queue_first_notify`.
@@ -239,10 +244,9 @@ export async function joinLiveQueue(input: {
     after(async () => {
       try {
         const { sendCustomerNotification } = await import("@/lib/notifications");
-        const { queueJoinNotifyTemplate } = await import("@/lib/queue/ai-menu");
         const notify = await sendCustomerNotification({
           customer: notifyCustomer,
-          template: await queueJoinNotifyTemplate(merchant.id),
+          template: joinTemplate,
           data: notifyData,
         });
         if (!notify.ok) {
