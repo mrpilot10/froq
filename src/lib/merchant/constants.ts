@@ -51,7 +51,7 @@ export const MERCHANT_PROFILE: MerchantProfile = {
   reservationAutoDeclineHours: 0,
   reservationWhatsappEnabled: true,
   reservationPaused: false,
-  queueAiMenuEnabled: false,
+  queueAiMenuEnabled: true,
 };
 
 export const MERCHANT_STATS: MerchantStats = {

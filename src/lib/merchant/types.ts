@@ -141,6 +141,7 @@ export interface MerchantProfile {
   /**
    * Queue ↔ AI Menu integration. When true, join/seated WhatsApp uses
    * menu CTA templates (queue_first_notify_menu / seated_menu).
+   * Default on for new merchants.
    */
   queueAiMenuEnabled: boolean;
 }

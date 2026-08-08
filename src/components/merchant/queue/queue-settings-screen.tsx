@@ -263,14 +263,6 @@ export function QueueSettingsScreen({
         </div>
       </div>
 
-      <MerchantPlanCard
-        product="queue"
-        enabled={productEnabled}
-        onGetStarted={onGetStarted}
-        onManagePlan={onManagePlan}
-      />
-
-      
       <div className="merchant-settings-group">
         <h3 className="merchant-settings-title">Integrations</h3>
         <div className="panel-card merchant-settings-panel">
@@ -282,7 +274,7 @@ export function QueueSettingsScreen({
               <div className="profile-row-label">AI Menu</div>
               <div className="profile-row-value profile-row-value--soft">
                 {aiMenuEnabled
-                  ? "Waitlist shows View our AI menu · queue_first_notify_menu / seated_menu"
+                  ? "Waitlist shows View our AI menu · menu WhatsApp templates"
                   : "Off — standard queue WhatsApp templates"}
               </div>
             </div>
@@ -300,6 +292,13 @@ export function QueueSettingsScreen({
           </div>
         </div>
       </div>
+
+      <MerchantPlanCard
+        product="queue"
+        enabled={productEnabled}
+        onGetStarted={onGetStarted}
+        onManagePlan={onManagePlan}
+      />
 
       <DeviceSetupPanel />
 
