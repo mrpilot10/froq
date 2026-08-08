@@ -1,10 +1,6 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  entitlementsFromRows,
-  isTrialActive,
-} from "@/lib/merchant/entitlements";
 import { MENU_PREVIEW } from "@/lib/merchant/feature-flags";
 
 function aiMenuLog(event: string, fields: Record<string, unknown>) {
@@ -44,11 +40,12 @@ export async function isQueueAiMenuEnabled(merchantId: string): Promise<boolean>
   // Preview unlocks AI Menu for every merchant; still require the Queue toggle.
   if (MENU_PREVIEW) return true;
 
-  const { data: rows, error: productError } = await admin
+  const { data: product, error: productError } = await admin
     .from("merchant_products")
-    .select("product, plan_id, status, onboarded_at, trial_started_at, trial_ends_at")
+    .select("status, plan_id, trial_ends_at")
     .eq("merchant_id", merchantId)
-    .eq("product", "menu");
+    .eq("product", "menu")
+    .maybeSingle();
   if (productError) {
     aiMenuLog("product_lookup_failed", {
       merchantId,
@@ -56,11 +53,11 @@ export async function isQueueAiMenuEnabled(merchantId: string): Promise<boolean>
     });
     return false;
   }
-
-  const menu = entitlementsFromRows(rows ?? []).menu;
-  if (!menu || menu.status !== "active") return false;
-  // Trial row without plan — honour the trial clock.
-  if (!menu.planId && menu.trialEndsAt) return isTrialActive(menu);
+  if (!product || product.status !== "active") return false;
+  if (!product.plan_id && product.trial_ends_at) {
+    const ends = Date.parse(product.trial_ends_at);
+    return Number.isFinite(ends) && ends > Date.now();
+  }
   return true;
 }
 

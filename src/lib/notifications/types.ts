@@ -280,7 +280,8 @@ export function buildSmsBody(
       const party = d.partySize != null ? ` for ${d.partySize}` : "";
       return `Hi ${name}, reminder: your table${party} at ${d.businessName} is booked for ${d.when}. View reservation: ${reservationUrl(d.reservationToken)}`;
     }
-    case "queue_first_notify": {
+    case "queue_first_notify":
+    case "queue_first_notify_menu": {
       const d = data as QueueJoinedData;
       const size = formatBookingSize(d.bookingSize);
       const wait = formatEstimatedWaitTime(d.estimatedWaitMinutes);
@@ -299,7 +300,8 @@ export function buildSmsBody(
       const size = formatBookingSize(d.bookingSize);
       return `Hi ${name}, your spot at ${d.businessName} (${size}) was skipped. Details: ${hub}`;
     }
-    case "queue_seated": {
+    case "queue_seated":
+    case "seated_menu": {
       const d = data as QueuePartyData;
       const size = formatBookingSize(d.bookingSize);
       return `Hi ${name}, you're seated at ${d.businessName} (${size}). Details: ${hub}`;
@@ -331,12 +333,14 @@ export function smsTemplateIdFor(
     reservation_updated: "APITXT_SMS_TEMPLATE_RESERVATION_UPDATED",
     reservation_reminder: "APITXT_SMS_TEMPLATE_RESERVATION_REMINDER",
     queue_first_notify: "APITXT_SMS_TEMPLATE_QUEUE_FIRST_NOTIFY",
+    queue_first_notify_menu: "APITXT_SMS_TEMPLATE_QUEUE_FIRST_NOTIFY",
     queue_call_now: "APITXT_SMS_TEMPLATE_QUEUE_CALL_NOW",
     queue_reminders_1: "APITXT_SMS_TEMPLATE_QUEUE_REMINDERS_1",
     queue_reminder_2: "APITXT_SMS_TEMPLATE_QUEUE_REMINDER_2",
     queue_3_reminder: "APITXT_SMS_TEMPLATE_QUEUE_REMINDER_3",
     queue_customer_skipped: "APITXT_SMS_TEMPLATE_QUEUE_CUSTOMER_SKIPPED",
     queue_seated: "APITXT_SMS_TEMPLATE_QUEUE_SEATED",
+    seated_menu: "APITXT_SMS_TEMPLATE_QUEUE_SEATED",
     birthday_bonus_stamps: "APITXT_SMS_TEMPLATE_BIRTHDAY_BONUS_STAMPS",
   }[template];
   return process.env[envKey]?.trim() || undefined;
