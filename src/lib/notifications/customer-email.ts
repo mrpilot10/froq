@@ -454,7 +454,7 @@ export function buildCustomerNotificationEmail<
               p(
                 `Reservation page: <a href="${rUrl}">${rUrl}</a>`,
               ),
-            ctaLabel: "🍽️ View our AI menu",
+            ctaLabel: "🍽️ Explore Our AI Menu",
             ctaUrl: menuLink,
           }),
           text: plainBody([

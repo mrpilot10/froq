@@ -9959,6 +9959,12 @@ body {
   cursor: progress;
 }
 
+/* Sits under the pass (after # / guest row), same CTA as queue waitlist. */
+.rpass-ai-menu {
+  margin-top: 14px;
+  margin-bottom: 2px;
+}
+
 /* ---- Dining table layout (shared Waitlist + Reservations) --------------- */
 .table-layout-editor {
   display: flex;

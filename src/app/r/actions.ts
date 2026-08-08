@@ -86,7 +86,7 @@ export interface PublicReservation {
   cancelledBy: "merchant" | "customer" | null;
   merchant: ReservationMerchantBrand;
   /**
-   * Reservation ↔ AI Menu — show "View our AI menu" once the booking is
+   * Reservation ↔ AI Menu — show "Explore Our AI Menu" once the booking is
    * confirmed (and later successful states).
    */
   aiMenuEnabled: boolean;

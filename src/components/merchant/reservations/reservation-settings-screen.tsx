@@ -145,7 +145,7 @@ export function ReservationSettingsScreen({
               <div className="profile-row-label">AI Menu</div>
               <div className="profile-row-value profile-row-value--soft">
                 {aiMenuEnabled
-                  ? "Confirmed guests see View our AI menu · reservation_confirmed_menu"
+                  ? "Confirmed guests see Explore Our AI Menu · reservation_confirmed_menu"
                   : "Off — standard confirmation WhatsApp templates"}
               </div>
             </div>

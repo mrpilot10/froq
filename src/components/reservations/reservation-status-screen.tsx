@@ -360,18 +360,6 @@ export function ReservationStatusScreen({
                 </div>
                 <h2 className="pass-title">{copy.title}</h2>
                 <p className="pass-subtitle">{copy.body}</p>
-                {(status === "confirmed" || status === "completed") &&
-                reservation.aiMenuEnabled &&
-                reservation.customerPublicToken ? (
-                  <a
-                    className="qjoin-ai-menu"
-                    href={`/m/${encodeURIComponent(reservation.customerPublicToken)}`}
-                    style={{ marginTop: 16 }}
-                  >
-                    <UtensilsCrossed size={16} strokeWidth={2.3} aria-hidden="true" />
-                    View our AI menu
-                  </a>
-                ) : null}
               </div>
             ) : (
               <div className="pass-headline">
@@ -434,6 +422,18 @@ export function ReservationStatusScreen({
             </div>
           </div>
         </div>
+
+        {(status === "confirmed" || status === "completed") &&
+        reservation.aiMenuEnabled &&
+        reservation.customerPublicToken ? (
+          <a
+            className="qjoin-ai-menu rpass-ai-menu"
+            href={`/m/${encodeURIComponent(reservation.customerPublicToken)}`}
+          >
+            <UtensilsCrossed size={16} strokeWidth={2.3} aria-hidden="true" />
+            Explore Our AI Menu
+          </a>
+        ) : null}
 
         {open && !proposed ? (
           <div className="rpass-actions">
