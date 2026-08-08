@@ -114,6 +114,7 @@ section("OR build localizes chef badge and suggestion chips", () => {
     businessName: "Meer's Kitchen",
     brandColor: "#16593F",
     lang: "OR",
+    tableNumber: null,
     categories: [
       category("ମୁଖ୍ୟ", [
         dish("ଶର୍ଟ ରିବ୍", {

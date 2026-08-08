@@ -48,6 +48,8 @@ export type NotificationChannel = "sms" | "whatsapp";
 export interface NotifiableCustomer {
   phone: string;
   name: string;
+  /** Optional — when set, dispatcher also sends parallel email. */
+  email?: string | null;
   whatsappAvailable: boolean;
   preferredNotificationChannel: NotificationChannel;
   publicToken: string;
