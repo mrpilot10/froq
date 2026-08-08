@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarClock, ChevronRight, LayoutGrid } from "lucide-react";
+import { CalendarClock, ChevronRight, UtensilsCrossed } from "lucide-react";
 import { toast } from "sonner";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import {
@@ -16,10 +16,6 @@ import { ProductBranchesSettings } from "../product-branches-settings";
 import { DeviceSetupPanel } from "../device-setup-rows";
 import { MerchantQrPanel } from "../qr-panel";
 import { ReservationSettingsFields } from "./reservation-settings-fields";
-import {
-  TableLayoutSheet,
-  useTableLayoutSummary,
-} from "../table-layout-sheet";
 import { useMerchantWorkspace } from "../merchant-workspace-context";
 
 interface ReservationSettingsScreenProps {
@@ -47,8 +43,6 @@ export function ReservationSettingsScreen({
     branches.find((b) => b.isDefault) ??
     branches[0] ??
     null;
-  const { summary: tableSummary, refresh: refreshTables } =
-    useTableLayoutSummary(activeBranchId);
   const settingsFromSources = useMemo(
     () =>
       reservationSettingsFromProfile({
@@ -60,8 +54,9 @@ export function ReservationSettingsScreen({
   );
   const [settings, setSettings] = useState<ReservationSettings>(settingsFromSources);
   const [bookingOpen, setBookingOpen] = useState(false);
-  const [tablesOpen, setTablesOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [toggleSaving, setToggleSaving] = useState(false);
+  const aiMenuEnabled = profile.reservationAiMenuEnabled === true;
 
   useEffect(() => {
     setSettings(settingsFromSources);
@@ -85,13 +80,22 @@ export function ReservationSettingsScreen({
         reservationAutoDeclineHours: next.autoDeclineHours,
         reservationWhatsappEnabled: next.whatsappEnabled,
         reservationGraceMinutes: next.graceMinutes,
-        reservationAutoAssignTables: next.autoAssignTables,
       });
       setBookingOpen(false);
     } finally {
       setSaving(false);
     }
   };
+
+  async function toggleAiMenu() {
+    if (toggleSaving) return;
+    setToggleSaving(true);
+    try {
+      await onSave({ reservationAiMenuEnabled: !aiMenuEnabled });
+    } finally {
+      setToggleSaving(false);
+    }
+  }
 
   return (
     <div className="tab-screen">
@@ -127,49 +131,32 @@ export function ReservationSettingsScreen({
             </div>
             <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
           </button>
+        </div>
+      </div>
 
-          <button
-            type="button"
-            className="merchant-settings-row"
-            onClick={() => setTablesOpen(true)}
-          >
-            <div className="profile-row-icon">
-              <LayoutGrid size={18} strokeWidth={2.2} />
-            </div>
-            <div className="profile-row-copy">
-              <div className="profile-row-label">Tables</div>
-              <div className="profile-row-value profile-row-value--soft">
-                {tableSummary}
-              </div>
-            </div>
-            <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
-          </button>
-
+      <div className="merchant-settings-group">
+        <h3 className="merchant-settings-title">Integrations</h3>
+        <div className="panel-card merchant-settings-panel">
           <div className="merchant-settings-row" style={{ cursor: "default" }}>
             <div className="profile-row-icon">
-              <LayoutGrid size={18} strokeWidth={2.2} />
+              <UtensilsCrossed size={18} strokeWidth={2.2} />
             </div>
             <div className="profile-row-copy">
-              <div className="profile-row-label">Automatically assign tables</div>
+              <div className="profile-row-label">AI Menu</div>
               <div className="profile-row-value profile-row-value--soft">
-                {settings.autoAssignTables
-                  ? "On confirm — best free table for the party"
-                  : "Off — assign tables yourself later"}
+                {aiMenuEnabled
+                  ? "Confirmed guests see View our AI menu · reservation_confirmed_menu"
+                  : "Off — standard confirmation WhatsApp templates"}
               </div>
             </div>
             <button
               type="button"
               role="switch"
-              aria-checked={settings.autoAssignTables}
-              aria-label="Automatically assign tables"
-              className={`merchant-toggle${settings.autoAssignTables ? " on" : ""}`}
-              disabled={saving}
-              onClick={() =>
-                void save({
-                  ...settings,
-                  autoAssignTables: !settings.autoAssignTables,
-                })
-              }
+              aria-checked={aiMenuEnabled}
+              aria-label="Enable AI Menu integration on Reservations"
+              className={`merchant-toggle${aiMenuEnabled ? " on" : ""}`}
+              disabled={toggleSaving}
+              onClick={() => void toggleAiMenu()}
             >
               <span className="merchant-toggle-knob" />
             </button>
@@ -187,13 +174,6 @@ export function ReservationSettingsScreen({
       />
 
       <DeviceSetupPanel />
-
-      <TableLayoutSheet
-        open={tablesOpen}
-        branchId={activeBranchId}
-        onClose={() => setTablesOpen(false)}
-        onSaved={(layout) => refreshTables(layout)}
-      />
 
       <BottomSheet
         open={bookingOpen}

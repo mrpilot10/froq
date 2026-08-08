@@ -39,6 +39,7 @@ export const WHATSAPP_TEMPLATE_CATEGORIES = {
 
   reservation_request_received: "UTILITY",
   reservation_confirmed: "UTILITY",
+  reservation_confirmed_menu: "UTILITY",
   reservation_updated: "UTILITY",
   reservation_reminder: "UTILITY",
   reservation_declined: "MARKETING",

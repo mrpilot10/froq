@@ -68,9 +68,7 @@ import { useMerchantWorkspace } from "../merchant-workspace-context";
 import { ActorChip } from "../actor-chip";
 import { QueueHomeSkeleton } from "./queue-skeletons";
 import { QueueSessionHistorySheet } from "./queue-session-history-sheet";
-import { SeatAtTableSheet } from "./seat-at-table-sheet";
 import { QueueStatusHero } from "./queue-status-hero";
-import { listBranchDiningTables } from "@/app/merchant/table-actions";
 
 interface QueueHomeScreenProps {
   profile: MerchantProfile;
@@ -366,8 +364,6 @@ const QueueEntryCard = memo(function QueueEntryCard({
             <div className="queue-entry-meta">
               {isSeated
                 ? `${partyLabel(entry.partySize)} · seated${
-                    entry.tableNumber != null ? ` · Table ${entry.tableNumber}` : ""
-                  }${
                     entry.seatedAtMs ? ` · ${timeLabel(entry.seatedAtMs)}` : ""
                   }`
                 : isLeft
@@ -375,11 +371,7 @@ const QueueEntryCard = memo(function QueueEntryCard({
                       entry.leftAtMs ? ` · ${timeLabel(entry.leftAtMs)}` : ""
                     }`
                   : calledCard
-                    ? `${partyLabel(entry.partySize)} · Called${
-                        entry.tableNumber != null
-                          ? ` · Table ${entry.tableNumber}`
-                          : ""
-                      }`
+                    ? `${partyLabel(entry.partySize)} · Called`
                     : isHeld
                       ? `${partyLabel(entry.partySize)} · arrives ${
                           entry.reservationTime || timeLabel(entry.joinedAtMs)
@@ -527,12 +519,6 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     entryId: string;
     action: "seated" | "left";
   } | null>(null);
-  /** Entry waiting for a table pick before call or seat. */
-  const [tablePick, setTablePick] = useState<{
-    entry: QueueEntry;
-    purpose: "call" | "seat";
-  } | null>(null);
-  const [hasTables, setHasTables] = useState(false);
   const resolvedCallRef = useRef<Set<string>>(new Set());
   /** Only persist after hydrate for this exact sessionKey (avoids clobber races). */
   const hydratedKeyRef = useRef<string | null>(null);
@@ -1010,7 +996,6 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     (entry: QueueEntry, tableId: string | null) => {
       if (callingRef.current.has(entry.id)) return;
       callingRef.current.add(entry.id);
-      setTablePick(null);
       void updateLiveQueueEntryStatus({
         entryId: entry.id,
         status: "called",
@@ -1025,17 +1010,13 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
           setEntries((prev) =>
             prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
           );
-          const tableBit =
-            result.entry.tableNumber != null
-              ? ` · Table ${result.entry.tableNumber}`
-              : "";
           if (result.error) {
             toast.warning(
-              `${entry.name} called${tableBit} · WhatsApp failed: ${result.error}`,
+              `${entry.name} called · WhatsApp failed: ${result.error}`,
             );
           } else {
             toast.success(
-              `${entry.name} has been called${tableBit} · ${acceptMinutes} min to arrive`,
+              `${entry.name} has been called · ${acceptMinutes} min to arrive`,
             );
           }
           void syncLiveBoard();
@@ -1050,13 +1031,9 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
   const callEntry = useCallback(
     (entry: QueueEntry) => {
       if (callingRef.current.has(entry.id)) return;
-      if (hasTables && activeBranchId) {
-        setTablePick({ entry, purpose: "call" });
-        return;
-      }
       completeCall(entry, null);
     },
-    [hasTables, activeBranchId, completeCall],
+    [completeCall],
   );
 
   const callNext = useCallback(() => {
@@ -1066,12 +1043,8 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
       toast("No one is waiting in the queue");
       return;
     }
-    if (hasTables && activeBranchId) {
-      setTablePick({ entry: preview, purpose: "call" });
-      return;
-    }
     completeCall(preview, null);
-  }, [entries, hasTables, activeBranchId, completeCall]);
+  }, [entries, completeCall]);
 
   const completeSeating = useCallback(
     (entry: QueueEntry, tableId: string | null) => {
@@ -1079,7 +1052,6 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
       const pending = { entryId: entry.id, action: "seated" as const };
       pendingResolveRef.current = pending;
       setPendingResolve(pending);
-      setTablePick(null);
       const seatedAtMs = Date.now();
       const actualWait = Math.max(
         0,
@@ -1104,17 +1076,13 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
           setEntries((prev) =>
             prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
           );
-          const tableBit =
-            result.entry.tableNumber != null
-              ? ` · Table ${result.entry.tableNumber}`
-              : "";
           if (result.error) {
             toast.warning(
-              `${entry.name} seated${tableBit} · WhatsApp failed: ${result.error}`,
+              `${entry.name} seated · WhatsApp failed: ${result.error}`,
             );
           } else {
             toast.success(
-              `${entry.name} marked as seated${tableBit} · wait was ${formatWaitShort(actualWait)}`,
+              `${entry.name} marked as seated · wait was ${formatWaitShort(actualWait)}`,
             );
           }
           void syncLiveBoard();
@@ -1132,35 +1100,10 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
   const markServed = useCallback(
     (entry: QueueEntry) => {
       if (pendingResolveRef.current) return;
-      // Already assigned at call time — seat without asking again.
-      if (entry.diningTableId) {
-        completeSeating(entry, entry.diningTableId);
-        return;
-      }
-      if (hasTables && activeBranchId) {
-        setTablePick({ entry, purpose: "seat" });
-        return;
-      }
       completeSeating(entry, null);
     },
-    [hasTables, activeBranchId, completeSeating],
+    [completeSeating],
   );
-
-  // Discover whether this branch has a table inventory (gates the seat sheet).
-  useEffect(() => {
-    if (!activeBranchId) {
-      setHasTables(false);
-      return;
-    }
-    let cancelled = false;
-    void listBranchDiningTables({ branchId: activeBranchId }).then((result) => {
-      if (cancelled) return;
-      setHasTables(result.ok && result.tables.length > 0);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeBranchId]);
 
   const markLeft = useCallback(
     (entry: QueueEntry) => {
@@ -1871,9 +1814,6 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
                 <p className="qcust-head-meta">
                   <span>{guestStatusLabel(selectedEntry.status)}</span>
                   <span>{partyLabel(selectedEntry.partySize)}</span>
-                  {selectedEntry.tableNumber != null ? (
-                    <span>Table {selectedEntry.tableNumber}</span>
-                  ) : null}
                 </p>
               </div>
             </div>
@@ -2011,29 +1951,6 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
           // The card is gone, but the queue is still closed — the header keeps
           // offering Start, so the screen stays coherent with no recap.
           setEndedSummary(null);
-        }}
-      />
-
-      <SeatAtTableSheet
-        open={Boolean(tablePick)}
-        branchId={activeBranchId}
-        partySize={tablePick?.entry.partySize ?? 1}
-        guestName={tablePick?.entry.name ?? "guest"}
-        purpose={tablePick?.purpose ?? "seat"}
-        ignoreQueueEntryId={tablePick?.entry.id}
-        busy={
-          tablePick?.purpose === "seat"
-            ? pendingResolve?.action === "seated"
-            : Boolean(tablePick && callingRef.current.has(tablePick.entry.id))
-        }
-        onClose={() => setTablePick(null)}
-        onConfirm={(tableId) => {
-          if (!tablePick) return;
-          if (tablePick.purpose === "call") {
-            completeCall(tablePick.entry, tableId);
-            return;
-          }
-          completeSeating(tablePick.entry, tableId);
         }}
       />
     </>

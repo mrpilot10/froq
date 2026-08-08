@@ -57,6 +57,7 @@ import {
 interface CapturedReservationNotify {
   target: ReservationNotifyTarget;
   template: ReservationTemplate;
+  merchantId: string;
   reservationToken: string;
   date: string;
   time: string;
@@ -370,7 +371,7 @@ export async function createReservation(input: {
     const { data: merchant } = await admin
       .from("merchants")
       .select(
-        "reservation_max_party_size, reservation_allow_notes, reservation_auto_assign_tables",
+        "reservation_max_party_size, reservation_allow_notes",
       )
       .eq("id", ctx.merchantId)
       .maybeSingle();
@@ -428,18 +429,6 @@ export async function createReservation(input: {
       detail: "Taken by phone or in person",
     });
 
-    if (merchant?.reservation_auto_assign_tables !== false && branchId) {
-      const { autoAssignTableForReservation } = await import(
-        "@/app/merchant/table-actions"
-      );
-      await autoAssignTableForReservation({ reservationId: reservation.id });
-      const { data: refreshed } = await admin
-        .from("reservations")
-        .select(RESERVATION_COLUMNS)
-        .eq("id", reservation.id)
-        .maybeSingle();
-      if (refreshed) reservation = toReservation(refreshed);
-    }
     // Booked and confirmed in one step, so the trail shows both.
     await recordReservationEvent({
       reservationId: reservation.id,
@@ -453,6 +442,7 @@ export async function createReservation(input: {
         customerId: customer.id,
       }),
       template: "reservation_confirmed",
+      merchantId: ctx.merchantId,
       reservationToken: reservation.publicToken,
       date: reservation.date,
       time: reservation.time,
@@ -631,6 +621,7 @@ export async function setReservationStatus(input: {
           customerId: reservation.customerId,
         }),
         template: action.template,
+        merchantId: ctx.merchantId,
         reservationToken: reservation.publicToken,
         date: reservation.date,
         time: reservation.time,
@@ -644,38 +635,6 @@ export async function setReservationStatus(input: {
         ...row,
         merchant_id: ctx.merchantId,
       });
-
-      // Merchant-picked table already applied in the confirm patch above.
-      // Otherwise auto-assign when enabled (unless the merchant skipped).
-      if (!reservation.diningTableId && reservation.branchId) {
-        const skipped = input.tableId === null;
-        if (!skipped) {
-          const { data: merchantPrefs } = await admin
-            .from("merchants")
-            .select("reservation_auto_assign_tables")
-            .eq("id", ctx.merchantId)
-            .maybeSingle();
-          const autoAssign = merchantPrefs?.reservation_auto_assign_tables !== false;
-          if (autoAssign) {
-            const { autoAssignTableForReservation } = await import(
-              "@/app/merchant/table-actions"
-            );
-            const assigned = await autoAssignTableForReservation({
-              reservationId: reservation.id,
-            });
-            if (assigned.ok && assigned.tableNumber != null) {
-              const { data: refreshed } = await admin
-                .from("reservations")
-                .select(RESERVATION_COLUMNS)
-                .eq("id", reservation.id)
-                .maybeSingle();
-              if (refreshed) {
-                return { ok: true, reservation: toReservation(refreshed) };
-              }
-            }
-          }
-        }
-      }
     } else if (
       input.action === "cancel" ||
       input.action === "decline" ||
@@ -779,6 +738,7 @@ export async function suggestReservationTime(input: {
         customerId: reservation.customerId,
       }),
       template: "reservation_updated",
+      merchantId: ctx.merchantId,
       reservationToken: reservation.publicToken,
       // The message quotes the proposed slot, not the one on hold.
       date: input.date,

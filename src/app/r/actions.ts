@@ -85,6 +85,13 @@ export interface PublicReservation {
   reminderSentAtMs: number | null;
   cancelledBy: "merchant" | "customer" | null;
   merchant: ReservationMerchantBrand;
+  /**
+   * Reservation ↔ AI Menu — show "View our AI menu" once the booking is
+   * confirmed (and later successful states).
+   */
+  aiMenuEnabled: boolean;
+  /** Customer hub / menu token (`frq_…`) for `/m/{{token}}`. */
+  customerPublicToken: string | null;
 }
 
 /** Branding + contact chrome shared by the request and status pages. */
@@ -170,6 +177,10 @@ async function loadMerchantBrand(
 function toPublicReservation(
   reservation: Reservation,
   merchant: PublicReservation["merchant"],
+  extras?: {
+    aiMenuEnabled?: boolean;
+    customerPublicToken?: string | null;
+  },
 ): PublicReservation {
   return {
     token: reservation.publicToken,
@@ -195,6 +206,42 @@ function toPublicReservation(
     reminderSentAtMs: reservation.reminderSentAtMs,
     cancelledBy: reservation.cancelledBy,
     merchant,
+    aiMenuEnabled: extras?.aiMenuEnabled === true,
+    customerPublicToken: extras?.customerPublicToken ?? null,
+  };
+}
+
+function publicExtrasFromFound(found: {
+  aiMenuEnabled: boolean;
+  customerPublicToken: string | null;
+}) {
+  return {
+    aiMenuEnabled: found.aiMenuEnabled,
+    customerPublicToken: found.customerPublicToken,
+  };
+}
+
+async function loadReservationAiMenuExtras(
+  admin: ReturnType<typeof createAdminClient>,
+  merchantId: string,
+  customerId: string | null,
+): Promise<{ aiMenuEnabled: boolean; customerPublicToken: string | null }> {
+  const { isReservationAiMenuEnabled } = await import(
+    "@/lib/reservations/ai-menu"
+  );
+  const [aiMenuEnabled, customerRes] = await Promise.all([
+    isReservationAiMenuEnabled(merchantId),
+    customerId
+      ? admin
+          .from("customers")
+          .select("public_token")
+          .eq("id", customerId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  return {
+    aiMenuEnabled,
+    customerPublicToken: customerRes.data?.public_token ?? null,
   };
 }
 
@@ -205,7 +252,14 @@ function toPublicReservation(
 async function readReservationByToken(
   token: string,
 ): Promise<
-  | { ok: true; reservation: Reservation; merchantId: string; merchant: PublicReservation["merchant"] }
+  | {
+      ok: true;
+      reservation: Reservation;
+      merchantId: string;
+      merchant: PublicReservation["merchant"];
+      aiMenuEnabled: boolean;
+      customerPublicToken: string | null;
+    }
   | { ok: false; error: string }
 > {
   if (!isReservationPublicToken(token)) {
@@ -223,11 +277,19 @@ async function readReservationByToken(
   const merchant = await loadMerchantBrand(admin, row.merchant_id, row.branch_id);
   if (!merchant) return { ok: false, error: "Reservation not found." };
 
+  const extras = await loadReservationAiMenuExtras(
+    admin,
+    row.merchant_id,
+    row.customer_id ?? null,
+  );
+
   return {
     ok: true,
     reservation: toReservation(row),
     merchantId: row.merchant_id,
     merchant,
+    aiMenuEnabled: extras.aiMenuEnabled,
+    customerPublicToken: extras.customerPublicToken,
   };
 }
 
@@ -240,7 +302,11 @@ export async function getPublicReservation(
     if (!found.ok) return { ok: false, error: found.error };
     return {
       ok: true,
-      reservation: toPublicReservation(found.reservation, found.merchant),
+      reservation: toPublicReservation(
+        found.reservation,
+        found.merchant,
+        publicExtrasFromFound(found),
+      ),
     };
   } catch {
     return { ok: false, error: "Couldn't load your reservation." };
@@ -284,7 +350,7 @@ export async function acceptSuggestedTime(
       // Someone got there first — show whatever the booking looks like now.
       return {
         ok: true,
-        reservation: toPublicReservation(found.reservation, found.merchant),
+        reservation: toPublicReservation(found.reservation, found.merchant, publicExtrasFromFound(found)),
       };
     }
 
@@ -302,7 +368,7 @@ export async function acceptSuggestedTime(
 
     return {
       ok: true,
-      reservation: toPublicReservation(toReservation(row), found.merchant),
+      reservation: toPublicReservation(toReservation(row), found.merchant, publicExtrasFromFound(found)),
     };
   } catch {
     return { ok: false, error: "Couldn't confirm the new time." };
@@ -326,7 +392,7 @@ export async function updatePublicReservation(input: {
     if (!isOpenReservation(found.reservation.status)) {
       return {
         ok: true,
-        reservation: toPublicReservation(found.reservation, found.merchant),
+        reservation: toPublicReservation(found.reservation, found.merchant, publicExtrasFromFound(found)),
       };
     }
 
@@ -378,7 +444,7 @@ export async function updatePublicReservation(input: {
     if (sameSlot) {
       return {
         ok: true,
-        reservation: toPublicReservation(found.reservation, found.merchant),
+        reservation: toPublicReservation(found.reservation, found.merchant, publicExtrasFromFound(found)),
       };
     }
 
@@ -410,7 +476,7 @@ export async function updatePublicReservation(input: {
     if (!row) {
       return {
         ok: true,
-        reservation: toPublicReservation(found.reservation, found.merchant),
+        reservation: toPublicReservation(found.reservation, found.merchant, publicExtrasFromFound(found)),
       };
     }
 
@@ -434,7 +500,7 @@ export async function updatePublicReservation(input: {
 
     return {
       ok: true,
-      reservation: toPublicReservation(updated, found.merchant),
+      reservation: toPublicReservation(updated, found.merchant, publicExtrasFromFound(found)),
     };
   } catch {
     return { ok: false, error: "Couldn't update your reservation." };
@@ -455,7 +521,7 @@ export async function cancelPublicReservation(
     if (!isOpenReservation(found.reservation.status)) {
       return {
         ok: true,
-        reservation: toPublicReservation(found.reservation, found.merchant),
+        reservation: toPublicReservation(found.reservation, found.merchant, publicExtrasFromFound(found)),
       };
     }
 
@@ -478,7 +544,7 @@ export async function cancelPublicReservation(
     if (!row) {
       return {
         ok: true,
-        reservation: toPublicReservation(found.reservation, found.merchant),
+        reservation: toPublicReservation(found.reservation, found.merchant, publicExtrasFromFound(found)),
       };
     }
 
@@ -493,7 +559,7 @@ export async function cancelPublicReservation(
 
     return {
       ok: true,
-      reservation: toPublicReservation(toReservation(row), found.merchant),
+      reservation: toPublicReservation(toReservation(row), found.merchant, publicExtrasFromFound(found)),
     };
   } catch {
     return { ok: false, error: "Couldn't cancel your reservation." };
@@ -715,6 +781,7 @@ export async function requestReservation(input: {
       await sendReservationNotification({
         target,
         template: "reservation_request_received",
+        merchantId: merchantRow.id,
         reservationToken: row.public_token,
         date: input.date,
         time,

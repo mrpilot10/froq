@@ -106,8 +106,10 @@ export function toMerchantProfile(row: MerchantProfileSource): MerchantProfile {
     menuServerNotify: row.menu_server_notify !== false,
     // Opt-out: missing column keeps the stamp card on the guest menu.
     menuShowLoyaltyStamps: row.menu_show_loyalty_stamps !== false,
-    // Opt-in: missing column keeps Queue ↔ AI Menu off.
+    // Opt-in: missing column keeps Queue ↔ AI Menu off until migration default.
     queueAiMenuEnabled: row.queue_ai_menu_enabled === true,
+    // Opt-in: missing column keeps Reservation ↔ AI Menu off until migration.
+    reservationAiMenuEnabled: row.reservation_ai_menu_enabled === true,
     // A missing column means the migration has not landed, so fall back to the
     // rates the cart charged before they were editable. A present 0 is a real
     // choice — the merchant removed that row — and must survive.
@@ -227,6 +229,9 @@ export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<Mer
   }
   if (patch.queueAiMenuEnabled !== undefined) {
     row.queue_ai_menu_enabled = patch.queueAiMenuEnabled;
+  }
+  if (patch.reservationAiMenuEnabled !== undefined) {
+    row.reservation_ai_menu_enabled = patch.reservationAiMenuEnabled;
   }
   if (patch.menuCgstPercent !== undefined)
     row.menu_cgst_percent = normalizeTaxPercent(patch.menuCgstPercent);

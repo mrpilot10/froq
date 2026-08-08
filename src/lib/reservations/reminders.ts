@@ -185,6 +185,7 @@ export async function processReservationReminders(
     const result = await sendReservationNotification({
       target,
       template: "reservation_reminder",
+      merchantId: row.merchant_id,
       reservationToken: row.public_token,
       date: row.reservation_date,
       time,

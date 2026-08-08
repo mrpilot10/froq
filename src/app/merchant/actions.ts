@@ -549,7 +549,7 @@ const MERCHANT_ACCESS_COLUMNS =
 
 /** Optional columns — selected separately so missing migrations can't take down the dashboard. */
 const MERCHANT_OPTIONAL_TOGGLE_COLUMNS =
-  "notify_staff_pending_approvals, notify_manager_pending_approvals, notify_owner_pending_approvals, birthday_double_stamps, reservation_auto_assign_tables, menu_table_ordering, menu_server_notify, menu_show_loyalty_stamps, queue_ai_menu_enabled, menu_cgst_percent, menu_sgst_percent, menu_service_charge_percent";
+  "notify_staff_pending_approvals, notify_manager_pending_approvals, notify_owner_pending_approvals, birthday_double_stamps, reservation_auto_assign_tables, menu_table_ordering, menu_server_notify, menu_show_loyalty_stamps, queue_ai_menu_enabled, reservation_ai_menu_enabled, menu_cgst_percent, menu_sgst_percent, menu_service_charge_percent";
 
 /**
  * Resolve the merchant this user can access — as owner or as a team member.
@@ -595,6 +595,7 @@ async function loadEscalationToggles(
   menu_server_notify?: boolean;
   menu_show_loyalty_stamps?: boolean;
   queue_ai_menu_enabled?: boolean;
+  reservation_ai_menu_enabled?: boolean;
   menu_cgst_percent?: number | null;
   menu_sgst_percent?: number | null;
   menu_service_charge_percent?: number | null;

@@ -398,7 +398,7 @@ export function JoinScreen({
               <label className="auth-field">
                 <span className="auth-label">Birthdate</span>
                 <input
-                  className="auth-input"
+                  className="auth-input auth-input--date"
                   type="date"
                   autoComplete="bday"
                   max={new Date().toISOString().slice(0, 10)}

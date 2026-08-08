@@ -157,6 +157,8 @@ export interface MerchantRow {
   menu_show_loyalty_stamps?: boolean;
   /** Queue ↔ AI Menu integration (migration 0105). */
   queue_ai_menu_enabled?: boolean;
+  /** Reservation ↔ AI Menu integration (migration 0107). */
+  reservation_ai_menu_enabled?: boolean;
   /** Percent added to an AI Menu cart, 0 to omit the row (migration 0087). */
   menu_cgst_percent?: number | null;
   menu_sgst_percent?: number | null;

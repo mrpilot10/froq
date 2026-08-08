@@ -128,6 +128,13 @@ function labeledBodyVariables(
       "time",
       "partySize",
     ],
+    reservation_confirmed_menu: [
+      "customerName",
+      "businessName",
+      "date",
+      "time",
+      "partySize",
+    ],
     reservation_declined: [
       "customerName",
       "businessName",

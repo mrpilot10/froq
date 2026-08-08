@@ -12,6 +12,7 @@ import {
   Pencil,
   Plus,
   Share2,
+  UtensilsCrossed,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -331,6 +332,18 @@ export function ReservationStatusScreen({
                 </div>
                 <h2 className="pass-title">{copy.title}</h2>
                 <p className="pass-subtitle">{copy.body}</p>
+                {(status === "confirmed" || status === "completed") &&
+                reservation.aiMenuEnabled &&
+                reservation.customerPublicToken ? (
+                  <a
+                    className="qjoin-ai-menu"
+                    href={`/m/${encodeURIComponent(reservation.customerPublicToken)}`}
+                    style={{ marginTop: 16 }}
+                  >
+                    <UtensilsCrossed size={16} strokeWidth={2.3} aria-hidden="true" />
+                    View our AI menu
+                  </a>
+                ) : null}
               </div>
             ) : (
               <div className="pass-headline">

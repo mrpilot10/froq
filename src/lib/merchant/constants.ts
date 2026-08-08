@@ -58,6 +58,7 @@ export const MERCHANT_PROFILE: MerchantProfile = {
   menuServerNotify: true,
   menuShowLoyaltyStamps: true,
   queueAiMenuEnabled: true,
+  reservationAiMenuEnabled: true,
   menuCgstPercent: DEFAULT_MENU_TAX_RATES.cgstPercent,
   menuSgstPercent: DEFAULT_MENU_TAX_RATES.sgstPercent,
   menuServiceChargePercent: DEFAULT_MENU_TAX_RATES.serviceChargePercent,

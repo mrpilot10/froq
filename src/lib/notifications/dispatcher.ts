@@ -163,6 +163,25 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
       });
       return;
     }
+    case "reservation_confirmed_menu": {
+      const d = data as CustomerNotificationDataMap["reservation_confirmed_menu"];
+      const vars = buildReservationWhatsAppVars({
+        customerName: customer.name,
+        businessName: d.businessName,
+        date: d.date,
+        time: d.time,
+        partySize: d.partySize ?? 1,
+        reservationToken: d.reservationToken,
+      });
+      await sendWhatsAppTemplate({
+        templateName: template,
+        mobile: customer.phone,
+        bodyParams: [...vars.body],
+        // Meta template base is /m/{{1}} — same guest token as queue menu CTAs.
+        publicToken: customer.publicToken,
+      });
+      return;
+    }
     case "queue_first_notify": {
       const d = data as CustomerNotificationDataMap["queue_first_notify"];
       await sendQueueJoined({

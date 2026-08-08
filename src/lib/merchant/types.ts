@@ -214,6 +214,11 @@ export interface MerchantProfile {
    * (queue_first_notify_menu / seated_menu). Default on for new merchants.
    */
   queueAiMenuEnabled: boolean;
+  /**
+   * Reservation ↔ AI Menu: confirmed guest page CTA + reservation_confirmed_menu
+   * WhatsApp. Default on for new merchants.
+   */
+  reservationAiMenuEnabled: boolean;
   /** Percent added to an AI Menu cart. 0 drops the row from the bill. */
   menuCgstPercent: number;
   menuSgstPercent: number;

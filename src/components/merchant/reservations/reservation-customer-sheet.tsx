@@ -413,11 +413,6 @@ function ReservationCustomerSheetBody({
                         >
                           {status.label}
                         </span>
-                        {booking.tableNumber != null ? (
-                          <span className="resv-fact-table">
-                            Table {booking.tableNumber}
-                          </span>
-                        ) : null}
                       </span>
                       <span className="rcust-booking-facts">
                         <span>{formatDateLabel(booking.date)}</span>

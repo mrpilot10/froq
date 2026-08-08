@@ -99,6 +99,7 @@ export const RESERVATION_STATUS_META: Record<ReservationStatus, StatusMeta> = {
 const NOTIFY_FAILURE_SUBJECTS: Record<string, string> = {
   reservation_request_received: "booking request confirmation",
   reservation_confirmed: "confirmation",
+  reservation_confirmed_menu: "confirmation",
   reservation_declined: "decline notice",
   reservation_updated: "new time proposal",
   reservation_reminder: "reminder",

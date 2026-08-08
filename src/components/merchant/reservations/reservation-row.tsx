@@ -144,15 +144,6 @@ export function ReservationRow({
               {reservation.partySize}{" "}
               {reservation.partySize === 1 ? "guest" : "guests"}
             </span>
-            <span className="resv-col resv-col--table">
-              {reservation.tableNumber != null ? (
-                <span className="resv-fact-table">
-                  Table {reservation.tableNumber}
-                </span>
-              ) : (
-                <span className="resv-col-empty">No table</span>
-              )}
-            </span>
             {isHistory ? (
               <span className="resv-col resv-col--status">
                 <span className={`merchant-badge merchant-badge--${status.cls}`}>

@@ -374,6 +374,7 @@ export function buildCustomerNotificationEmail<
     }
     case "reservation_request_received":
     case "reservation_confirmed":
+    case "reservation_confirmed_menu":
     case "reservation_updated":
     case "reservation_reminder":
     case "reservation_declined": {
@@ -434,6 +435,35 @@ export function buildCustomerNotificationEmail<
             `Confirmed at ${d.businessName} for ${d.when}${partyLabel}.`,
             "",
             `View: ${rUrl}`,
+          ]),
+        };
+      }
+      if (template === "reservation_confirmed_menu") {
+        const subject = `✅ Table locked at ${d.businessName}`;
+        return {
+          subject,
+          html: brandedEmailHtml({
+            title: subject,
+            greetingHtml: greet.html,
+            bodyHtml:
+              p(`You're booked — browse the menu while you wait. ✨`) +
+              highlightBox(
+                `🗓️ ${strong(d.when)}${partyLabel ? ` · ${strong(`party of ${d.partySize}`)}` : ""}` +
+                  `<br/>📍 ${strong(d.businessName)}`,
+              ) +
+              p(
+                `Reservation page: <a href="${rUrl}">${rUrl}</a>`,
+              ),
+            ctaLabel: "🍽️ View our AI menu",
+            ctaUrl: menuLink,
+          }),
+          text: plainBody([
+            greet.text,
+            "",
+            `Confirmed at ${d.businessName} for ${d.when}${partyLabel}.`,
+            "",
+            `Menu: ${menuLink}`,
+            `Reservation: ${rUrl}`,
           ]),
         };
       }

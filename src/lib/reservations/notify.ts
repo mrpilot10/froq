@@ -19,6 +19,7 @@ import type { ReservationDeclinedData } from "@/lib/notifications/types";
 export type ReservationTemplate =
   | "reservation_request_received"
   | "reservation_confirmed"
+  | "reservation_confirmed_menu"
   | "reservation_declined"
   | "reservation_updated"
   | "reservation_reminder";
@@ -91,18 +92,30 @@ async function recordNotifyOutcome(
 /**
  * Send one reservation message through the existing messaging service.
  * Safe to call from `after()` — never throws.
+ *
+ * When `template` is `reservation_confirmed` and `merchantId` is set, may
+ * upgrade to `reservation_confirmed_menu` when Reservation ↔ AI Menu is on.
  */
 export async function sendReservationNotification(input: {
   target: ReservationNotifyTarget;
   template: ReservationTemplate;
-  /** Reservation page token — the CTA on every reservation template. */
+  /** Used to resolve reservation_confirmed → reservation_confirmed_menu. */
+  merchantId?: string;
+  /** Reservation page token — the CTA on standard reservation templates. */
   reservationToken: string;
   date: string;
   time: string;
   partySize: number;
   declineReason?: string | null;
 }): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
-  const { target, template } = input;
+  const { target } = input;
+  let template = input.template;
+  if (template === "reservation_confirmed" && input.merchantId) {
+    const { reservationConfirmedNotifyTemplate } = await import(
+      "@/lib/reservations/ai-menu"
+    );
+    template = await reservationConfirmedNotifyTemplate(input.merchantId);
+  }
   // Turning WhatsApp off is a choice, not a failure — nothing to flag.
   if (!target.enabled) return { ok: true, skipped: true };
   if (!target.customer) {

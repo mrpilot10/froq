@@ -47,9 +47,6 @@ function RowSkeletons({
                 <div className="resv-col resv-col--party">
                   <div className="sk sk-line" style={{ width: 54, height: 11 }} />
                 </div>
-                <div className="resv-col resv-col--table">
-                  <div className="sk sk-line" style={{ width: 58, height: 11 }} />
-                </div>
                 {isHistory ? (
                   <div className="resv-col resv-col--status">
                     <div className="sk" style={{ width: 68, height: 18, borderRadius: 999 }} />

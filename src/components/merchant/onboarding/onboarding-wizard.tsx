@@ -64,10 +64,7 @@ import {
 } from "@/components/merchant/queue/queue-hours-fields";
 import { MenuTaxFields } from "@/components/merchant/menu/menu-tax-fields";
 import { ReservationSettingsFields } from "@/components/merchant/reservations/reservation-settings-fields";
-import { TableLayoutEditor } from "@/components/merchant/table-layout-editor";
 import { DEFAULT_RESERVATION_SETTINGS } from "@/lib/merchant/reservations";
-import { saveMainBranchDiningTables } from "@/app/merchant/table-actions";
-import { validateDiningTableDraft } from "@/lib/merchant/dining-tables";
 import {
   REWARD_COOLDOWN_UNITS,
   formatRewardCooldown,
@@ -408,14 +405,6 @@ export function OnboardingWizard({
       if (product === "queue") {
         setInitialEstimatedWaitMinutes(draft.estimatedWaitMinutes);
         await updateMainBranchEstimatedWait(draft.estimatedWaitMinutes);
-        if (draft.tables.length > 0 && !validateDiningTableDraft(draft.tables)) {
-          await saveMainBranchDiningTables({ tables: draft.tables });
-        }
-      }
-      if (product === "reservation") {
-        if (draft.tables.length > 0 && !validateDiningTableDraft(draft.tables)) {
-          await saveMainBranchDiningTables({ tables: draft.tables });
-        }
       }
       return res;
     }
@@ -429,9 +418,6 @@ export function OnboardingWizard({
         reservationCloseTime: draft.queueCloseTime,
       });
       if (!saved.ok) return saved;
-      if (draft.tables.length > 0 && !validateDiningTableDraft(draft.tables)) {
-        await saveMainBranchDiningTables({ tables: draft.tables });
-      }
     } else if (product === "queue") {
       setInitialEstimatedWaitMinutes(draft.estimatedWaitMinutes);
       const saved = await updateMerchantProfile({
@@ -440,9 +426,6 @@ export function OnboardingWizard({
       });
       if (!saved.ok) return saved;
       await updateMainBranchEstimatedWait(draft.estimatedWaitMinutes);
-      if (draft.tables.length > 0 && !validateDiningTableDraft(draft.tables)) {
-        await saveMainBranchDiningTables({ tables: draft.tables });
-      }
     } else if (product === "menu") {
       // Only the tax columns. This merchant may already run Loyalty, and the
       // reward branch below would overwrite their reward with a placeholder.
@@ -1111,20 +1094,6 @@ export function OnboardingWizard({
                     }
                   />
                 </div>
-
-                <div className="wizard-queue-hours" style={{ marginTop: 20 }}>
-                  <span className="auth-label">Tables</span>
-                  <span className="merchant-field-hint" style={{ display: "block", marginBottom: 12 }}>
-                    Numbers are filled in automatically — edit any of them. Shared with Reservations.
-                  </span>
-                  <TableLayoutEditor
-                    compact
-                    value={draft.tables}
-                    onChange={(tables) =>
-                      setDraft((prev) => ({ ...prev, tables }))
-                    }
-                  />
-                </div>
               </div>
             )}
 
@@ -1154,20 +1123,6 @@ export function OnboardingWizard({
                         reservationIntervalMinutes: settings.intervalMinutes,
                         reservationAllowSameDay: settings.allowSameDay,
                       }))
-                    }
-                  />
-                </div>
-
-                <div className="wizard-queue-hours" style={{ marginTop: 20 }}>
-                  <span className="auth-label">Tables</span>
-                  <span className="merchant-field-hint" style={{ display: "block", marginBottom: 12 }}>
-                    Numbers are filled in automatically — edit any of them. Shared with Waitlist.
-                  </span>
-                  <TableLayoutEditor
-                    compact
-                    value={draft.tables}
-                    onChange={(tables) =>
-                      setDraft((prev) => ({ ...prev, tables }))
                     }
                   />
                 </div>

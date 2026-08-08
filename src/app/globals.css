@@ -2281,6 +2281,14 @@ body {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 12%, transparent);
 }
 
+/* Date fields only need ~YYYY-MM-DD width — full-row stretch looks oversized. */
+.auth-input--date {
+  width: min(100%, 11.75rem);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 .auth-select {
   appearance: none;
   -webkit-appearance: none;

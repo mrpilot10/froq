@@ -12,8 +12,6 @@ import {
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { formatPhoneDisplay } from "@/lib/auth/format";
 import { fetchReservationEvents } from "@/app/merchant/reservation-actions";
-import { assignReservationTable } from "@/app/merchant/table-actions";
-import { AssignTableSheet } from "../queue/seat-at-table-sheet";
 import {
   buildReservationTimeline,
   drawerActionsFor,
@@ -31,7 +29,6 @@ import {
   type ReservationEvent,
 } from "@/lib/merchant/reservations";
 import { ReservationSlotPicker } from "./reservation-slot-picker";
-import { toast } from "sonner";
 
 interface ReservationDrawerProps {
   reservation: Reservation | null;
@@ -45,11 +42,6 @@ interface ReservationDrawerProps {
   ) => Promise<boolean> | boolean;
   onSuggest: (input: { date: string; time: string }) => Promise<boolean> | boolean;
   onSaveNotes: (merchantNotes: string) => Promise<boolean> | boolean;
-  /** After table assign — parent refreshes the row. */
-  onTableAssigned?: (next: {
-    diningTableId: string | null;
-    tableNumber: number | null;
-  }) => void;
 }
 
 type Panel = "decline" | "suggest" | null;
@@ -80,7 +72,6 @@ export function ReservationDrawer({
   onAction,
   onSuggest,
   onSaveNotes,
-  onTableAssigned,
 }: ReservationDrawerProps) {
   const [panel, setPanel] = useState<Panel>(null);
   const [reason, setReason] = useState("");
@@ -89,8 +80,6 @@ export function ReservationDrawer({
   const [suggestDate, setSuggestDate] = useState("");
   const [suggestTime, setSuggestTime] = useState("");
   const [events, setEvents] = useState<ReservationEvent[]>([]);
-  const [tablePickerOpen, setTablePickerOpen] = useState(false);
-  const [assigningTable, setAssigningTable] = useState(false);
 
   // Reset the per-booking panels whenever the drawer switches reservation.
   useEffect(() => {
@@ -177,7 +166,6 @@ export function ReservationDrawer({
   );
 
   return (
-    <>
     <BottomSheet
       open={reservation !== null}
       onClose={onClose}
@@ -237,24 +225,6 @@ export function ReservationDrawer({
                 {reservation.partySize === 1 ? "guest" : "guests"}
               </span>
             </div>
-            <button
-              type="button"
-              className="resv-drawer-fact resv-drawer-fact--action"
-              onClick={() => {
-                if (!reservation.branchId) {
-                  toast.error("This booking has no branch.");
-                  return;
-                }
-                setTablePickerOpen(true);
-              }}
-            >
-              <span className="resv-drawer-fact-label">Table</span>
-              <span className="resv-drawer-fact-value">
-                {reservation.tableNumber != null
-                  ? `T${reservation.tableNumber}`
-                  : "Assign"}
-              </span>
-            </button>
           </div>
 
           {(reservation.notes ||
@@ -461,47 +431,5 @@ export function ReservationDrawer({
         </div>
       )}
     </BottomSheet>
-
-    {/* Same picker the board and the queue use, so a table is chosen the same
-        way wherever staff are standing. */}
-    <AssignTableSheet
-      open={tablePickerOpen}
-      branchId={reservation?.branchId}
-      partySize={reservation?.partySize ?? 1}
-      guestName={reservation?.customerName ?? "guest"}
-      purpose="assign"
-      date={reservation?.date}
-      time={reservation?.time}
-      ignoreReservationId={reservation?.id}
-      selectedTableId={reservation?.diningTableId ?? null}
-      busy={assigningTable}
-      onClose={() => setTablePickerOpen(false)}
-      onConfirm={(tableId) => {
-        if (!reservation) return;
-        setAssigningTable(true);
-        void assignReservationTable({
-          reservationId: reservation.id,
-          tableId,
-        })
-          .then((result) => {
-            if (!result.ok) {
-              toast.error(result.error ?? "Couldn't assign table.");
-              return;
-            }
-            onTableAssigned?.({
-              diningTableId: tableId,
-              tableNumber: result.tableNumber ?? null,
-            });
-            toast.success(
-              result.tableNumber != null
-                ? `Assigned Table ${result.tableNumber}`
-                : "Table cleared",
-            );
-            setTablePickerOpen(false);
-          })
-          .finally(() => setAssigningTable(false));
-      }}
-    />
-    </>
   );
 }

@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Clock3,
   ImagePlus,
-  LayoutGrid,
   Trash2,
   UtensilsCrossed,
   Users,
@@ -31,10 +30,6 @@ import { MerchantPlanCard } from "../plan-card";
 import { ProductBranchesSettings } from "../product-branches-settings";
 import { DeviceSetupPanel } from "../device-setup-rows";
 import { MerchantQrPanel } from "../qr-panel";
-import {
-  TableLayoutSheet,
-  useTableLayoutSummary,
-} from "../table-layout-sheet";
 import {
   hoursFromBranch,
   profilePatchFromHours,
@@ -99,9 +94,6 @@ export function QueueSettingsScreen({
   branchSelected = true,
 }: QueueSettingsScreenProps) {
   const branchId = branch?.id ?? null;
-  const { summary: tableSummary, refresh: refreshTables } =
-    useTableLayoutSummary(branchId);
-  const [tablesOpen, setTablesOpen] = useState(false);
   const [waitMinutes, setWaitMinutes] = useState(DEFAULT_ESTIMATED_WAIT_MINUTES);
   const [waitMeta, setWaitMeta] = useState(() => ({
     minutes: DEFAULT_ESTIMATED_WAIT_MINUTES,
@@ -296,23 +288,6 @@ export function QueueSettingsScreen({
               <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
             </button>
           ))}
-
-          <button
-            type="button"
-            className="merchant-settings-row"
-            onClick={() => setTablesOpen(true)}
-          >
-            <div className="profile-row-icon">
-              <LayoutGrid size={18} strokeWidth={2.2} />
-            </div>
-            <div className="profile-row-copy">
-              <div className="profile-row-label">Tables</div>
-              <div className="profile-row-value profile-row-value--soft">
-                {tableSummary}
-              </div>
-            </div>
-            <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
-          </button>
         </div>
       </div>
 
@@ -356,13 +331,6 @@ export function QueueSettingsScreen({
       />
 
       <DeviceSetupPanel />
-
-      <TableLayoutSheet
-        open={tablesOpen}
-        branchId={branchId}
-        onClose={() => setTablesOpen(false)}
-        onSaved={(layout) => refreshTables(layout)}
-      />
 
       <BottomSheet
         open={sheet !== null}

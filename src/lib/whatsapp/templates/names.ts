@@ -47,6 +47,11 @@ export const WhatsAppTemplateName = {
    */
   ReservationRequestReceived: "reservation_request_received",
   ReservationConfirmed: "reservation_confirmed",
+  /**
+   * Confirmed booking — AI Menu CTA variant.
+   * Same body as reservation_confirmed; URL button → https://froq.io/m/{{1}}.
+   */
+  ReservationConfirmedMenu: "reservation_confirmed_menu",
   ReservationDeclined: "reservation_declined",
   /** Merchant proposed a different slot; the guest answers on their page. */
   ReservationUpdated: "reservation_updated",

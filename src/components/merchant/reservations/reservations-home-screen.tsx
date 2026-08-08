@@ -18,7 +18,6 @@ import {
   fetchReservationFormConfig,
   fetchReservations,
 } from "@/app/merchant/reservation-actions";
-import { listBranchDiningTables } from "@/app/merchant/table-actions";
 import { useReservationActions } from "@/lib/merchant/use-reservation-actions";
 import {
   formatDateLabel,
@@ -33,7 +32,6 @@ import {
   type ReservationStatus,
 } from "@/lib/merchant/reservations";
 import { useMerchantWorkspace } from "../merchant-workspace-context";
-import { AssignTableSheet } from "../queue/seat-at-table-sheet";
 import { NewReservationSheet } from "./new-reservation-sheet";
 import { ReservationDrawer } from "./reservation-drawer";
 import { ReservationRow } from "./reservation-row";
@@ -68,8 +66,6 @@ export function ReservationsHomeScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pausing, setPausing] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
-  const [confirmPick, setConfirmPick] = useState<Reservation | null>(null);
-  const [hasTables, setHasTables] = useState(false);
 
   const load = useCallback(async () => {
     const result = await fetchReservations({
@@ -174,39 +170,13 @@ export function ReservationsHomeScreen() {
     load,
   );
 
-  useEffect(() => {
-    if (!activeBranchId) {
-      setHasTables(false);
-      return;
-    }
-    let cancelled = false;
-    void listBranchDiningTables({ branchId: activeBranchId }).then((result) => {
-      if (cancelled) return;
-      setHasTables(result.ok && result.tables.length > 0);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeBranchId]);
-
   const requestAction = useCallback(
     (
       reservation: Reservation,
       action: ReservationActionId,
       input?: { reason?: string; tableId?: string | null },
-    ) => {
-      if (
-        action === "confirm" &&
-        hasTables &&
-        !reservation.diningTableId &&
-        input?.tableId === undefined
-      ) {
-        setConfirmPick(reservation);
-        return Promise.resolve(false);
-      }
-      return runAction(reservation, action, input);
-    },
-    [hasTables, runAction],
+    ) => runAction(reservation, action, input),
+    [runAction],
   );
 
   if (!loaded) return <ReservationsHomeSkeleton />;
@@ -261,12 +231,12 @@ export function ReservationsHomeScreen() {
             <h2 className="tab-title">Reservations</h2>
             <p className="tab-sub">
               {paused
-                ? "Bookings are stopped — guests can't request a table right now"
+                ? "Bookings are stopped — guests can't request a booking right now"
                 : stats.pending > 0
                   ? `${stats.pending} request${stats.pending === 1 ? "" : "s"} waiting for your review`
                   : stats.today > 0
                     ? `${stats.today} booking${stats.today === 1 ? "" : "s"} on the book today`
-                    : "Confirm requests and manage today's tables"}
+                    : "Confirm requests and manage today's bookings"}
             </p>
           </div>
           <div className="queue-session-actions">
@@ -418,7 +388,7 @@ export function ReservationsHomeScreen() {
               <p className="merchant-empty-sub">
                 {searching
                   ? "Try another name, number or status."
-                  : "Share your reservation QR so guests can request a table, or add a booking you took over the phone."}
+                  : "Share your reservation QR so guests can request a booking, or add one you took over the phone."}
               </p>
             </div>
           ) : grouped ? (
@@ -479,33 +449,6 @@ export function ReservationsHomeScreen() {
         onSaveNotes={(merchantNotes) =>
           selected ? saveNotes(selected, merchantNotes) : false
         }
-        onTableAssigned={({ diningTableId, tableNumber }) => {
-          if (!selected) return;
-          applyUpdated({
-            ...selected,
-            diningTableId,
-            tableNumber,
-          });
-        }}
-      />
-
-      <AssignTableSheet
-        open={Boolean(confirmPick)}
-        branchId={confirmPick?.branchId ?? activeBranchId}
-        partySize={confirmPick?.partySize ?? 1}
-        guestName={confirmPick?.customerName ?? "guest"}
-        purpose="confirm"
-        date={confirmPick?.date}
-        time={confirmPick?.time}
-        ignoreReservationId={confirmPick?.id}
-        busy={busyId === confirmPick?.id}
-        onClose={() => setConfirmPick(null)}
-        onConfirm={(tableId) => {
-          if (!confirmPick) return;
-          const target = confirmPick;
-          setConfirmPick(null);
-          void requestAction(target, "confirm", { tableId });
-        }}
       />
 
       <NewReservationSheet

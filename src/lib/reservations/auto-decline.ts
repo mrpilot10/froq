@@ -159,6 +159,7 @@ export async function processReservationAutoDeclines(
     const notify = await sendReservationNotification({
       target,
       template: "reservation_declined",
+      merchantId: row.merchant_id,
       reservationToken: row.public_token,
       date: row.reservation_date,
       time,

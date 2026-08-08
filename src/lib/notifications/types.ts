@@ -1,6 +1,7 @@
 import { loyaltyCardUrl } from "@/lib/whatsapp/templates/names";
 import { requireCustomerPublicToken } from "@/lib/customer/hub";
 import { reservationUrl } from "@/lib/reservations/link";
+import { customerMenuUrl } from "@/lib/app-url";
 import { formatBookingSize, formatEstimatedWaitTime } from "@/lib/queue/format";
 
 /** Notification templates routed by sendCustomerNotification. */
@@ -15,6 +16,8 @@ export const CustomerNotificationTemplate = {
   WaitlistCalled: "waitlist_called",
   ReservationRequestReceived: "reservation_request_received",
   ReservationConfirmed: "reservation_confirmed",
+  /** Confirmed booking with AI Menu CTA → /m/{{1}}. */
+  ReservationConfirmedMenu: "reservation_confirmed_menu",
   ReservationDeclined: "reservation_declined",
   ReservationUpdated: "reservation_updated",
   ReservationReminder: "reservation_reminder",
@@ -148,6 +151,7 @@ export type CustomerNotificationDataMap = {
   waitlist_called: WaitlistCalledData;
   reservation_request_received: ReservationData;
   reservation_confirmed: ReservationData;
+  reservation_confirmed_menu: ReservationData;
   reservation_declined: ReservationDeclinedData;
   reservation_updated: ReservationData;
   reservation_reminder: ReservationData;
@@ -268,6 +272,12 @@ export function buildSmsBody(
       const party = d.partySize != null ? `, party of ${d.partySize}` : "";
       return `Hi ${name}, reservation confirmed at ${d.businessName} for ${d.when}${party}. View reservation: ${reservationUrl(d.reservationToken)}`;
     }
+    case "reservation_confirmed_menu": {
+      const d = data as ReservationData;
+      const party = d.partySize != null ? `, party of ${d.partySize}` : "";
+      const menu = customerMenuUrl(customer.publicToken);
+      return `Hi ${name}, reservation confirmed at ${d.businessName} for ${d.when}${party}. View reservation: ${reservationUrl(d.reservationToken)} · Menu: ${menu}`;
+    }
     case "reservation_declined": {
       const d = data as ReservationDeclinedData;
       const reason = d.reason?.trim() ? ` ${d.reason.trim()}` : "";
@@ -331,6 +341,7 @@ export function smsTemplateIdFor(
     waitlist_called: "APITXT_SMS_TEMPLATE_WAITLIST_CALLED",
     reservation_request_received: "APITXT_SMS_TEMPLATE_RESERVATION_REQUEST_RECEIVED",
     reservation_confirmed: "APITXT_SMS_TEMPLATE_RESERVATION_CONFIRMED",
+    reservation_confirmed_menu: "APITXT_SMS_TEMPLATE_RESERVATION_CONFIRMED",
     reservation_declined: "APITXT_SMS_TEMPLATE_RESERVATION_DECLINED",
     reservation_updated: "APITXT_SMS_TEMPLATE_RESERVATION_UPDATED",
     reservation_reminder: "APITXT_SMS_TEMPLATE_RESERVATION_REMINDER",

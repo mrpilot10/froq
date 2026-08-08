@@ -35,7 +35,7 @@ export const ReservationWindowCard = memo(function ReservationWindowCard({
 }: ReservationWindowCardProps) {
   const value = paused ? "Stopped" : "Open";
   const meta = paused
-    ? "Guests can't request a table right now"
+    ? "Guests can't request a booking right now"
     : `Guests can book anytime · seats ${formatTimeLabel(settings.openTime)}–${formatTimeLabel(settings.closeTime)} (store timings)`;
   const badge = paused ? "paused" : "live";
   const tone = paused ? "paused" : "open";
