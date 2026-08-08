@@ -138,6 +138,11 @@ export interface MerchantProfile {
   reservationWhatsappEnabled: boolean;
   /** Bookings stopped by the merchant — the public form is closed. */
   reservationPaused: boolean;
+  /**
+   * Queue ↔ AI Menu integration. When true, join/seated WhatsApp uses
+   * menu CTA templates (queue_first_notify_menu / seated_menu).
+   */
+  queueAiMenuEnabled: boolean;
 }
 
 export interface MerchantStats {

@@ -7,6 +7,19 @@
  */
 
 export { WhatsAppTemplateName, froqPublicOrigin, loyaltyCardUrl } from "./names";
+
+export {
+  WHATSAPP_TEMPLATE_CATEGORIES,
+  WHATSAPP_CATEGORY_LABEL,
+  categoryForWhatsAppTemplate,
+  listWhatsAppTemplateCategories,
+  countTemplatesByCategory,
+} from "./categories";
+export type {
+  WhatsAppTemplateCategory,
+  WhatsAppTemplateCategoryRow,
+  ApitxtTemplateCatalogName,
+} from "./categories";
 export type { WhatsAppTemplateName as WhatsAppTemplateNameValue } from "./names";
 
 export {
@@ -44,11 +57,14 @@ export type {
 
 export {
   buildQueueJoinedTemplate,
+  buildQueueJoinedMenuTemplate,
   buildQueueCustomerCalledTemplate,
   buildQueueCustomerCalledReminder1Template,
   buildQueueCustomerCalledReminder2Template,
   buildQueueCustomerCalledReminder3Template,
   buildQueueCustomerSkippedTemplate,
   buildQueueCustomerSeatedTemplate,
+  buildSeatedMenuTemplate,
+  canonicalQueueTemplateName,
 } from "./queue";
 export type { QueueJoinedTemplateInput, QueuePartyTemplateInput } from "./queue";

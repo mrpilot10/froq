@@ -97,3 +97,15 @@ export function customerHubUrl(publicToken: string): string {
   const token = publicToken.trim();
   return `${getAppOrigin()}/c/${encodeURIComponent(token)}`;
 }
+
+/** Absolute AI Menu deep link — Meta: https://froq.io/m/{{1}}. */
+export function customerMenuUrl(publicToken: string): string {
+  const token = publicToken.trim();
+  return `${getAppOrigin()}/m/${encodeURIComponent(token)}`;
+}
+
+/** Absolute live queue ticket link — Meta: https://froq.io/queue/{{1}}. */
+export function customerQueueUrl(publicToken: string): string {
+  const token = publicToken.trim();
+  return `${getAppOrigin()}/queue/${encodeURIComponent(token)}`;
+}

@@ -81,6 +81,7 @@ export interface MerchantWorkspaceValue {
     openDays: number[];
     autoSessions: boolean;
   }) => Promise<void>;
+  onSaveQueueSettings: (patch: Partial<MerchantProfile>) => Promise<void>;
   onSaveReservationSettings: (patch: Partial<MerchantProfile>) => Promise<void>;
   /** Stop / resume public booking requests, like pausing the live queue. */
   onSetReservationPaused: (paused: boolean) => Promise<void>;

@@ -16,6 +16,9 @@ import {
   buildQueueCustomerSeatedTemplate,
   buildQueueCustomerSkippedTemplate,
   buildQueueJoinedTemplate,
+  buildQueueJoinedMenuTemplate,
+  buildSeatedMenuTemplate,
+  canonicalQueueTemplateName,
   buildBirthdayBonusStampsTemplate,
   requireNonEmptyString,
   requireNumberAsString,
@@ -172,7 +175,9 @@ export async function sendWhatsAppTemplate(
     throw new Error("APITXT_PROJECT_REF_ID is not configured.");
   }
 
-  const templateName = requireNonEmptyString(input.templateName, "templateName");
+  const templateName = canonicalQueueTemplateName(
+    requireNonEmptyString(input.templateName, "templateName"),
+  );
   let publicToken: string | undefined;
   if (input.publicToken != null && input.publicToken.trim()) {
     try {
@@ -622,6 +627,13 @@ export async function sendQueueJoined(
   return sendFromQueuePayload(input.mobile, buildQueueJoinedTemplate(input));
 }
 
+/** queue_first_notify_menu — join notice with AI Menu CTA. */
+export async function sendQueueJoinedMenu(
+  input: SendQueueJoinedInput,
+): Promise<ApitxtSendWaResponse> {
+  return sendFromQueuePayload(input.mobile, buildQueueJoinedMenuTemplate(input));
+}
+
 /** @deprecated Prefer sendQueueJoined — same Meta template queue_first_notify. */
 export const sendQueueFirstNotify = sendQueueJoined;
 
@@ -674,6 +686,13 @@ export async function sendQueueCustomerSeated(
   input: SendQueuePartyInput,
 ): Promise<ApitxtSendWaResponse> {
   return sendFromQueuePayload(input.mobile, buildQueueCustomerSeatedTemplate(input));
+}
+
+/** seated_menu — party seated with AI Menu CTA. */
+export async function sendSeatedMenu(
+  input: SendQueuePartyInput,
+): Promise<ApitxtSendWaResponse> {
+  return sendFromQueuePayload(input.mobile, buildSeatedMenuTemplate(input));
 }
 
 export interface SendBirthdayBonusStampsInput {

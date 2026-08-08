@@ -10,13 +10,23 @@ import { buildUrlButton, type WhatsAppTemplatePayload } from "./types";
 export type QueueJoinedTemplateInput = QueueJoinedWhatsAppVarInput;
 export type QueuePartyTemplateInput = QueuePartyWhatsAppVarInput;
 
+/**
+ * Map legacy / renamed Meta template names to the currently approved send name.
+ * queue_reminder_3 → queue_3_reminder (Meta rename).
+ */
+export function canonicalQueueTemplateName(templateName: string): string {
+  const name = templateName.trim();
+  if (name === "queue_reminder_3") return WhatsAppTemplateName.QueueReminder3;
+  return name;
+}
+
 function withPartyButton(
   templateName: string,
   input: QueuePartyWhatsAppVarInput,
 ): WhatsAppTemplatePayload {
   const vars = buildQueuePartyWhatsAppVars(input);
   return {
-    templateName,
+    templateName: canonicalQueueTemplateName(templateName),
     body: [...vars.body],
     buttons: [buildUrlButton([vars.publicToken])],
   };
@@ -25,7 +35,7 @@ function withPartyButton(
 /**
  * queue_first_notify — guest joined the waitlist.
  * Body: name, business, booking size, position, estimated wait.
- * URL button {{1}} = publicToken (https://a-t.cc/{{1}}).
+ * URL button {{1}} = publicToken → https://froq.io/queue/{{1}}.
  */
 export function buildQueueJoinedTemplate(
   input: QueueJoinedTemplateInput,
@@ -33,6 +43,21 @@ export function buildQueueJoinedTemplate(
   const vars = buildQueueJoinedWhatsAppVars(input);
   return {
     templateName: WhatsAppTemplateName.QueueFirstNotify,
+    body: [...vars.body],
+    buttons: [buildUrlButton([vars.publicToken])],
+  };
+}
+
+/**
+ * queue_first_notify_menu — same body as join, Menu CTA.
+ * URL button {{1}} = publicToken → https://froq.io/m/{{1}}.
+ */
+export function buildQueueJoinedMenuTemplate(
+  input: QueueJoinedTemplateInput,
+): WhatsAppTemplatePayload {
+  const vars = buildQueueJoinedWhatsAppVars(input);
+  return {
+    templateName: WhatsAppTemplateName.QueueFirstNotifyMenu,
     body: [...vars.body],
     buttons: [buildUrlButton([vars.publicToken])],
   };
@@ -62,7 +87,7 @@ export function buildQueueCustomerCalledReminder2Template(
   return withPartyButton(WhatsAppTemplateName.QueueReminder2, input);
 }
 
-/** queue_reminder_3 — third follow-up after call. */
+/** queue_3_reminder — third follow-up after call. */
 export function buildQueueCustomerCalledReminder3Template(
   input: QueuePartyTemplateInput,
 ): WhatsAppTemplatePayload {
@@ -76,9 +101,16 @@ export function buildQueueCustomerSkippedTemplate(
   return withPartyButton(WhatsAppTemplateName.QueueCustomerSkipped, input);
 }
 
-/** queue_seated — party seated. */
+/** queue_seated — party seated. CTA → /queue/{{1}}. */
 export function buildQueueCustomerSeatedTemplate(
   input: QueuePartyTemplateInput,
 ): WhatsAppTemplatePayload {
   return withPartyButton(WhatsAppTemplateName.QueueSeated, input);
+}
+
+/** seated_menu — party seated with AI Menu CTA → /m/{{1}}. */
+export function buildSeatedMenuTemplate(
+  input: QueuePartyTemplateInput,
+): WhatsAppTemplatePayload {
+  return withPartyButton(WhatsAppTemplateName.SeatedMenu, input);
 }

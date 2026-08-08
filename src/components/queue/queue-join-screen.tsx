@@ -9,6 +9,7 @@ import {
   Phone,
   Plus,
   Timer,
+  UtensilsCrossed,
   UserRound,
   Users,
   X,
@@ -36,6 +37,8 @@ interface QueueJoinScreenProps {
   banner?: string;
   bannerLink?: string;
   /** From /queue/frq_… WhatsApp links — restores live ticket without localStorage. */
+  /** Queue ↔ AI Menu — show View our AI menu on the waitlist ticket. */
+  aiMenuEnabled?: boolean;
   initialTicket?: QueuePageInitialTicket;
 }
 
@@ -43,6 +46,7 @@ interface Ticket {
   entryId?: string;
   /** Queue position number only (e.g. "1") — UI prefixes with #. */
   token: string;
+  publicToken?: string;
   name: string;
   phone: string;
   party: number;
@@ -78,6 +82,7 @@ export function QueueJoinScreen({
   logoUrl,
   banner,
   bannerLink,
+  aiMenuEnabled = false,
   initialTicket,
 }: QueueJoinScreenProps) {
   useBrandTheme(brandColor);
@@ -216,6 +221,7 @@ export function QueueJoinScreen({
       const next: Ticket = {
         entryId: result.entryId,
         token: queueNumberLabel(result.tokenLabel ?? position, position),
+        publicToken: result.publicToken,
         name: name.trim(),
         phone: `+91${phone}`,
         party,
@@ -611,9 +617,20 @@ export function QueueJoinScreen({
               )}
 
               {status === "waiting" && (
-                <button type="button" className="qjoin-leave" onClick={leaveQueue}>
-                  Leave the queue
-                </button>
+                <>
+                  {aiMenuEnabled && ticket.publicToken ? (
+                    <a
+                      className="qjoin-ai-menu"
+                      href={`/m/${encodeURIComponent(ticket.publicToken)}`}
+                    >
+                      <UtensilsCrossed size={16} strokeWidth={2.3} aria-hidden="true" />
+                      View our AI menu
+                    </a>
+                  ) : null}
+                  <button type="button" className="qjoin-leave" onClick={leaveQueue}>
+                    Leave the queue
+                  </button>
+                </>
               )}
 
               {(status === "seated" || status === "left") && (

@@ -87,6 +87,7 @@ export function toMerchantProfile(row: MerchantProfileSource): MerchantProfile {
     reservationAutoDeclineHours: row.reservation_auto_decline_hours ?? 0,
     reservationWhatsappEnabled: row.reservation_whatsapp_enabled !== false,
     reservationPaused: row.reservation_paused === true,
+    queueAiMenuEnabled: row.queue_ai_menu_enabled === true,
   };
 }
 
@@ -176,6 +177,9 @@ export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<Mer
   if (patch.reservationWhatsappEnabled !== undefined)
     row.reservation_whatsapp_enabled = patch.reservationWhatsappEnabled;
   if (patch.reservationPaused !== undefined) row.reservation_paused = patch.reservationPaused;
+  if (patch.queueAiMenuEnabled !== undefined) {
+    row.queue_ai_menu_enabled = patch.queueAiMenuEnabled;
+  }
   return row;
 }
 

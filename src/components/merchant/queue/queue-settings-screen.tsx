@@ -8,6 +8,7 @@ import {
   Clock3,
   ImagePlus,
   Trash2,
+  UtensilsCrossed,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -59,6 +60,8 @@ interface QueueSettingsScreenProps {
   bannerLink: string;
   onSaveBanner: (banner: string, bannerLink: string) => Promise<void> | void;
   onSaveHours: (hours: QueueStoreHours) => Promise<void> | void;
+  /** Persist Queue settings that live on the merchant profile (integrations). */
+  onSaveProfile?: (patch: Partial<MerchantProfile>) => Promise<void> | void;
   productEnabled?: boolean;
   onGetStarted?: () => void;
   onManagePlan?: () => void;
@@ -74,6 +77,7 @@ export function QueueSettingsScreen({
   bannerLink,
   onSaveBanner,
   onSaveHours,
+  onSaveProfile,
   productEnabled,
   onGetStarted,
   onManagePlan,
@@ -91,6 +95,18 @@ export function QueueSettingsScreen({
   const [hours, setHours] = useState<QueueStoreHours>(() => hoursFromProfile(profile));
   const [savingBanner, setSavingBanner] = useState(false);
   const [savingHours, setSavingHours] = useState(false);
+  const [toggleSaving, setToggleSaving] = useState(false);
+  const aiMenuEnabled = profile.queueAiMenuEnabled === true;
+
+  async function toggleAiMenu() {
+    if (!onSaveProfile || toggleSaving) return;
+    setToggleSaving(true);
+    try {
+      await onSaveProfile({ queueAiMenuEnabled: !aiMenuEnabled });
+    } finally {
+      setToggleSaving(false);
+    }
+  }
   const [processing, setProcessing] = useState(false);
   const [sheet, setSheet] = useState<SheetKind>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -253,6 +269,37 @@ export function QueueSettingsScreen({
         onGetStarted={onGetStarted}
         onManagePlan={onManagePlan}
       />
+
+      
+      <div className="merchant-settings-group">
+        <h3 className="merchant-settings-title">Integrations</h3>
+        <div className="panel-card merchant-settings-panel">
+          <div className="merchant-settings-row" style={{ cursor: "default" }}>
+            <div className="profile-row-icon">
+              <UtensilsCrossed size={18} strokeWidth={2.2} />
+            </div>
+            <div className="profile-row-copy">
+              <div className="profile-row-label">AI Menu</div>
+              <div className="profile-row-value profile-row-value--soft">
+                {aiMenuEnabled
+                  ? "Waitlist shows View our AI menu · queue_first_notify_menu / seated_menu"
+                  : "Off — standard queue WhatsApp templates"}
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={aiMenuEnabled}
+              aria-label="Enable AI Menu integration on Queue"
+              className={`merchant-toggle${aiMenuEnabled ? " on" : ""}`}
+              disabled={toggleSaving || !onSaveProfile}
+              onClick={() => void toggleAiMenu()}
+            >
+              <span className="merchant-toggle-knob" />
+            </button>
+          </div>
+        </div>
+      </div>
 
       <DeviceSetupPanel />
 

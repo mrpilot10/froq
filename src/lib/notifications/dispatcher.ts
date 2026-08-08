@@ -8,6 +8,8 @@ import {
   sendQueueCustomerSeated,
   sendQueueCustomerSkipped,
   sendQueueJoined,
+  sendQueueJoinedMenu,
+  sendSeatedMenu,
   sendRewardReadyWaitTime,
   sendRewardRedeemed,
   sendRewardUnlocked,
@@ -176,6 +178,19 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
       });
       return;
     }
+    case "queue_first_notify_menu": {
+      const d = data as CustomerNotificationDataMap["queue_first_notify_menu"];
+      await sendQueueJoinedMenu({
+        mobile: customer.phone,
+        customerName: customer.name,
+        businessName: d.businessName,
+        bookingSize: d.bookingSize,
+        queuePosition: d.queuePosition,
+        estimatedWaitMinutes: d.estimatedWaitMinutes,
+        publicToken: customer.publicToken,
+      });
+      return;
+    }
     case "queue_call_now": {
       const d = data as CustomerNotificationDataMap["queue_call_now"];
       await sendQueueCustomerCalled({
@@ -209,8 +224,8 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
       });
       return;
     }
-    case "queue_reminder_3": {
-      const d = data as CustomerNotificationDataMap["queue_reminder_3"];
+    case "queue_3_reminder": {
+      const d = data as CustomerNotificationDataMap["queue_3_reminder"];
       await sendQueueCustomerCalledReminder3({
         mobile: customer.phone,
         customerName: customer.name,
@@ -234,6 +249,17 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
     case "queue_seated": {
       const d = data as CustomerNotificationDataMap["queue_seated"];
       await sendQueueCustomerSeated({
+        mobile: customer.phone,
+        customerName: customer.name,
+        businessName: d.businessName,
+        bookingSize: d.bookingSize,
+        publicToken: customer.publicToken,
+      });
+      return;
+    }
+    case "seated_menu": {
+      const d = data as CustomerNotificationDataMap["seated_menu"];
+      await sendSeatedMenu({
         mobile: customer.phone,
         customerName: customer.name,
         businessName: d.businessName,

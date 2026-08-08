@@ -525,7 +525,7 @@ const MERCHANT_ACCESS_COLUMNS =
 
 /** Optional toggles — selected separately so missing migrations can't take down the dashboard. */
 const MERCHANT_OPTIONAL_TOGGLE_COLUMNS =
-  "notify_staff_pending_approvals, notify_manager_pending_approvals, notify_owner_pending_approvals, birthday_double_stamps";
+  "notify_staff_pending_approvals, notify_manager_pending_approvals, notify_owner_pending_approvals, birthday_double_stamps, queue_ai_menu_enabled";
 
 /**
  * Resolve the merchant this user can access — as owner or as a team member.
@@ -566,6 +566,7 @@ async function loadEscalationToggles(
   notify_manager_pending_approvals?: boolean;
   notify_owner_pending_approvals?: boolean;
   birthday_double_stamps?: boolean;
+  queue_ai_menu_enabled?: boolean;
 }> {
   const { data, error } = await supabase
     .from("merchants")

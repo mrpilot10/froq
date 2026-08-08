@@ -20,18 +20,20 @@ export const CustomerNotificationTemplate = {
   ReservationReminder: "reservation_reminder",
   QueueJoined: "queue_first_notify",
   QueueFirstNotify: "queue_first_notify",
+  QueueFirstNotifyMenu: "queue_first_notify_menu",
   QueueCallNow: "queue_call_now",
   /** @deprecated Prefer QueueCallNow */
   QueueCustomerCalled: "queue_call_now",
   QueueReminders1: "queue_reminders_1",
   QueueReminder2: "queue_reminder_2",
-  QueueReminder3: "queue_reminder_3",
+  QueueReminder3: "queue_3_reminder",
   /** @deprecated Prefer QueueReminders1 / QueueReminder2 / QueueReminder3 */
   QueueCustomerCalledReminder1: "queue_reminders_1",
   QueueCustomerCalledReminder2: "queue_reminder_2",
-  QueueCustomerCalledReminder3: "queue_reminder_3",
+  QueueCustomerCalledReminder3: "queue_3_reminder",
   QueueCustomerSkipped: "queue_customer_skipped",
   QueueSeated: "queue_seated",
+  SeatedMenu: "seated_menu",
   /** @deprecated Prefer QueueSeated */
   QueueCustomerSeated: "queue_seated",
   /** Birthday bonus — 2 stamps on birthday (WhatsApp template birthday_bonus_stamps). */
@@ -148,12 +150,14 @@ export type CustomerNotificationDataMap = {
   reservation_updated: ReservationData;
   reservation_reminder: ReservationData;
   queue_first_notify: QueueJoinedData;
+  queue_first_notify_menu: QueueJoinedData;
   queue_call_now: QueuePartyData;
   queue_reminders_1: QueuePartyData;
   queue_reminder_2: QueuePartyData;
-  queue_reminder_3: QueuePartyData;
+  queue_3_reminder: QueuePartyData;
   queue_customer_skipped: QueuePartyData;
   queue_seated: QueuePartyData;
+  seated_menu: QueuePartyData;
   birthday_bonus_stamps: BirthdayBonusStampsData;
 };
 
@@ -184,12 +188,14 @@ export function isQueueNotificationTemplate(
 ): boolean {
   return (
     template === "queue_first_notify" ||
+    template === "queue_first_notify_menu" ||
     template === "queue_call_now" ||
     template === "queue_reminders_1" ||
     template === "queue_reminder_2" ||
-    template === "queue_reminder_3" ||
+    template === "queue_3_reminder" ||
     template === "queue_customer_skipped" ||
-    template === "queue_seated"
+    template === "queue_seated" ||
+    template === "seated_menu"
   );
 }
 
@@ -283,7 +289,7 @@ export function buildSmsBody(
     case "queue_call_now":
     case "queue_reminders_1":
     case "queue_reminder_2":
-    case "queue_reminder_3": {
+    case "queue_3_reminder": {
       const d = data as QueuePartyData;
       const size = formatBookingSize(d.bookingSize);
       return `Hi ${name}, ${d.businessName} is ready for your party (${size}). Details: ${hub}`;
@@ -328,7 +334,7 @@ export function smsTemplateIdFor(
     queue_call_now: "APITXT_SMS_TEMPLATE_QUEUE_CALL_NOW",
     queue_reminders_1: "APITXT_SMS_TEMPLATE_QUEUE_REMINDERS_1",
     queue_reminder_2: "APITXT_SMS_TEMPLATE_QUEUE_REMINDER_2",
-    queue_reminder_3: "APITXT_SMS_TEMPLATE_QUEUE_REMINDER_3",
+    queue_3_reminder: "APITXT_SMS_TEMPLATE_QUEUE_REMINDER_3",
     queue_customer_skipped: "APITXT_SMS_TEMPLATE_QUEUE_CUSTOMER_SKIPPED",
     queue_seated: "APITXT_SMS_TEMPLATE_QUEUE_SEATED",
     birthday_bonus_stamps: "APITXT_SMS_TEMPLATE_BIRTHDAY_BONUS_STAMPS",

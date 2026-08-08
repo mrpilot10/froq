@@ -14,6 +14,7 @@ export default function QueueSettingsPage() {
     activeBranchId,
     onSaveQueueBanner,
     onSaveQueueHours,
+    onSaveQueueSettings,
     entitlements,
     onPurchaseProduct,
   } = useMerchantWorkspace();
@@ -29,6 +30,7 @@ export default function QueueSettingsPage() {
       bannerLink={profile.queueBannerLink ?? ""}
       onSaveBanner={onSaveQueueBanner}
       onSaveHours={onSaveQueueHours}
+      onSaveProfile={onSaveQueueSettings}
       productEnabled={isProductEnabled(entitlements, "queue")}
       onGetStarted={isOwner ? () => onPurchaseProduct("queue") : undefined}
       onManagePlan={isOwner ? () => router.push("/merchant/queue/plan") : undefined}

@@ -35,6 +35,10 @@ import {
   type LiveQueueSession,
 } from "@/lib/queue/live-board";
 import { callAcceptDeadlineMs } from "@/lib/merchant/queue-settings";
+import {
+  queueJoinNotifyTemplate,
+  queueSeatedNotifyTemplate,
+} from "@/lib/queue/ai-menu";
 
 type QueueCallResolveStatus = "seated" | "skipped" | "left";
 
@@ -58,8 +62,10 @@ function toNotifiable(customer: QueueNotifiableCustomer) {
 
 type QueueNotifyTemplate =
   | "queue_first_notify"
+  | "queue_first_notify_menu"
   | "queue_call_now"
   | "queue_seated"
+  | "seated_menu"
   | "queue_customer_skipped";
 
 type QueueNotifyData =
@@ -250,7 +256,7 @@ export async function registerQueueJoin(input: {
 
     scheduleQueueNotifyAfter({
       customer,
-      template: "queue_first_notify",
+      template: await queueJoinNotifyTemplate(ctx.merchantId),
       data: {
         businessName,
         bookingSize: partySize,
@@ -742,7 +748,7 @@ export async function addLiveQueueEntry(input: {
 
     scheduleQueueNotifyAfter({
       customer,
-      template: "queue_first_notify",
+      template: await queueJoinNotifyTemplate(ctx.merchantId),
       data: {
         businessName,
         bookingSize: partySize,
@@ -863,7 +869,9 @@ export async function updateLiveQueueEntryStatus(input: {
       scheduleQueueNotifyAfter({
         customer,
         template:
-          input.status === "seated" ? "queue_seated" : "queue_customer_skipped",
+          input.status === "seated"
+            ? await queueSeatedNotifyTemplate(ctx.merchantId)
+            : "queue_customer_skipped",
         data: {
           businessName,
           bookingSize: updated.party_size,

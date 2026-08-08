@@ -239,9 +239,10 @@ export async function joinLiveQueue(input: {
     after(async () => {
       try {
         const { sendCustomerNotification } = await import("@/lib/notifications");
+        const { queueJoinNotifyTemplate } = await import("@/lib/queue/ai-menu");
         const notify = await sendCustomerNotification({
           customer: notifyCustomer,
-          template: "queue_first_notify",
+          template: await queueJoinNotifyTemplate(merchant.id),
           data: notifyData,
         });
         if (!notify.ok) {
@@ -376,11 +377,15 @@ export type QueuePageMerchant = {
   logoUrl: string | null;
   banner: string;
   bannerLink: string;
+  /** Queue ↔ AI Menu — waitlist shows View our AI menu. */
+  aiMenuEnabled: boolean;
 };
 
 export type QueuePageInitialTicket = {
   entryId: string;
   token: string;
+  /** Customer public token for AI Menu deep links. */
+  publicToken?: string;
   name: string;
   phone: string;
   party: number;
@@ -423,6 +428,8 @@ export async function resolveQueuePage(
         .maybeSingle();
       if (!merchantRow?.slug) return { ok: false };
 
+      const { isQueueAiMenuEnabled } = await import("@/lib/queue/ai-menu");
+      const aiMenuEnabled = await isQueueAiMenuEnabled(customer.merchant_id);
       const merchant: QueuePageMerchant = {
         slug: merchantRow.slug,
         businessName: merchantRow.business_name,
@@ -430,6 +437,7 @@ export async function resolveQueuePage(
         logoUrl: merchantRow.logo_url,
         banner: merchantRow.queue_banner ?? "",
         bannerLink: merchantRow.queue_banner_link ?? "",
+        aiMenuEnabled,
       };
 
       const { data: entry } = await admin
@@ -465,6 +473,7 @@ export async function resolveQueuePage(
         initialTicket: {
           entryId: remote.entryId,
           token: remote.tokenLabel,
+          publicToken: raw,
           name: remote.name,
           phone: customer.phone ?? "",
           party: remote.partySize,
@@ -480,11 +489,14 @@ export async function resolveQueuePage(
     const { data: merchantRow } = await admin
       .from("merchants")
       .select(
-        "slug, business_name, brand_color, logo_url, queue_banner, queue_banner_link",
+        "id, slug, business_name, brand_color, logo_url, queue_banner, queue_banner_link",
       )
       .eq("slug", raw)
       .maybeSingle();
     if (!merchantRow?.slug) return { ok: false };
+
+    const { isQueueAiMenuEnabled } = await import("@/lib/queue/ai-menu");
+    const aiMenuEnabled = await isQueueAiMenuEnabled(merchantRow.id);
 
     return {
       ok: true,
@@ -495,6 +507,7 @@ export async function resolveQueuePage(
         logoUrl: merchantRow.logo_url,
         banner: merchantRow.queue_banner ?? "",
         bannerLink: merchantRow.queue_banner_link ?? "",
+        aiMenuEnabled,
       },
     };
   } catch {

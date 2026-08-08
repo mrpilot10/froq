@@ -120,6 +120,7 @@ export interface MerchantRow {
   reservation_whatsapp_enabled: boolean;
   /** Merchant stopped taking new online bookings (their own still work). */
   reservation_paused: boolean;
+  queue_ai_menu_enabled?: boolean;
   slug: string;
   created_at: string;
 }

@@ -38,6 +38,7 @@ export default async function QueueJoinPage({ params }: { params: Promise<{ slug
       logoUrl={merchant.logoUrl}
       banner={merchant.banner}
       bannerLink={merchant.bannerLink}
+      aiMenuEnabled={merchant.aiMenuEnabled}
       initialTicket={initialTicket}
     />
   );

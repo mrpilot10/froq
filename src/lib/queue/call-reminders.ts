@@ -39,7 +39,7 @@ export const QUEUE_CALL_REMINDER_OFFSETS_MS = {
 export const QUEUE_CALL_REMINDER_TEMPLATE = {
   1: "queue_reminders_1",
   2: "queue_reminder_2",
-  3: "queue_reminder_3",
+  3: "queue_3_reminder",
 } as const;
 
 export type ReminderScheduleColumns = {

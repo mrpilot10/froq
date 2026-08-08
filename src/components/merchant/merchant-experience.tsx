@@ -619,7 +619,19 @@ export function MerchantExperience({
     [run],
   );
 
-  const handleSaveQueueHours = useCallback(
+    const handleSaveQueueSettings = useCallback(
+    async (patch: Partial<MerchantProfile>) => {
+      const previous = Object.fromEntries(
+        Object.keys(patch).map((key) => [key, profile[key as keyof MerchantProfile]]),
+      ) as Partial<MerchantProfile>;
+      setProfile((prev) => ({ ...prev, ...patch }));
+      const ok = await run(() => updateMerchantProfile(patch), "Queue settings saved");
+      if (!ok) setProfile((prev) => ({ ...prev, ...previous }));
+    },
+    [run, profile],
+  );
+
+const handleSaveQueueHours = useCallback(
     async (hours: {
       openTime: string;
       closeTime: string;
@@ -823,6 +835,7 @@ export function MerchantExperience({
       onConfirmOfferStamp: handleConfirmOfferStamp,
       onEditSection: setEditSection,
       onSaveQueueBanner: handleSaveQueueBanner,
+      onSaveQueueSettings: handleSaveQueueSettings,
       onSaveQueueHours: handleSaveQueueHours,
       onSaveReservationSettings: handleSaveReservationSettings,
       onSetReservationPaused: handleSetReservationPaused,
