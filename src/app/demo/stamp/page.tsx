@@ -17,6 +17,7 @@ export default function StampDemoPage() {
         totalStamps: DEMO_BUSINESS.totalStamps,
         status: "active",
         pending: false,
+        banned: false,
         rewardCode: "FROQ-DEMO1",
       }}
       history={DEMO_HISTORY}

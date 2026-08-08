@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Plus_Jakarta_Sans } from "next/font/google";
+import { Ga4SiteTag } from "@/components/analytics/ga4-site-tag";
 import { AppToaster } from "@/components/app-toaster";
 import { KeyboardAware } from "@/components/shared/keyboard-aware";
 import { PwaBoot } from "@/components/shared/pwa-boot";
@@ -52,6 +53,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${plusJakarta.variable} h-full`}>
       <body className="min-h-full antialiased">
+        <Ga4SiteTag />
         <PwaBoot />
         {children}
         <KeyboardAware />

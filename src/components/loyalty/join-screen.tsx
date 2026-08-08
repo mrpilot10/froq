@@ -12,7 +12,6 @@ import { checkShopMembership, joinMerchant } from "@/app/actions/customer";
 import { TurnstileField } from "@/components/turnstile/turnstile-field";
 import { useTurnstile } from "@/lib/turnstile/use-turnstile";
 import { customerHubPath } from "@/lib/customer/hub";
-import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { OtpInput } from "@/components/auth/otp-input";
 import { FroqFooter } from "@/components/shared/froq-footer";
 
@@ -75,8 +74,6 @@ export function JoinScreen({
   const captcha = useTurnstile({ action: "customer-phone-login" });
 
   const e164 = authedPhone || `+91${phone}`;
-
-  useBrandTheme(brandColor);
 
   useEffect(() => {
     let active = true;
@@ -222,9 +219,9 @@ export function JoinScreen({
         <header className="merchant-auth-head">
           <div className="merchant-auth-logo" style={{ background: brandColor }}>
             {logoUrl ? (
-              <Image src={logoUrl} alt={businessName} width={56} height={56} unoptimized />
+              <Image src={logoUrl} alt={businessName} width={88} height={88} unoptimized />
             ) : (
-              <Gift size={26} strokeWidth={2} color="#fff" />
+              <Gift size={34} strokeWidth={2} color="#fff" />
             )}
           </div>
           <h1 className="merchant-auth-brand">{businessName}</h1>

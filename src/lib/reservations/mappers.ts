@@ -18,7 +18,7 @@ function ms(value: string | null): number | null {
 
 /** Columns every reservation read needs — keep in sync with {@link toReservation}. */
 export const RESERVATION_COLUMNS =
-  "id, branch_id, reservation_number, public_token, customer_id, customer_name, customer_phone, customer_whatsapp, party_size, reservation_date, reservation_time, status, notes, merchant_notes, decline_reason, suggested_at, suggested_date, suggested_time, suggestion_accepted_at, confirmed_at, declined_at, cancelled_at, cancelled_by, completed_at, no_show_at, reminder_24h_sent_at, reminder_2h_sent_at, reminder_30m_sent_at, notify_failed_template, notify_failed_reason, notify_failed_at, created_at";
+  "id, branch_id, reservation_number, public_token, customer_id, customer_name, customer_phone, customer_whatsapp, party_size, reservation_date, reservation_time, status, notes, merchant_notes, decline_reason, suggested_at, suggested_date, suggested_time, suggestion_accepted_at, confirmed_at, declined_at, cancelled_at, cancelled_by, completed_at, no_show_at, reminder_24h_sent_at, reminder_2h_sent_at, reminder_30m_sent_at, notify_failed_template, notify_failed_reason, notify_failed_at, dining_table_id, table_number, created_at";
 
 type ReservationReadRow = Omit<ReservationRow, "merchant_id" | "updated_at">;
 
@@ -63,6 +63,8 @@ export function toReservation(row: ReservationReadRow): Reservation {
     date: row.reservation_date,
     time: formatTimeForInput(row.reservation_time),
     status: row.status,
+    tableNumber: row.table_number ?? null,
+    diningTableId: row.dining_table_id ?? null,
     notes: row.notes ?? "",
     merchantNotes: row.merchant_notes ?? "",
     declineReason: row.decline_reason ?? "",

@@ -97,6 +97,7 @@ async function loadNotifiableCustomer(
 ): Promise<{
   phone: string;
   name: string;
+  email: string | null;
   publicToken: string;
   whatsappAvailable: boolean;
   preferredNotificationChannel: "sms" | "whatsapp";
@@ -105,7 +106,7 @@ async function loadNotifiableCustomer(
 
   const { data: customer } = await admin
     .from("customers")
-    .select("name, phone, public_token, whatsapp_available, preferred_notification_channel")
+    .select("name, phone, email, public_token, whatsapp_available, preferred_notification_channel")
     .eq("id", job.customer_id)
     .maybeSingle();
 
@@ -116,6 +117,7 @@ async function loadNotifiableCustomer(
     // The job carries the name given when this guest joined; `customers.name`
     // can belong to an earlier visitor on the same number.
     name: job.customer_name?.trim() || customer.name,
+    email: (customer.email as string | null) ?? null,
     publicToken: customer.public_token,
     whatsappAvailable: customer.whatsapp_available === true,
     preferredNotificationChannel:
@@ -269,6 +271,13 @@ export async function processQueueCallReminders(
         });
 
         if (!result.ok) {
+          // Release the claim so the next cron tick can retry this reminder.
+          await admin
+            .from("queue_call_jobs")
+            .update({ [column]: null })
+            .eq("id", working.id)
+            .eq(column, claimIso);
+          working = { ...working, [column]: null };
           failed += 1;
           jobLog("error", "send_failed", {
             jobId: working.id,
@@ -286,6 +295,12 @@ export async function processQueueCallReminders(
           channel: result.channel,
         });
       } catch (err) {
+        await admin
+          .from("queue_call_jobs")
+          .update({ [column]: null })
+          .eq("id", working.id)
+          .eq(column, claimIso);
+        working = { ...working, [column]: null };
         failed += 1;
         jobLog("error", "send_exception", {
           jobId: working.id,

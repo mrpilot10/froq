@@ -2,33 +2,62 @@
 
 import { formatTimeLabel, reservationToday } from "@/lib/merchant/reservations";
 
-interface ReservationSlotPickerProps {
+interface ReservationDateFieldProps {
+  date: string;
+  onDateChange: (date: string) => void;
+  minDate?: string;
+  maxDate?: string;
+  label?: string;
+}
+
+interface ReservationTimeFieldProps {
   slots: string[];
   date: string;
   time: string;
-  onDateChange: (date: string) => void;
   onTimeChange: (time: string) => void;
-  minDate?: string;
-  maxDate?: string;
   /** Hide slots already gone for today (public form + same-day bookings). */
   hidePastToday?: boolean;
-  dateLabel?: string;
-  timeLabel?: string;
+  label?: string;
 }
 
-/** Native date input plus the merchant's bookable slots, shared by every form. */
-export function ReservationSlotPicker({
+type ReservationSlotPickerProps = ReservationDateFieldProps &
+  ReservationTimeFieldProps & {
+    dateLabel?: string;
+    timeLabel?: string;
+  };
+
+/** Native date input, split out so callers can lay it out beside other fields. */
+export function ReservationDateField({
+  date,
+  onDateChange,
+  minDate,
+  maxDate,
+  label = "Date",
+}: ReservationDateFieldProps) {
+  return (
+    <label className="auth-field">
+      <span className="auth-label">{label}</span>
+      <input
+        className="auth-input"
+        type="date"
+        value={date}
+        min={minDate}
+        max={maxDate}
+        onChange={(event) => onDateChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+/** The merchant's bookable slots for the chosen day. */
+export function ReservationTimeField({
   slots,
   date,
   time,
-  onDateChange,
   onTimeChange,
-  minDate,
-  maxDate,
   hidePastToday = false,
-  dateLabel = "Date",
-  timeLabel = "Time",
-}: ReservationSlotPickerProps) {
+  label = "Time",
+}: ReservationTimeFieldProps) {
   const today = reservationToday();
   const nowMinutes = (() => {
     const parts = new Date().toLocaleTimeString("en-GB", {
@@ -50,45 +79,65 @@ export function ReservationSlotPicker({
       : slots;
 
   return (
-    <>
-      <label className="auth-field">
-        <span className="auth-label">{dateLabel}</span>
-        <input
-          className="auth-input"
-          type="date"
-          value={date}
-          min={minDate}
-          max={maxDate}
-          onChange={(event) => onDateChange(event.target.value)}
-        />
-      </label>
+    <div className="auth-field">
+      <span className="auth-label">{label}</span>
+      {visibleSlots.length === 0 ? (
+        <p className="merchant-field-hint" style={{ margin: 0 }}>
+          No slots left for this date. Pick another day.
+        </p>
+      ) : (
+        <div className="resv-slots" role="radiogroup" aria-label={label}>
+          {visibleSlots.map((slot) => {
+            const active = slot === time;
+            return (
+              <button
+                key={slot}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                className={`resv-slot${active ? " active" : ""}`}
+                onClick={() => onTimeChange(slot)}
+              >
+                {formatTimeLabel(slot)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
-      <div className="auth-field">
-        <span className="auth-label">{timeLabel}</span>
-        {visibleSlots.length === 0 ? (
-          <p className="merchant-field-hint" style={{ margin: 0 }}>
-            No slots left for this date. Pick another day.
-          </p>
-        ) : (
-          <div className="resv-slots" role="radiogroup" aria-label={timeLabel}>
-            {visibleSlots.map((slot) => {
-              const active = slot === time;
-              return (
-                <button
-                  key={slot}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  className={`resv-slot${active ? " active" : ""}`}
-                  onClick={() => onTimeChange(slot)}
-                >
-                  {formatTimeLabel(slot)}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+/** Date above slots — the stacked default used by the merchant-side forms. */
+export function ReservationSlotPicker({
+  slots,
+  date,
+  time,
+  onDateChange,
+  onTimeChange,
+  minDate,
+  maxDate,
+  hidePastToday = false,
+  dateLabel = "Date",
+  timeLabel = "Time",
+}: ReservationSlotPickerProps) {
+  return (
+    <>
+      <ReservationDateField
+        date={date}
+        onDateChange={onDateChange}
+        minDate={minDate}
+        maxDate={maxDate}
+        label={dateLabel}
+      />
+      <ReservationTimeField
+        slots={slots}
+        date={date}
+        time={time}
+        onTimeChange={onTimeChange}
+        hidePastToday={hidePastToday}
+        label={timeLabel}
+      />
     </>
   );
 }

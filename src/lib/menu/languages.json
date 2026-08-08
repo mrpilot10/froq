@@ -1,0 +1,18 @@
+{
+  "comment": "Languages the guest menu can switch into, most-spoken first. `code` is what gets stored in the translations column and sent to the assistant; `native` is what the picker shows; `name` is what the translation prompt names. Editing this list is enough to add a language: the picker, the assistant and the translation worker all read it.",
+  "languages": [
+    { "code": "EN", "native": "English", "name": "English" },
+    { "code": "HI", "native": "हिन्दी", "name": "Hindi" },
+    { "code": "BN", "native": "বাংলা", "name": "Bengali" },
+    { "code": "MR", "native": "मराठी", "name": "Marathi" },
+    { "code": "TE", "native": "తెలుగు", "name": "Telugu" },
+    { "code": "TA", "native": "தமிழ்", "name": "Tamil" },
+    { "code": "GU", "native": "ગુજરાતી", "name": "Gujarati" },
+    { "code": "UR", "native": "اردو", "name": "Urdu", "rtl": true },
+    { "code": "KN", "native": "ಕನ್ನಡ", "name": "Kannada" },
+    { "code": "OR", "native": "ଓଡ଼ିଆ", "name": "Odia" },
+    { "code": "ML", "native": "മലയാളം", "name": "Malayalam" },
+    { "code": "PA", "native": "ਪੰਜਾਬੀ", "name": "Punjabi" },
+    { "code": "AS", "native": "অসমীয়া", "name": "Assamese" }
+  ]
+}

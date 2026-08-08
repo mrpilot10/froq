@@ -1,6 +1,7 @@
 import "server-only";
 
 import { headers } from "next/headers";
+import { recordTurnstileVerify } from "@/lib/turnstile/log";
 import { TURNSTILE_MISSING_MESSAGE, TURNSTILE_REJECTED_MESSAGE } from "./config";
 
 const SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -14,7 +15,12 @@ interface SiteVerifyResponse {
 export type TurnstileVerification = { ok: true } | { ok: false; error: string };
 
 function secretKey(): string {
-  return (process.env.TURNSTILE_SECRET_KEY ?? "").trim();
+  // Prefer Spin's TURNSTILE_SECRET; keep TURNSTILE_SECRET_KEY for existing deploys.
+  return (
+    process.env.TURNSTILE_SECRET?.trim() ||
+    process.env.TURNSTILE_SECRET_KEY?.trim() ||
+    ""
+  );
 }
 
 /** Best-effort client IP for Cloudflare's optional `remoteip` check. */
@@ -43,8 +49,10 @@ async function clientIp(): Promise<string | undefined> {
  */
 export async function verifyTurnstileToken(
   token: string | null | undefined,
+  options?: { source?: string },
 ): Promise<TurnstileVerification> {
   const secret = secretKey();
+  const source = options?.source;
 
   // Unconfigured environment (local dev, previews): stay usable rather than
   // blocking every public form behind a check that can't succeed.
@@ -52,11 +60,19 @@ export async function verifyTurnstileToken(
     if (process.env.NODE_ENV === "production") {
       console.warn("turnstile_secret_missing: skipping captcha verification");
     }
+    recordTurnstileVerify({ status: "skipped", source });
     return { ok: true };
   }
 
   const candidate = token?.trim();
-  if (!candidate) return { ok: false, error: TURNSTILE_MISSING_MESSAGE };
+  if (!candidate) {
+    recordTurnstileVerify({
+      status: "fail",
+      errorCodes: ["missing-input-response"],
+      source,
+    });
+    return { ok: false, error: TURNSTILE_MISSING_MESSAGE };
+  }
 
   const body = new URLSearchParams({ secret, response: candidate });
   const ip = await clientIp();
@@ -73,14 +89,23 @@ export async function verifyTurnstileToken(
 
     if (!res.ok) {
       console.error("turnstile_siteverify_http_error", { status: res.status });
+      recordTurnstileVerify({
+        status: "error",
+        errorCodes: [`http_${res.status}`],
+        source,
+      });
       return { ok: false, error: TURNSTILE_REJECTED_MESSAGE };
     }
 
     const data = (await res.json()) as SiteVerifyResponse;
-    if (data.success) return { ok: true };
+    if (data.success) {
+      recordTurnstileVerify({ status: "pass", source });
+      return { ok: true };
+    }
 
     const codes = data["error-codes"] ?? [];
     console.warn("turnstile_rejected", { codes });
+    recordTurnstileVerify({ status: "fail", errorCodes: codes, source });
 
     // An expired or already-spent token is the common, recoverable case: the
     // widget resets itself, so ask for a retry rather than showing a hard error.
@@ -90,6 +115,11 @@ export async function verifyTurnstileToken(
   } catch (error) {
     console.error("turnstile_siteverify_failed", {
       reason: error instanceof Error ? error.message : "unknown",
+    });
+    recordTurnstileVerify({
+      status: "error",
+      errorCodes: ["siteverify_unreachable"],
+      source,
     });
     // Cloudflare unreachable: fail closed. These endpoints send SMS/WhatsApp or
     // write public rows, so a bot storm during an outage is the worse outcome.

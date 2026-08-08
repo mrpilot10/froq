@@ -11,6 +11,7 @@ import {
   ChevronRight,
   LifeBuoy,
   LogOut,
+  QrCode,
   Settings,
   ContactRound,
   type LucideIcon,
@@ -38,6 +39,8 @@ interface ProductRailProps {
   onProductChange: (product: MerchantProduct) => void;
   onComingSoonProduct?: (product: ComingSoonProduct) => void;
   onTabChange: (tab: MerchantTab) => void;
+  /** Opens the one QR that points at the merchant's public landing page. */
+  onShowHubQr?: () => void;
   pendingCount?: number;
   onLogout?: () => void;
 }
@@ -57,6 +60,7 @@ export function ProductRail({
   onProductChange,
   onComingSoonProduct,
   onTabChange,
+  onShowHubQr,
   pendingCount = 0,
   onLogout,
 }: ProductRailProps) {
@@ -200,6 +204,20 @@ export function ProductRail({
         ) : null}
 
         <div className="merchant-rail-foot">
+          {onShowHubQr && (
+            <button
+              type="button"
+              className="merchant-rail-item merchant-rail-item--ghost"
+              aria-label="Your QR"
+              data-tip={tip("Your QR")}
+              onClick={onShowHubQr}
+            >
+              <span className="merchant-rail-icon">
+                <QrCode size={20} strokeWidth={2} />
+              </span>
+              <span className="merchant-rail-label">Your QR</span>
+            </button>
+          )}
           <Link
             href={TAB_HREF.profile}
             prefetch

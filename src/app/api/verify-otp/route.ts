@@ -11,6 +11,7 @@ import { establishPhoneSession } from "@/lib/auth/otp/session";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { maskPhone, toCanonicalPhone } from "@/lib/auth/otp/phone";
 import { otpLog } from "@/lib/auth/otp/logger";
+import { verifyTurnstileToken } from "@/lib/turnstile/verify";
 import { TURNSTILE_REJECTED_MESSAGE, isCaptchaAuthError } from "@/lib/turnstile/config";
 import type { VerifyOtpResult } from "@/lib/auth/otp/types";
 
@@ -65,10 +66,16 @@ export async function POST(request: Request) {
 
     const deliveryChannel = record.channel === "whatsapp" ? "whatsapp" : "sms";
 
-    // The session is minted with a phone+password grant, which GoTrue guards
-    // with its CAPTCHA check — hence a second token here, distinct from the one
-    // spent on /api/send-otp. It also rate-limits code-guessing at the last step.
-    const session = await establishPhoneSession(phone, parsed.captchaToken ?? undefined);
+    // Fresh token vs send-otp — siteverify here, then mint the session without
+    // handing the spent token to GoTrue.
+    const captcha = await verifyTurnstileToken(parsed.captchaToken, {
+      source: "customer-verify-otp",
+    });
+    if (!captcha.ok) {
+      return json({ ok: false, message: captcha.error }, 403);
+    }
+
+    const session = await establishPhoneSession(phone);
     if (!session.ok) {
       const err = session.error ?? "";
       otpLog.error("verify_session_failed", { phone: maskPhone(phone), reason: err });

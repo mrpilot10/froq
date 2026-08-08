@@ -2,7 +2,16 @@
 // merchant row, so we downscale + recompress before upload to keep the payload
 // well under the server-action body size limit (and keep public reads fast).
 
-const MAX_LOGO_DIMENSION = 256;
+/** Longest edge after processing — keep the upload hint in sync with this. */
+export const MAX_LOGO_DIMENSION = 256;
+
+/** Recommended source size for crisp guest-facing logos (square crop). */
+export const LOGO_RECOMMENDED_SIZE = 512;
+
+/** Soft guidance shown next to the logo file picker. */
+export const LOGO_UPLOAD_HINT =
+  `Square PNG, JPG, or WebP · ${LOGO_RECOMMENDED_SIZE}×${LOGO_RECOMMENDED_SIZE} px · under 2 MB`;
+
 const WEBP_QUALITY = 0.9;
 
 function readAsDataUrl(file: File): Promise<string> {

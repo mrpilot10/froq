@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import type { MerchantProduct, MerchantProfile } from "@/lib/merchant/types";
 import { useMerchantQr } from "./use-merchant-qr";
 import { MerchantPosterCard } from "./poster-card";
+import { posterAvailableFor } from "@/lib/merchant/poster-availability";
 
 type QrView = "qr" | "poster";
 
@@ -38,6 +39,13 @@ const QR_COPY: Record<
     openLabel: "Open Booking Page",
     tip: "Display at your entrance or share the link with guests.",
     alt: "Reservation request QR code",
+  },
+  menu: {
+    title: "Menu QR",
+    caption: "Guests scan this QR to open your AI menu.",
+    openLabel: "Open Menu Page",
+    tip: "Put one on every table so guests can ask and order from their seat.",
+    alt: "AI menu QR code",
   },
 };
 
@@ -72,8 +80,7 @@ export function MerchantQrPanel({
     branchSlug,
   );
   const copy = QR_COPY[product];
-  // The printable poster template only exists for loyalty.
-  const posterAvailable = product === "loyalty";
+  const posterAvailable = posterAvailableFor(product);
 
   if (needsBranch && !branchSelected) {
     return (
@@ -194,7 +201,7 @@ export function MerchantQrPanel({
             </div>
           </>
         ) : (
-          <MerchantPosterCard />
+          <MerchantPosterCard product={product} branchSlug={branchSlug} />
         )}
       </div>
     </div>

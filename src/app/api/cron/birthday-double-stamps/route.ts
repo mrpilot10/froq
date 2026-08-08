@@ -13,7 +13,7 @@ function isAuthorizedCron(request: Request): boolean {
 
 /**
  * GET /api/cron/birthday-double-stamps
- * Sends birthday_bonus_stamps WhatsApp (SMS fallback) at 9:00 AM Asia/Kolkata.
+ * Sends birthday_bonus_stamps WhatsApp (+ email when available) at 9:00 AM Asia/Kolkata.
  * Cron runs hourly; the job no-ops outside that local hour.
  */
 export async function GET(request: Request) {

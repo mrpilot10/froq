@@ -10,7 +10,9 @@ const nextConfig: NextConfig = {
     // Logos are downscaled client-side before upload, but keep a comfortable
     // ceiling so a server action carrying a logo data URL never hits the
     // default 1 MB limit (which surfaces as a generic server render error).
-    serverActions: { bodySizeLimit: "4mb" },
+    // The headroom above that is for menu uploads: several photographed pages
+    // or a multi-page PDF travel base64-encoded to the AI extraction action.
+    serverActions: { bodySizeLimit: "16mb" },
   },
 };
 

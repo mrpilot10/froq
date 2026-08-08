@@ -20,15 +20,28 @@ import { recordReservationEvent } from "@/lib/reservations/events";
 import { isReservationPublicToken } from "@/lib/reservations/link";
 import { RESERVATION_COLUMNS, toReservation } from "@/lib/reservations/mappers";
 import {
+  resolveGuestSocialLinks,
+  type GuestSocialLinks,
+} from "@/lib/merchant/guest-social-links";
+import {
   resolveReservationTarget,
   sendReservationNotification,
 } from "@/lib/reservations/notify";
+import { resolveJoinBranchId } from "@/lib/queue/live-board";
+import {
+  ensureHeldQueueEntryForReservation,
+  releaseQueueHoldForReservation,
+} from "@/lib/queue/reservation-holds";
 
 export interface ReservationPageMerchant {
   slug: string;
   businessName: string;
   brandColor: string;
   logoUrl: string | null;
+  phone?: string;
+  address?: string;
+  googleMapsUrl?: string;
+  socialLinks: GuestSocialLinks;
   description: string;
   maxPartySize: number;
   allowNotes: boolean;
@@ -41,6 +54,8 @@ export interface ReservationPageMerchant {
   maxDate: string;
   /** Restaurant has stopped taking online requests. */
   paused: boolean;
+  /** Branch from `?b=` — stamped onto new requests so the merchant board sees them. */
+  branchSlug?: string | null;
 }
 
 /** A guest's own booking, as shown on their reservation page. */
@@ -54,6 +69,8 @@ export interface PublicReservation {
   name: string;
   notes: string;
   declineReason: string;
+  /** Assigned table when the restaurant has one. */
+  tableNumber: number | null;
   /** Slot the restaurant proposed — the guest accepts or declines it. */
   suggestedDate: string | null;
   suggestedTime: string | null;
@@ -67,34 +84,86 @@ export interface PublicReservation {
   noShowAtMs: number | null;
   reminderSentAtMs: number | null;
   cancelledBy: "merchant" | "customer" | null;
-  merchant: {
-    slug: string;
-    businessName: string;
-    brandColor: string;
-    logoUrl: string | null;
-  };
+  merchant: ReservationMerchantBrand;
+}
+
+/** Branding + contact chrome shared by the request and status pages. */
+export interface ReservationMerchantBrand {
+  slug: string;
+  businessName: string;
+  brandColor: string;
+  logoUrl: string | null;
+  phone?: string;
+  address?: string;
+  googleMapsUrl?: string;
+  socialLinks: GuestSocialLinks;
 }
 
 const REQUEST_WINDOW_DAYS = 60;
 
 const PUBLIC_RESERVATION_COLUMNS = `${RESERVATION_COLUMNS}, merchant_id`;
 
-/** Merchant branding for the reservation page header. */
+const RESERVATION_CONTACT_SELECT =
+  "phone, address, google_maps_url, website_url, instagram_url, facebook_url, google_business_url, google_place_id, queue_open_time, queue_close_time";
+
+function preferBranch(
+  branchValue: string | null | undefined,
+  merchantValue: string | null | undefined,
+): string | undefined {
+  return branchValue?.trim() || merchantValue?.trim() || undefined;
+}
+
+/**
+ * Contact details for the branch that holds the booking, falling back to the
+ * merchant default — the same precedence the queue guest page uses.
+ */
+async function loadBranchContact(
+  admin: ReturnType<typeof createAdminClient>,
+  merchantId: string,
+  branchId?: string | null,
+) {
+  if (branchId) {
+    const { data } = await admin
+      .from("branches")
+      .select(RESERVATION_CONTACT_SELECT)
+      .eq("id", branchId)
+      .eq("merchant_id", merchantId)
+      .maybeSingle();
+    if (data) return data;
+  }
+  const { data } = await admin
+    .from("branches")
+    .select(RESERVATION_CONTACT_SELECT)
+    .eq("merchant_id", merchantId)
+    .eq("is_default", true)
+    .maybeSingle();
+  return data ?? null;
+}
+
+/** Merchant branding + contact chrome for the reservation page header. */
 async function loadMerchantBrand(
   admin: ReturnType<typeof createAdminClient>,
   merchantId: string,
-): Promise<PublicReservation["merchant"] | null> {
+  branchId?: string | null,
+): Promise<ReservationMerchantBrand | null> {
   const { data } = await admin
     .from("merchants")
-    .select("slug, business_name, brand_color, logo_url")
+    .select(`slug, business_name, brand_color, logo_url, ${RESERVATION_CONTACT_SELECT}`)
     .eq("id", merchantId)
     .maybeSingle();
   if (!data?.slug) return null;
+
+  const branch = await loadBranchContact(admin, merchantId, branchId);
+
   return {
     slug: data.slug,
     businessName: data.business_name,
     brandColor: data.brand_color,
     logoUrl: data.logo_url,
+    phone: preferBranch(branch?.phone, data.phone),
+    address: preferBranch(branch?.address, data.address),
+    googleMapsUrl: preferBranch(branch?.google_maps_url, data.google_maps_url),
+    socialLinks: resolveGuestSocialLinks(branch, data),
   };
 }
 
@@ -112,6 +181,7 @@ function toPublicReservation(
     name: reservation.customerName,
     notes: reservation.notes,
     declineReason: reservation.declineReason,
+    tableNumber: reservation.tableNumber,
     suggestedDate: hasOpenSuggestion(reservation) ? reservation.suggestedDate : null,
     suggestedTime: hasOpenSuggestion(reservation) ? reservation.suggestedTime : null,
     createdAtMs: reservation.createdAtMs,
@@ -150,7 +220,7 @@ async function readReservationByToken(
     .maybeSingle();
   if (!row) return { ok: false, error: "Reservation not found." };
 
-  const merchant = await loadMerchantBrand(admin, row.merchant_id);
+  const merchant = await loadMerchantBrand(admin, row.merchant_id, row.branch_id);
   if (!merchant) return { ok: false, error: "Reservation not found." };
 
   return {
@@ -225,12 +295,149 @@ export async function acceptSuggestedTime(
       actor: { kind: "guest" },
     });
 
+    await ensureHeldQueueEntryForReservation({
+      ...row,
+      merchant_id: found.merchantId,
+    });
+
     return {
       ok: true,
       reservation: toPublicReservation(toReservation(row), found.merchant),
     };
   } catch {
     return { ok: false, error: "Couldn't confirm the new time." };
+  }
+}
+
+/**
+ * Guest changes their own booking in place — same reservation number and
+ * token, new slot. Does not cancel. Confirmed stays confirmed; pending stays
+ * pending. Any merchant proposal in flight is withdrawn.
+ */
+export async function updatePublicReservation(input: {
+  token: string;
+  date: string;
+  time: string;
+  partySize: number;
+}): Promise<{ ok: boolean; error?: string; reservation?: PublicReservation }> {
+  try {
+    const found = await readReservationByToken(input.token);
+    if (!found.ok) return { ok: false, error: found.error };
+    if (!isOpenReservation(found.reservation.status)) {
+      return {
+        ok: true,
+        reservation: toPublicReservation(found.reservation, found.merchant),
+      };
+    }
+
+    const page = await resolveReservationPage(found.merchant.slug);
+    if (!page.ok) return { ok: false, error: "Couldn't load available times." };
+    const merchant = page.merchant;
+    if (merchant.paused) {
+      return {
+        ok: false,
+        error: `${merchant.businessName} isn't taking online bookings right now.`,
+      };
+    }
+
+    const time = normalizeTimeInput(input.time);
+    if (!time || !merchant.slots.includes(time)) {
+      return { ok: false, error: "Pick one of the available times." };
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+      return { ok: false, error: "Pick a date." };
+    }
+    if (input.date < merchant.minDate) {
+      return {
+        ok: false,
+        error: merchant.allowSameDay
+          ? "Pick a date that hasn't passed."
+          : "Same-day bookings aren't available. Please pick a later date.",
+      };
+    }
+    if (input.date > merchant.maxDate) {
+      return { ok: false, error: "Please pick a date within the next 60 days." };
+    }
+
+    const partySize = Math.round(input.partySize);
+    if (!Number.isFinite(partySize) || partySize < 1) {
+      return { ok: false, error: "Select how many guests are coming." };
+    }
+    if (partySize > merchant.maxPartySize) {
+      return {
+        ok: false,
+        error: `Up to ${merchant.maxPartySize} guests online — please call the restaurant for more.`,
+      };
+    }
+
+    const sameSlot =
+      found.reservation.date === input.date &&
+      found.reservation.time === time &&
+      found.reservation.partySize === partySize &&
+      !hasOpenSuggestion(found.reservation);
+    if (sameSlot) {
+      return {
+        ok: true,
+        reservation: toPublicReservation(found.reservation, found.merchant),
+      };
+    }
+
+    const admin = createAdminClient();
+    const nowIso = new Date().toISOString();
+    const { data: row, error } = await admin
+      .from("reservations")
+      .update({
+        reservation_date: input.date,
+        reservation_time: time,
+        party_size: partySize,
+        // Guest took a new slot — any merchant proposal is moot.
+        suggested_at: null,
+        suggested_date: null,
+        suggested_time: null,
+        suggestion_accepted_at: null,
+        // Reminders track the previous slot; reset so the new one gets them.
+        reminder_24h_sent_at: null,
+        reminder_2h_sent_at: null,
+        reminder_30m_sent_at: null,
+        updated_at: nowIso,
+      })
+      .eq("id", found.reservation.id)
+      .in("status", ["pending", "confirmed"])
+      .select(PUBLIC_RESERVATION_COLUMNS)
+      .maybeSingle();
+
+    if (error) return { ok: false, error: "Couldn't update your reservation." };
+    if (!row) {
+      return {
+        ok: true,
+        reservation: toPublicReservation(found.reservation, found.merchant),
+      };
+    }
+
+    const updated = toReservation(row);
+    await recordReservationEvent({
+      reservationId: updated.id,
+      merchantId: found.merchantId,
+      event: "rescheduled",
+      actor: { kind: "guest" },
+      detail: `${input.date} at ${time}, ${partySize} guest${partySize === 1 ? "" : "s"}`,
+    });
+
+    // Drop the old hold, then recreate if this booking is still confirmed today.
+    await releaseQueueHoldForReservation(updated.id, "rescheduled");
+    if (updated.status === "confirmed") {
+      await ensureHeldQueueEntryForReservation({
+        ...row,
+        merchant_id: found.merchantId,
+      });
+    }
+
+    return {
+      ok: true,
+      reservation: toPublicReservation(updated, found.merchant),
+    };
+  } catch {
+    return { ok: false, error: "Couldn't update your reservation." };
   }
 }
 
@@ -282,6 +489,8 @@ export async function cancelPublicReservation(
       actor: { kind: "guest" },
     });
 
+    await releaseQueueHoldForReservation(found.reservation.id, "cancelled");
+
     return {
       ok: true,
       reservation: toPublicReservation(toReservation(row), found.merchant),
@@ -293,6 +502,7 @@ export async function cancelPublicReservation(
 
 export async function resolveReservationPage(
   slug: string,
+  branchSlug?: string | null,
 ): Promise<{ ok: true; merchant: ReservationPageMerchant } | { ok: false }> {
   try {
     const raw = slug.trim();
@@ -302,16 +512,26 @@ export async function resolveReservationPage(
     const { data: row } = await admin
       .from("merchants")
       .select(
-        "slug, business_name, brand_color, logo_url, reservation_description, reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes, reservation_paused",
+        `id, slug, business_name, brand_color, logo_url, reservation_description, reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes, reservation_paused, ${RESERVATION_CONTACT_SELECT}`,
       )
       .eq("slug", raw)
       .maybeSingle();
     if (!row?.slug) return { ok: false };
 
+    const branchId = await resolveJoinBranchId(row.id, branchSlug);
+    const branch = await loadBranchContact(admin, row.id, branchId);
+
     const settings = reservationSettingsFromProfile({
       reservationDescription: row.reservation_description ?? undefined,
       reservationMaxPartySize: row.reservation_max_party_size,
       reservationIntervalMinutes: row.reservation_interval_minutes,
+      // Prefer branch store timings; merchant reservation_* is a legacy mirror.
+      queueOpenTime: branch?.queue_open_time
+        ? formatTimeForInput(branch.queue_open_time)
+        : undefined,
+      queueCloseTime: branch?.queue_close_time
+        ? formatTimeForInput(branch.queue_close_time)
+        : undefined,
       reservationOpenTime: formatTimeForInput(row.reservation_open_time),
       reservationCloseTime: formatTimeForInput(row.reservation_close_time),
       reservationAllowSameDay: row.reservation_allow_same_day,
@@ -326,6 +546,10 @@ export async function resolveReservationPage(
         businessName: row.business_name,
         brandColor: row.brand_color,
         logoUrl: row.logo_url,
+        phone: preferBranch(branch?.phone, row.phone),
+        address: preferBranch(branch?.address, row.address),
+        googleMapsUrl: preferBranch(branch?.google_maps_url, row.google_maps_url),
+        socialLinks: resolveGuestSocialLinks(branch, row),
         description: settings.description,
         maxPartySize: settings.maxPartySize,
         allowNotes: settings.allowNotes,
@@ -334,6 +558,7 @@ export async function resolveReservationPage(
         minDate: settings.allowSameDay ? today : addDays(today, 1),
         maxDate: addDays(today, REQUEST_WINDOW_DAYS),
         paused: row.reservation_paused === true,
+        branchSlug: branchSlug?.trim() || null,
       },
     };
   } catch {
@@ -357,6 +582,8 @@ export async function requestReservation(input: {
   time: string;
   notes?: string;
   captchaToken?: string;
+  /** Branch from the QR (`?b=`) — defaults to the merchant's main branch. */
+  branchSlug?: string | null;
 }): Promise<{ ok: boolean; error?: string; token?: string }> {
   try {
     const slug = input.slug.trim();
@@ -367,7 +594,7 @@ export async function requestReservation(input: {
     const captcha = await verifyTurnstileToken(input.captchaToken);
     if (!captcha.ok) return { ok: false, error: captcha.error };
 
-    const resolved = await resolveReservationPage(slug);
+    const resolved = await resolveReservationPage(slug, input.branchSlug);
     if (!resolved.ok) return { ok: false, error: "Restaurant not found." };
     const merchant = resolved.merchant;
 
@@ -405,7 +632,7 @@ export async function requestReservation(input: {
     if (partySize > merchant.maxPartySize) {
       return {
         ok: false,
-        error: `For parties over ${merchant.maxPartySize}, please call the restaurant.`,
+        error: `Up to ${merchant.maxPartySize} guests online — please call the restaurant for more.`,
       };
     }
 
@@ -426,8 +653,11 @@ export async function requestReservation(input: {
       };
     }
 
+    const branchId = await resolveJoinBranchId(merchantRow.id, input.branchSlug);
+
     const customer = await ensureGuestCustomer({
       merchantId: merchantRow.id,
+      branchId,
       name,
       phone: input.phone,
     });
@@ -449,6 +679,7 @@ export async function requestReservation(input: {
       .from("reservations")
       .insert({
         merchant_id: merchantRow.id,
+        branch_id: branchId,
         customer_id: customer.id,
         customer_name: name,
         customer_phone: customer.phone,

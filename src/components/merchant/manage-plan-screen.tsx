@@ -4,7 +4,6 @@ import { useCallback, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { load } from "@cashfreepayments/cashfree-js";
 import { toast } from "sonner";
 import { PricingTable } from "@/components/landing/pricing-table";
 import { CurrentPlanDrawer } from "@/components/merchant/current-plan-drawer";
@@ -23,9 +22,10 @@ import {
 } from "@/lib/merchant/billing";
 import type { PricingPlan } from "@/lib/merchant/pricing";
 import type { MerchantProduct } from "@/lib/merchant/types";
-
-const CASHFREE_MODE =
-  process.env.NEXT_PUBLIC_CASHFREE_ENV === "production" ? "production" : "sandbox";
+import {
+  payWithRazorpay,
+  RazorpayCheckoutCancelledError,
+} from "@/lib/payments/razorpay-checkout";
 
 interface ManagePlanScreenProps {
   product: MerchantProduct;
@@ -59,43 +59,17 @@ export function ManagePlanScreen({ product, backHref }: ManagePlanScreenProps) {
   const initialBilling = currentPlanId?.endsWith("-yearly") ? "yearly" : "monthly";
   const onPaidPlan = isPaidPlanId(currentPlanId);
 
-  const payFirstSubscription = useCallback(
-    async (plan: PricingPlan) => {
+  const payAndApplyPlan = useCallback(
+    async (plan: PricingPlan, opts?: { successMessage?: string }) => {
       setSelectingPlanId(plan.id);
       setError("");
       try {
-        const orderRes = await fetch("/api/checkout/cashfree/order", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ planId: plan.id }),
-        });
-        const orderData = await orderRes.json().catch(() => null);
-        if (!orderRes.ok || !orderData?.paymentSessionId) {
-          throw new Error(orderData?.error ?? "Could not start the payment.");
-        }
+        const payment = await payWithRazorpay({ planId: plan.id });
 
-        const cashfree = await load({ mode: CASHFREE_MODE });
-        const result = await cashfree.checkout({
-          paymentSessionId: orderData.paymentSessionId,
-          redirectTarget: "_modal",
+        const updated = await updateProductPlan(product, plan.id, {
+          razorpaySubscriptionId:
+            payment.mode === "subscription" ? payment.subscriptionId : null,
         });
-        if (result?.error) {
-          throw new Error("Payment was cancelled or failed. Please try again.");
-        }
-
-        const verifyRes = await fetch("/api/checkout/cashfree/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ orderId: orderData.orderId }),
-        });
-        const verifyData = await verifyRes.json().catch(() => null);
-        if (!verifyRes.ok || !verifyData?.paid) {
-          throw new Error(
-            "We couldn't confirm your payment. If you were charged, contact support.",
-          );
-        }
-
-        const updated = await updateProductPlan(product, plan.id);
         if (!updated.ok) {
           throw new Error(
             updated.error ?? "Payment succeeded but plan update failed. Contact support.",
@@ -103,8 +77,15 @@ export function ManagePlanScreen({ product, backHref }: ManagePlanScreenProps) {
         }
 
         await onRefresh();
-        toast.success(`Subscribed to ${plan.name}. 7-day money-back applies to first-time plans.`);
+        toast.success(
+          opts?.successMessage ??
+            `Upgraded to ${plan.name}. Your new limits are active now.`,
+        );
       } catch (err) {
+        if (err instanceof RazorpayCheckoutCancelledError) {
+          setError("Payment was cancelled. You can try again when ready.");
+          return;
+        }
         const message = err instanceof Error ? err.message : "Could not complete the payment.";
         setError(message);
         throw err;
@@ -113,6 +94,15 @@ export function ManagePlanScreen({ product, backHref }: ManagePlanScreenProps) {
       }
     },
     [product, onRefresh],
+  );
+
+  const payFirstSubscription = useCallback(
+    async (plan: PricingPlan) => {
+      await payAndApplyPlan(plan, {
+        successMessage: `Subscribed to ${plan.name}. 7-day money-back applies to first-time plans.`,
+      });
+    },
+    [payAndApplyPlan],
   );
 
   const scheduleChange = useCallback(
@@ -124,7 +114,7 @@ export function ManagePlanScreen({ product, backHref }: ManagePlanScreenProps) {
         const res = await schedulePlanChange(product, plan.id);
         if (!res.ok) throw new Error(res.error ?? "Could not schedule the plan change.");
         await onRefresh();
-        const verb = kind === "upgrade" ? "Upgrade" : kind === "downgrade" ? "Downgrade" : "Change";
+        const verb = kind === "downgrade" ? "Downgrade" : "Change";
         toast.success(
           `${verb} to ${plan.name} scheduled for ${formatBillingDate(res.effectiveOn)}.`,
         );
@@ -153,19 +143,41 @@ export function ManagePlanScreen({ product, backHref }: ManagePlanScreenProps) {
           await payFirstSubscription(plan);
           return;
         }
+
+        const kind = classifyPlanChange(currentPlanId, plan.id);
+        if (kind === "upgrade") {
+          await payAndApplyPlan(plan);
+          return;
+        }
+        // Downgrades (and lower billing cycles) apply at renewal.
         await scheduleChange(plan);
       } catch {
         // Error surfaced via state.
       }
     },
-    [role, currentPlanId, onPaidPlan, payFirstSubscription, scheduleChange],
+    [
+      role,
+      currentPlanId,
+      onPaidPlan,
+      payFirstSubscription,
+      payAndApplyPlan,
+      scheduleChange,
+    ],
   );
 
   const handleChangeBilling = useCallback(
     async (plan: PricingPlan) => {
+      const kind = classifyPlanChange(currentPlanId, plan.id);
+      if (kind === "upgrade") {
+        await payAndApplyPlan(plan, {
+          successMessage: `Switched to ${plan.name}. Billed ${plan.billing === "yearly" ? "yearly" : "monthly"} from today.`,
+        });
+        setViewPlanOpen(false);
+        return;
+      }
       await scheduleChange(plan, { closeDrawer: true });
     },
-    [scheduleChange],
+    [currentPlanId, payAndApplyPlan, scheduleChange],
   );
 
   const handleCancelPlan = useCallback(async () => {
@@ -180,7 +192,7 @@ export function ManagePlanScreen({ product, backHref }: ManagePlanScreenProps) {
       if (!res.ok) throw new Error(res.error ?? "Could not cancel the plan.");
       await onRefresh();
       toast.success(
-        `Canceled. No future renewals. Access until ${formatBillingDate(res.effectiveOn)}, then Free.`,
+        `Canceled. No future renewals. Access until ${formatBillingDate(res.effectiveOn)}, then locks.`,
       );
       setViewPlanOpen(false);
     } catch (err) {
@@ -243,15 +255,23 @@ export function ManagePlanScreen({ product, backHref }: ManagePlanScreenProps) {
         }
         onSelectPlan={handleSelectPlan}
         onViewPlan={() => setViewPlanOpen(true)}
-        planActionLabel={() => "Get started"}
+        planActionLabel={(plan) => {
+          if (!onPaidPlan) return "Get started";
+          const kind = classifyPlanChange(currentPlanId, plan.id);
+          if (kind === "upgrade") return "Upgrade now";
+          if (kind === "downgrade") return "Schedule downgrade";
+          return "Switch plan";
+        }}
         title={
           product === "queue"
             ? "Manage Queue plan"
             : product === "reservation"
               ? "Manage Reservations plan"
-              : undefined
+              : product === "menu"
+                ? "Manage AI Menu plan"
+                : undefined
         }
-        subtitle="Plan changes apply at your next renewal. Cancel anytime to stop future renewals."
+        subtitle="Upgrades apply immediately after payment. Downgrades take effect at your next renewal."
       />
 
       <ul className="merchant-billing-policy">

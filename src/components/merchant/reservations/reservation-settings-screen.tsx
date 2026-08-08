@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CalendarClock, ChevronRight, MessageSquare, Text } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { CalendarClock, ChevronRight, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import {
@@ -12,22 +12,15 @@ import {
 } from "@/lib/merchant/reservations";
 import type { MerchantProfile } from "@/lib/merchant/types";
 import { MerchantPlanCard } from "../plan-card";
+import { ProductBranchesSettings } from "../product-branches-settings";
 import { DeviceSetupPanel } from "../device-setup-rows";
 import { MerchantQrPanel } from "../qr-panel";
 import { ReservationSettingsFields } from "./reservation-settings-fields";
-
-type SheetKind = "booking" | "description" | null;
-
-const SHEET_META: Record<Exclude<SheetKind, null>, { title: string; subtitle: string }> = {
-  booking: {
-    title: "Booking window",
-    subtitle: "Times guests can request, party limits and WhatsApp updates",
-  },
-  description: {
-    title: "Reservation page",
-    subtitle: "The line guests read above your booking form",
-  },
-};
+import {
+  TableLayoutSheet,
+  useTableLayoutSummary,
+} from "../table-layout-sheet";
+import { useMerchantWorkspace } from "../merchant-workspace-context";
 
 interface ReservationSettingsScreenProps {
   profile: MerchantProfile;
@@ -48,15 +41,31 @@ export function ReservationSettingsScreen({
   branchSlug = null,
   branchSelected = true,
 }: ReservationSettingsScreenProps) {
-  const [settings, setSettings] = useState<ReservationSettings>(() =>
-    reservationSettingsFromProfile(profile),
+  const { activeBranchId, branches } = useMerchantWorkspace();
+  const activeBranch =
+    branches.find((b) => b.id === activeBranchId) ??
+    branches.find((b) => b.isDefault) ??
+    branches[0] ??
+    null;
+  const { summary: tableSummary, refresh: refreshTables } =
+    useTableLayoutSummary(activeBranchId);
+  const settingsFromSources = useMemo(
+    () =>
+      reservationSettingsFromProfile({
+        ...profile,
+        queueOpenTime: activeBranch?.queueOpenTime ?? profile.queueOpenTime,
+        queueCloseTime: activeBranch?.queueCloseTime ?? profile.queueCloseTime,
+      }),
+    [profile, activeBranch?.queueOpenTime, activeBranch?.queueCloseTime],
   );
-  const [sheet, setSheet] = useState<SheetKind>(null);
+  const [settings, setSettings] = useState<ReservationSettings>(settingsFromSources);
+  const [bookingOpen, setBookingOpen] = useState(false);
+  const [tablesOpen, setTablesOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setSettings(reservationSettingsFromProfile(profile));
-  }, [profile]);
+    setSettings(settingsFromSources);
+  }, [settingsFromSources]);
 
   const save = async (next: ReservationSettings) => {
     const error = validateReservationSettings(next);
@@ -66,50 +75,29 @@ export function ReservationSettingsScreen({
     }
     setSaving(true);
     try {
+      // Open/close stay on Business settings → Branch; don't write them here.
       await onSave({
         reservationDescription: next.description,
         reservationMaxPartySize: next.maxPartySize,
         reservationIntervalMinutes: next.intervalMinutes,
-        reservationOpenTime: next.openTime,
-        reservationCloseTime: next.closeTime,
         reservationAllowSameDay: next.allowSameDay,
         reservationAllowNotes: next.allowNotes,
         reservationAutoDeclineHours: next.autoDeclineHours,
         reservationWhatsappEnabled: next.whatsappEnabled,
+        reservationGraceMinutes: next.graceMinutes,
+        reservationAutoAssignTables: next.autoAssignTables,
       });
-      setSheet(null);
+      setBookingOpen(false);
     } finally {
       setSaving(false);
     }
   };
 
-  const rows: Array<{
-    id: Exclude<SheetKind, null>;
-    label: string;
-    value: string;
-    Icon: typeof CalendarClock;
-  }> = [
-    {
-      id: "booking",
-      label: "Booking window",
-      value: formatSettingsSummary(settings),
-      Icon: CalendarClock,
-    },
-    {
-      id: "description",
-      label: "Reservation page",
-      value: settings.description.trim() || "No description set",
-      Icon: Text,
-    },
-  ];
-
-  const activeMeta = sheet ? SHEET_META[sheet] : null;
-
   return (
     <div className="tab-screen">
       <div className="tab-head">
         <h2 className="tab-title">Reservation settings</h2>
-        <p className="tab-sub">Control when guests can book and what they can tell you</p>
+        <p className="tab-sub">Control booking rules and what guests can tell you</p>
       </div>
 
       <MerchantQrPanel
@@ -123,45 +111,64 @@ export function ReservationSettingsScreen({
       <div className="merchant-settings-group">
         <h3 className="merchant-settings-title">Reservation setup</h3>
         <div className="panel-card merchant-settings-panel">
-          {rows.map(({ id, label, value, Icon }) => (
-            <button
-              key={id}
-              type="button"
-              className="merchant-settings-row"
-              onClick={() => setSheet(id)}
-            >
-              <div className="profile-row-icon">
-                <Icon size={18} strokeWidth={2.2} />
+          <button
+            type="button"
+            className="merchant-settings-row"
+            onClick={() => setBookingOpen(true)}
+          >
+            <div className="profile-row-icon">
+              <CalendarClock size={18} strokeWidth={2.2} />
+            </div>
+            <div className="profile-row-copy">
+              <div className="profile-row-label">Booking rules</div>
+              <div className="profile-row-value profile-row-value--soft">
+                {formatSettingsSummary(settings)}
               </div>
-              <div className="profile-row-copy">
-                <div className="profile-row-label">{label}</div>
-                <div className="profile-row-value profile-row-value--soft">{value}</div>
+            </div>
+            <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
+          </button>
+
+          <button
+            type="button"
+            className="merchant-settings-row"
+            onClick={() => setTablesOpen(true)}
+          >
+            <div className="profile-row-icon">
+              <LayoutGrid size={18} strokeWidth={2.2} />
+            </div>
+            <div className="profile-row-copy">
+              <div className="profile-row-label">Tables</div>
+              <div className="profile-row-value profile-row-value--soft">
+                {tableSummary}
               </div>
-              <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
-            </button>
-          ))}
+            </div>
+            <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
+          </button>
 
           <div className="merchant-settings-row" style={{ cursor: "default" }}>
             <div className="profile-row-icon">
-              <MessageSquare size={18} strokeWidth={2.2} />
+              <LayoutGrid size={18} strokeWidth={2.2} />
             </div>
             <div className="profile-row-copy">
-              <div className="profile-row-label">WhatsApp updates</div>
+              <div className="profile-row-label">Automatically assign tables</div>
               <div className="profile-row-value profile-row-value--soft">
-                {settings.whatsappEnabled
-                  ? "Guests get confirmations, updates and reminders"
-                  : "Turned off — guests won't hear from Froq"}
+                {settings.autoAssignTables
+                  ? "On confirm — best free table for the party"
+                  : "Off — assign tables yourself later"}
               </div>
             </div>
             <button
               type="button"
               role="switch"
-              aria-checked={settings.whatsappEnabled}
-              aria-label="WhatsApp updates"
-              className={`merchant-toggle${settings.whatsappEnabled ? " on" : ""}`}
+              aria-checked={settings.autoAssignTables}
+              aria-label="Automatically assign tables"
+              className={`merchant-toggle${settings.autoAssignTables ? " on" : ""}`}
               disabled={saving}
               onClick={() =>
-                void save({ ...settings, whatsappEnabled: !settings.whatsappEnabled })
+                void save({
+                  ...settings,
+                  autoAssignTables: !settings.autoAssignTables,
+                })
               }
             >
               <span className="merchant-toggle-knob" />
@@ -169,6 +176,8 @@ export function ReservationSettingsScreen({
           </div>
         </div>
       </div>
+
+      <ProductBranchesSettings product="reservation" />
 
       <MerchantPlanCard
         product="reservation"
@@ -179,53 +188,51 @@ export function ReservationSettingsScreen({
 
       <DeviceSetupPanel />
 
+      <TableLayoutSheet
+        open={tablesOpen}
+        branchId={activeBranchId}
+        onClose={() => setTablesOpen(false)}
+        onSaved={(layout) => refreshTables(layout)}
+      />
+
       <BottomSheet
-        open={sheet !== null}
-        onClose={() => setSheet(null)}
+        open={bookingOpen}
+        onClose={() => setBookingOpen(false)}
         labelledBy="reservation-setting-title"
         className="merchant-theme merchant-edit-drawer"
       >
-        {sheet && activeMeta && (
-          <div className="merchant-edit-sheet">
-            <div className="merchant-edit-sheet-head">
-              <h3 id="reservation-setting-title" className="merchant-edit-sheet-title">
-                {activeMeta.title}
-              </h3>
-              <p className="merchant-edit-sheet-sub">{activeMeta.subtitle}</p>
-            </div>
-
-            <div className="merchant-edit-fields">
-              {sheet === "booking" ? (
-                <ReservationSettingsFields value={settings} onChange={setSettings} />
-              ) : (
-                <label className="auth-field">
-                  <span className="auth-label">Short description</span>
-                  <textarea
-                    className="auth-input merchant-textarea"
-                    rows={3}
-                    placeholder="Family-run South Indian kitchen. Tables held for 15 minutes."
-                    value={settings.description}
-                    onChange={(event) =>
-                      setSettings({ ...settings, description: event.target.value })
-                    }
-                  />
-                  <span className="merchant-field-hint">
-                    Shown under your name on the public reservation page.
-                  </span>
-                </label>
-              )}
-
-              <button
-                type="button"
-                className="cta-btn merchant-cta-accent"
-                disabled={saving}
-                onClick={() => void save(settings)}
-              >
-                {saving ? "Saving…" : "Save changes"}
-              </button>
-            </div>
+        <div className="merchant-edit-sheet">
+          <div className="merchant-edit-sheet-head">
+            <h3 id="reservation-setting-title" className="merchant-edit-sheet-title">
+              Booking rules
+            </h3>
+            <p className="merchant-edit-sheet-sub">
+              Interval, party size, and guest options — seating window follows
+              store timings
+            </p>
           </div>
-        )}
+
+          <div className="merchant-edit-fields">
+            <span className="merchant-field-hint" style={{ display: "block", marginBottom: 12 }}>
+              Seating slots use store timings from Business settings → Branch
+              {activeBranch?.name ? ` · ${activeBranch.name}` : ""}.
+            </span>
+            <ReservationSettingsFields
+              hideSeatingTimes
+              value={settings}
+              onChange={setSettings}
+            />
+
+            <button
+              type="button"
+              className="cta-btn merchant-cta-accent"
+              disabled={saving}
+              onClick={() => void save(settings)}
+            >
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+          </div>
+        </div>
       </BottomSheet>
     </div>
   );

@@ -1,10 +1,13 @@
 "use client";
 
 import { Bell, ChevronRight, Gift } from "lucide-react";
+import { activeBranchIdsForProduct } from "@/lib/merchant/branch-assignments";
 import type { MerchantEditSection, MerchantProfile } from "@/lib/merchant/types";
 import { MerchantPlanCard } from "./plan-card";
+import { ProductBranchesSettings } from "./product-branches-settings";
 import { MerchantQrPanel } from "./qr-panel";
 import { DeviceSetupPanel } from "./device-setup-rows";
+import { useMerchantWorkspace } from "./merchant-workspace-context";
 
 interface LoyaltySettingsScreenProps {
   profile: MerchantProfile;
@@ -56,6 +59,11 @@ export function LoyaltySettingsScreen({
   branchSelected = true,
   branchName = null,
 }: LoyaltySettingsScreenProps) {
+  const { entitlements, productBranches, dashboardStats } = useMerchantWorkspace();
+  const planId = entitlements.loyalty?.planId ?? null;
+  const branchesUsed = activeBranchIdsForProduct(productBranches, "loyalty").length;
+  const metricUsed = dashboardStats.totalCustomers;
+
   return (
     <div className="tab-screen">
       <div className="tab-head">
@@ -96,9 +104,14 @@ export function LoyaltySettingsScreen({
         </div>
       </div>
 
+      <ProductBranchesSettings product="loyalty" />
+
       <MerchantPlanCard
         product="loyalty"
         enabled={productEnabled}
+        planId={planId}
+        branchesUsed={branchesUsed}
+        metricUsed={metricUsed}
         onGetStarted={canPurchase ? onGetStarted : undefined}
         onManagePlan={canPurchase ? onManagePlan : undefined}
       />

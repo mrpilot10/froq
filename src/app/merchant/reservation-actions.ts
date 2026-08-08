@@ -10,11 +10,12 @@ import {
 } from "@/lib/merchant/server-context";
 import { resolveBranchFilterForUser } from "@/lib/merchant/branch-access";
 import { dashboardRangeStart } from "@/lib/merchant/analytics";
-import { canViewAnalytics } from "@/lib/merchant/roles";
+import { canViewAnalytics, canViewCustomerData } from "@/lib/merchant/roles";
 import type { DashboardDateRange } from "@/lib/merchant/types";
 import {
   addDays,
   buildReservationSlots,
+  reservationStartMs,
   reservationToday,
   reservationSettingsFromProfile,
   type Reservation,
@@ -25,6 +26,10 @@ import {
   type ReservationStatus,
 } from "@/lib/merchant/reservations";
 import { formatTimeForInput, normalizeTimeInput } from "@/lib/merchant/queue-hours";
+import {
+  ensureHeldQueueEntryForReservation,
+  releaseQueueHoldForReservation,
+} from "@/lib/queue/reservation-holds";
 import {
   RESERVATION_COLUMNS,
   toReservation,
@@ -44,6 +49,10 @@ import {
   type ReservationAnalytics,
   type ReservationHistorySummary,
 } from "@/lib/reservations/stats";
+import {
+  entitlementsFromRows,
+  isTrialActive,
+} from "@/lib/merchant/entitlements";
 
 interface CapturedReservationNotify {
   target: ReservationNotifyTarget;
@@ -140,6 +149,24 @@ export async function fetchReservations(input?: {
     const filter = input?.filter ?? "today";
     const range = rangeForFilter(filter, today);
     const admin = createAdminClient();
+
+    // Legacy guest requests were saved without a branch. Attach them to the
+    // default branch so branch-scoped boards (and this fetch) can see them.
+    if (branchId) {
+      const { data: defaultBranch } = await admin
+        .from("branches")
+        .select("id")
+        .eq("merchant_id", ctx.merchantId)
+        .eq("is_default", true)
+        .maybeSingle();
+      if (defaultBranch?.id === branchId) {
+        await admin
+          .from("reservations")
+          .update({ branch_id: branchId })
+          .eq("merchant_id", ctx.merchantId)
+          .is("branch_id", null);
+      }
+    }
 
     let query = admin
       .from("reservations")
@@ -342,7 +369,9 @@ export async function createReservation(input: {
     const admin = createAdminClient();
     const { data: merchant } = await admin
       .from("merchants")
-      .select("reservation_max_party_size, reservation_allow_notes")
+      .select(
+        "reservation_max_party_size, reservation_allow_notes, reservation_auto_assign_tables",
+      )
       .eq("id", ctx.merchantId)
       .maybeSingle();
     const maxPartySize = merchant?.reservation_max_party_size ?? 12;
@@ -390,7 +419,7 @@ export async function createReservation(input: {
       return { ok: false, error: error?.message ?? "Could not save the reservation." };
     }
 
-    const reservation = toReservation(row);
+    let reservation = toReservation(row);
     await recordReservationEvent({
       reservationId: reservation.id,
       merchantId: ctx.merchantId,
@@ -398,6 +427,19 @@ export async function createReservation(input: {
       actor: staffActor(ctx),
       detail: "Taken by phone or in person",
     });
+
+    if (merchant?.reservation_auto_assign_tables !== false && branchId) {
+      const { autoAssignTableForReservation } = await import(
+        "@/app/merchant/table-actions"
+      );
+      await autoAssignTableForReservation({ reservationId: reservation.id });
+      const { data: refreshed } = await admin
+        .from("reservations")
+        .select(RESERVATION_COLUMNS)
+        .eq("id", reservation.id)
+        .maybeSingle();
+      if (refreshed) reservation = toReservation(refreshed);
+    }
     // Booked and confirmed in one step, so the trail shows both.
     await recordReservationEvent({
       reservationId: reservation.id,
@@ -415,6 +457,12 @@ export async function createReservation(input: {
       date: reservation.date,
       time: reservation.time,
       partySize: reservation.partySize,
+    });
+
+    // Hold a future queue slot when today's queue is live.
+    await ensureHeldQueueEntryForReservation({
+      ...row,
+      merchant_id: ctx.merchantId,
     });
 
     return { ok: true, reservation };
@@ -479,6 +527,8 @@ export async function setReservationStatus(input: {
   reservationId: string;
   action: ReservationAction;
   reason?: string;
+  /** On confirm — optional dining table the merchant picked. */
+  tableId?: string | null;
 }): Promise<{ ok: boolean; error?: string; reservation?: Reservation }> {
   try {
     const ctx = await requireMerchantContext();
@@ -489,6 +539,37 @@ export async function setReservationStatus(input: {
 
     const admin = createAdminClient();
     const nowIso = new Date().toISOString();
+
+    // Resolve a merchant-picked table up front so confirm can't succeed without it.
+    let confirmTable:
+      | { id: string; table_number: number }
+      | null
+      | undefined;
+    if (input.action === "confirm" && input.tableId) {
+      const { data: existing } = await admin
+        .from("reservations")
+        .select("id, party_size, branch_id, dining_table_id, reservation_date, reservation_time")
+        .eq("id", input.reservationId)
+        .eq("merchant_id", ctx.merchantId)
+        .maybeSingle();
+      if (!existing) return { ok: false, error: "Reservation not found." };
+      if (!existing.dining_table_id) {
+        const { data: table } = await admin
+          .from("dining_tables")
+          .select("id, table_number, seats, status")
+          .eq("id", input.tableId)
+          .eq("merchant_id", ctx.merchantId)
+          .maybeSingle();
+        if (!table || table.status !== "active") {
+          return { ok: false, error: "Table not found." };
+        }
+        if (table.seats < existing.party_size) {
+          return { ok: false, error: "That table is too small for this party." };
+        }
+        confirmTable = { id: table.id, table_number: table.table_number };
+      }
+    }
+
     const patch: Record<string, unknown> = {
       status: action.status,
       [action.stamp]: nowIso,
@@ -505,6 +586,10 @@ export async function setReservationStatus(input: {
       patch.suggested_at = null;
       patch.suggested_date = null;
       patch.suggested_time = null;
+      if (confirmTable) {
+        patch.dining_table_id = confirmTable.id;
+        patch.table_number = confirmTable.table_number;
+      }
     }
 
     const { data: row, error } = await admin
@@ -552,6 +637,67 @@ export async function setReservationStatus(input: {
         partySize: reservation.partySize,
         declineReason: reservation.declineReason,
       });
+    }
+
+    if (input.action === "confirm") {
+      await ensureHeldQueueEntryForReservation({
+        ...row,
+        merchant_id: ctx.merchantId,
+      });
+
+      // Merchant-picked table already applied in the confirm patch above.
+      // Otherwise auto-assign when enabled (unless the merchant skipped).
+      if (!reservation.diningTableId && reservation.branchId) {
+        const skipped = input.tableId === null;
+        if (!skipped) {
+          const { data: merchantPrefs } = await admin
+            .from("merchants")
+            .select("reservation_auto_assign_tables")
+            .eq("id", ctx.merchantId)
+            .maybeSingle();
+          const autoAssign = merchantPrefs?.reservation_auto_assign_tables !== false;
+          if (autoAssign) {
+            const { autoAssignTableForReservation } = await import(
+              "@/app/merchant/table-actions"
+            );
+            const assigned = await autoAssignTableForReservation({
+              reservationId: reservation.id,
+            });
+            if (assigned.ok && assigned.tableNumber != null) {
+              const { data: refreshed } = await admin
+                .from("reservations")
+                .select(RESERVATION_COLUMNS)
+                .eq("id", reservation.id)
+                .maybeSingle();
+              if (refreshed) {
+                return { ok: true, reservation: toReservation(refreshed) };
+              }
+            }
+          }
+        }
+      }
+    } else if (
+      input.action === "cancel" ||
+      input.action === "decline" ||
+      input.action === "no_show"
+    ) {
+      await releaseQueueHoldForReservation(
+        reservation.id,
+        input.action === "no_show"
+          ? "no_show"
+          : input.action === "decline"
+            ? "declined"
+            : "cancelled",
+      );
+    } else if (input.action === "complete") {
+      // Arrival / seated — close any open hold without treating as left.
+      const adminHold = createAdminClient();
+      const nowComplete = new Date().toISOString();
+      await adminHold
+        .from("queue_entries")
+        .update({ status: "seated", seated_at: nowComplete })
+        .eq("reservation_id", reservation.id)
+        .in("status", ["held", "waiting", "called"]);
     }
 
     return { ok: true, reservation };
@@ -615,6 +761,9 @@ export async function suggestReservationTime(input: {
     if (!row) {
       return { ok: false, error: "Only open reservations can be rescheduled." };
     }
+
+    // Original slot is no longer held while the guest considers the proposal.
+    await releaseQueueHoldForReservation(row.id, "suggested");
 
     const reservation = toReservation(row);
     await recordReservationEvent({
@@ -718,10 +867,12 @@ export async function getReservationAnalytics(input?: {
 }
 
 /**
- * Slots + limits for the merchant's own booking form, read from settings so the
- * manual page and the public page never drift apart.
+ * Slots + limits for the merchant's own booking form. Interval/party rules come
+ * from reservation settings; the seating window comes from branch store timings.
  */
-export async function fetchReservationFormConfig(): Promise<{
+export async function fetchReservationFormConfig(input?: {
+  branchId?: string | null;
+}): Promise<{
   ok: boolean;
   error?: string;
   slots?: string[];
@@ -734,17 +885,41 @@ export async function fetchReservationFormConfig(): Promise<{
     if (!ctx.ok) return { ok: false, error: ctx.error };
 
     const admin = createAdminClient();
-    const { data } = await admin
-      .from("merchants")
-      .select(
-        "reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes",
-      )
-      .eq("id", ctx.merchantId)
-      .maybeSingle();
+    const branchId = await scopedBranchId(ctx, input?.branchId);
 
+    const [{ data }, branchRes] = await Promise.all([
+      admin
+        .from("merchants")
+        .select(
+          "reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes",
+        )
+        .eq("id", ctx.merchantId)
+        .maybeSingle(),
+      branchId
+        ? admin
+            .from("branches")
+            .select("queue_open_time, queue_close_time")
+            .eq("id", branchId)
+            .eq("merchant_id", ctx.merchantId)
+            .maybeSingle()
+        : admin
+            .from("branches")
+            .select("queue_open_time, queue_close_time")
+            .eq("merchant_id", ctx.merchantId)
+            .eq("is_default", true)
+            .maybeSingle(),
+    ]);
+
+    const branch = branchRes.data;
     const settings = reservationSettingsFromProfile({
       reservationMaxPartySize: data?.reservation_max_party_size,
       reservationIntervalMinutes: data?.reservation_interval_minutes,
+      queueOpenTime: branch?.queue_open_time
+        ? formatTimeForInput(branch.queue_open_time)
+        : undefined,
+      queueCloseTime: branch?.queue_close_time
+        ? formatTimeForInput(branch.queue_close_time)
+        : undefined,
       reservationOpenTime: data ? formatTimeForInput(data.reservation_open_time) : undefined,
       reservationCloseTime: data ? formatTimeForInput(data.reservation_close_time) : undefined,
       reservationAllowSameDay: data?.reservation_allow_same_day,
@@ -762,6 +937,162 @@ export async function fetchReservationFormConfig(): Promise<{
     return {
       ok: false,
       error: error instanceof Error ? error.message : "Could not load settings.",
+    };
+  }
+}
+
+/** Cap on bookings pulled for one person — far beyond any real guest history. */
+const CUSTOMER_BOOKING_LIMIT = 200;
+
+/**
+ * Sidebar meter: bookings created in the current trial window (or calendar
+ * month when paid) — same window the capacity gate uses on trial.
+ */
+export async function countReservationsUsedForPlanMeter(): Promise<{
+  ok: boolean;
+  count: number;
+  error?: string;
+}> {
+  try {
+    const ctx = await requireMerchantContext();
+    if (!ctx.ok) return { ok: false, count: 0, error: ctx.error };
+
+    const admin = createAdminClient();
+    const { data: rows } = await admin
+      .from("merchant_products")
+      .select(
+        "product, plan_id, status, onboarded_at, trial_started_at, trial_ends_at",
+      )
+      .eq("merchant_id", ctx.merchantId);
+
+    const entitlements = entitlementsFromRows(rows ?? []);
+    const reservation = entitlements.reservation;
+    const onTrial = isTrialActive(reservation);
+
+    let sinceIso: string;
+    if (onTrial && reservation?.trialStartedAt) {
+      sinceIso = reservation.trialStartedAt;
+    } else {
+      const d = new Date();
+      d.setDate(1);
+      d.setHours(0, 0, 0, 0);
+      sinceIso = d.toISOString();
+    }
+
+    const { count } = await admin
+      .from("reservations")
+      .select("id", { count: "exact", head: true })
+      .eq("merchant_id", ctx.merchantId)
+      .gte("created_at", sinceIso);
+
+    return { ok: true, count: count ?? 0 };
+  } catch (error) {
+    return {
+      ok: false,
+      count: 0,
+      error: error instanceof Error ? error.message : "Could not load usage.",
+    };
+  }
+}
+
+/**
+ * Every reservation by one person, newest dining slot first, for
+ * Reservations → Customers.
+ *
+ * Rows carry `customer_id` only when the guest was matched to a customer
+ * record, so phone is the fallback join — and phones are stored in mixed forms
+ * (`+91…`, `91…`, bare national), hence the variant list.
+ */
+export async function fetchReservationCustomerBookings(input: {
+  customerId?: string | null;
+  phone?: string | null;
+  branchId?: string | null;
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  bookings: Reservation[];
+  /** Customer row behind these bookings, when one exists. Enables notes. */
+  customerId: string | null;
+  merchantNotes: string;
+  email: string | null;
+}> {
+  const empty = { bookings: [], customerId: null, merchantNotes: "", email: null };
+  try {
+    const ctx = await requireMerchantContext();
+    if (!ctx.ok) return { ok: false, error: ctx.error, ...empty };
+    if (!canViewCustomerData(ctx.role)) {
+      return { ok: false, error: "You do not have access to guest history.", ...empty };
+    }
+
+    const customerId = input.customerId?.trim() || null;
+    const national = (input.phone ?? "").replace(/\D/g, "").slice(-10);
+    const phoneVariants =
+      national.length === 10
+        ? [national, `91${national}`, `+91${national}`]
+        : [];
+    if (!customerId && phoneVariants.length === 0) {
+      return { ok: false, error: "Guest not found.", ...empty };
+    }
+
+    const admin = createAdminClient();
+    let query = admin
+      .from("reservations")
+      .select(RESERVATION_COLUMNS)
+      .eq("merchant_id", ctx.merchantId)
+      .order("reservation_date", { ascending: false })
+      .order("reservation_time", { ascending: false })
+      .limit(CUSTOMER_BOOKING_LIMIT);
+
+    const matchers = [
+      customerId ? `customer_id.eq.${customerId}` : null,
+      phoneVariants.length > 0
+        ? `customer_phone.in.(${phoneVariants.join(",")})`
+        : null,
+    ].filter((clause): clause is string => clause !== null);
+    query = query.or(matchers.join(","));
+
+    if (input.branchId) query = query.eq("branch_id", input.branchId);
+
+    const { data, error } = await query;
+    if (error) {
+      console.error("fetchReservationCustomerBookings", error);
+      return { ok: false, error: "Could not load bookings.", ...empty };
+    }
+
+    const bookings = (data ?? []).map(toReservation);
+    // Prefer dining-slot order even if the DB sort mixed future/past oddly.
+    bookings.sort(
+      (a, b) =>
+        reservationStartMs(b.date, b.time) - reservationStartMs(a.date, a.time),
+    );
+
+    const resolvedCustomerId =
+      customerId ?? bookings.find((row) => row.customerId)?.customerId ?? null;
+    let merchantNotes = "";
+    let email: string | null = null;
+    if (resolvedCustomerId) {
+      const { data: customer } = await admin
+        .from("customers")
+        .select("merchant_notes, email")
+        .eq("id", resolvedCustomerId)
+        .eq("merchant_id", ctx.merchantId)
+        .maybeSingle();
+      merchantNotes = customer?.merchant_notes?.trim() ?? "";
+      email = customer?.email?.trim() || null;
+    }
+
+    return {
+      ok: true,
+      bookings,
+      customerId: resolvedCustomerId,
+      merchantNotes,
+      email,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not load bookings.",
+      ...empty,
     };
   }
 }

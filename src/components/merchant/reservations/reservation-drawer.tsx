@@ -6,14 +6,14 @@ import {
   CalendarDays,
   Check,
   Clock3,
-  MessageSquare,
   Phone,
-  Users,
   X,
 } from "lucide-react";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { formatPhoneDisplay } from "@/lib/auth/format";
 import { fetchReservationEvents } from "@/app/merchant/reservation-actions";
+import { assignReservationTable } from "@/app/merchant/table-actions";
+import { AssignTableSheet } from "../queue/seat-at-table-sheet";
 import {
   buildReservationTimeline,
   drawerActionsFor,
@@ -31,6 +31,7 @@ import {
   type ReservationEvent,
 } from "@/lib/merchant/reservations";
 import { ReservationSlotPicker } from "./reservation-slot-picker";
+import { toast } from "sonner";
 
 interface ReservationDrawerProps {
   reservation: Reservation | null;
@@ -40,13 +41,25 @@ interface ReservationDrawerProps {
   onClose: () => void;
   onAction: (
     action: ReservationActionId,
-    input?: { reason?: string },
+    input?: { reason?: string; tableId?: string | null },
   ) => Promise<boolean> | boolean;
   onSuggest: (input: { date: string; time: string }) => Promise<boolean> | boolean;
   onSaveNotes: (merchantNotes: string) => Promise<boolean> | boolean;
+  /** After table assign — parent refreshes the row. */
+  onTableAssigned?: (next: {
+    diningTableId: string | null;
+    tableNumber: number | null;
+  }) => void;
 }
 
 type Panel = "decline" | "suggest" | null;
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+}
 
 function timelineTime(atMs: number | null): string {
   if (atMs == null) return "";
@@ -67,6 +80,7 @@ export function ReservationDrawer({
   onAction,
   onSuggest,
   onSaveNotes,
+  onTableAssigned,
 }: ReservationDrawerProps) {
   const [panel, setPanel] = useState<Panel>(null);
   const [reason, setReason] = useState("");
@@ -75,6 +89,8 @@ export function ReservationDrawer({
   const [suggestDate, setSuggestDate] = useState("");
   const [suggestTime, setSuggestTime] = useState("");
   const [events, setEvents] = useState<ReservationEvent[]>([]);
+  const [tablePickerOpen, setTablePickerOpen] = useState(false);
+  const [assigningTable, setAssigningTable] = useState(false);
 
   // Reset the per-booking panels whenever the drawer switches reservation.
   useEffect(() => {
@@ -127,7 +143,41 @@ export function ReservationDrawer({
     await onAction(action);
   };
 
+  const actionGroups = {
+    primary: actions.filter((a) => a === "confirm" || a === "complete"),
+    negative: actions.filter(
+      (a) => a === "decline" || a === "cancel" || a === "no_show",
+    ),
+    alternate: actions.filter((a) => a === "suggest"),
+  };
+
+  const renderAction = (action: ReservationActionId) => (
+    <button
+      key={action}
+      type="button"
+      className={
+        action === "confirm" || action === "complete"
+          ? "queue-act queue-act--served"
+          : action === "suggest"
+            ? "queue-act queue-act--suggest"
+            : "queue-act queue-act--left"
+      }
+      disabled={busy}
+      onClick={() => void runAction(action)}
+    >
+      {action === "confirm" || action === "complete" ? (
+        <Check size={14} strokeWidth={2.3} />
+      ) : action === "suggest" ? (
+        <CalendarDays size={14} strokeWidth={2.3} />
+      ) : (
+        <X size={14} strokeWidth={2.3} />
+      )}
+      {RESERVATION_ACTION_LABELS[action]}
+    </button>
+  );
+
   return (
+    <>
     <BottomSheet
       open={reservation !== null}
       onClose={onClose}
@@ -135,24 +185,37 @@ export function ReservationDrawer({
       className="merchant-theme"
     >
       {reservation && status && (
-        <div className="merchant-drawer">
+        <div className="merchant-drawer resv-drawer">
           <div className="merchant-drawer-head">
             <div className="merchant-avatar merchant-avatar--lg">
-              {formatReservationNumber(reservation.number).replace("#", "")}
+              {initials(reservation.customerName)}
             </div>
             <div className="merchant-drawer-head-copy">
               <h3 id="reservation-drawer-title" className="merchant-drawer-name">
                 {reservation.customerName}
               </h3>
-              <span className={`merchant-badge merchant-badge--${status.cls}`}>
-                {status.label}
-              </span>
+              <div className="resv-drawer-head-meta">
+                <span className={`merchant-badge merchant-badge--${status.cls}`}>
+                  {status.label}
+                </span>
+                <span className="resv-drawer-ref">
+                  {formatReservationNumber(reservation.number)}
+                </span>
+              </div>
             </div>
+            <a
+              className="resv-drawer-call"
+              href={`tel:${reservation.customerPhone.replace(/[^\d+]/g, "")}`}
+              aria-label={`Call ${reservation.customerName}`}
+            >
+              <Phone size={18} strokeWidth={2.3} />
+              Call
+            </a>
           </div>
 
           {notifyFailure ? (
             <div className="resv-drawer-alert" role="status">
-              <AlertTriangle size={16} strokeWidth={2.3} aria-hidden="true" />
+              <AlertTriangle size={15} strokeWidth={2.3} aria-hidden="true" />
               <div>
                 <strong>{notifyFailure.chip}</strong>
                 <p>{notifyFailure.detail}</p>
@@ -160,109 +223,82 @@ export function ReservationDrawer({
             </div>
           ) : null}
 
-          <div className="merchant-drawer-stats">
-            <div className="merchant-drawer-stat merchant-drawer-stat--accent">
-              <span className="merchant-drawer-stat-label">Date</span>
-              <span className="merchant-drawer-stat-value">
-                {formatDateLabel(reservation.date)}
+          <div className="resv-drawer-facts">
+            <div className="resv-drawer-fact">
+              <span className="resv-drawer-fact-label">When</span>
+              <span className="resv-drawer-fact-value">
+                {formatDateLabel(reservation.date)} · {formatTimeLabel(reservation.time)}
               </span>
             </div>
-            <div className="merchant-drawer-stat">
-              <span className="merchant-drawer-stat-label">Time</span>
-              <span className="merchant-drawer-stat-value">
-                {formatTimeLabel(reservation.time)}
+            <div className="resv-drawer-fact">
+              <span className="resv-drawer-fact-label">Party</span>
+              <span className="resv-drawer-fact-value">
+                {reservation.partySize}{" "}
+                {reservation.partySize === 1 ? "guest" : "guests"}
               </span>
             </div>
-            <div className="merchant-drawer-stat">
-              <span className="merchant-drawer-stat-label">Guests</span>
-              <span className="merchant-drawer-stat-value">{reservation.partySize}</span>
-            </div>
-            <div className="merchant-drawer-stat">
-              <span className="merchant-drawer-stat-label">Booking</span>
-              <span className="merchant-drawer-stat-value">
-                {formatReservationNumber(reservation.number)}
+            <button
+              type="button"
+              className="resv-drawer-fact resv-drawer-fact--action"
+              onClick={() => {
+                if (!reservation.branchId) {
+                  toast.error("This booking has no branch.");
+                  return;
+                }
+                setTablePickerOpen(true);
+              }}
+            >
+              <span className="resv-drawer-fact-label">Table</span>
+              <span className="resv-drawer-fact-value">
+                {reservation.tableNumber != null
+                  ? `T${reservation.tableNumber}`
+                  : "Assign"}
               </span>
-            </div>
+            </button>
           </div>
 
-          <div className="merchant-drawer-rows">
-            <a
-              className="profile-row"
-              href={`tel:${reservation.customerPhone.replace(/[^\d+]/g, "")}`}
-            >
-              <div className="profile-row-icon">
-                <Phone size={18} strokeWidth={2.2} />
-              </div>
-              <div className="profile-row-copy">
-                <div className="profile-row-label">Phone</div>
-                <div className="profile-row-value">
-                  {formatPhoneDisplay(reservation.customerPhone)}
+          {(reservation.notes ||
+            reservation.customerWhatsapp ||
+            pendingSuggestion ||
+            reservation.declineReason) && (
+            <div className="resv-drawer-details">
+              {reservation.notes ? (
+                <div className="resv-drawer-detail">
+                  <span className="resv-drawer-detail-label">Guest note</span>
+                  <span className="resv-drawer-detail-value">{reservation.notes}</span>
                 </div>
-              </div>
-            </a>
-
-            <div className="profile-row">
-              <div className="profile-row-icon">
-                <MessageSquare size={18} strokeWidth={2.2} />
-              </div>
-              <div className="profile-row-copy">
-                <div className="profile-row-label">WhatsApp</div>
-                <div className="profile-row-value">
-                  {reservation.customerWhatsapp
-                    ? formatPhoneDisplay(reservation.customerWhatsapp)
-                    : "Not available"}
+              ) : null}
+              {reservation.customerWhatsapp &&
+              reservation.customerWhatsapp.replace(/\D/g, "") !==
+                reservation.customerPhone.replace(/\D/g, "") ? (
+                <div className="resv-drawer-detail">
+                  <span className="resv-drawer-detail-label">WhatsApp</span>
+                  <span className="resv-drawer-detail-value">
+                    {formatPhoneDisplay(reservation.customerWhatsapp)}
+                  </span>
                 </div>
-              </div>
-            </div>
-
-            {pendingSuggestion ? (
-              <div className="profile-row">
-                <div className="profile-row-icon">
-                  <CalendarDays size={18} strokeWidth={2.2} />
-                </div>
-                <div className="profile-row-copy">
-                  <div className="profile-row-label">Proposed time</div>
-                  <div className="profile-row-value">
+              ) : null}
+              {pendingSuggestion ? (
+                <div className="resv-drawer-detail">
+                  <span className="resv-drawer-detail-label">Proposed</span>
+                  <span className="resv-drawer-detail-value">
                     {formatDateLabel(reservation.suggestedDate!)} at{" "}
                     {formatTimeLabel(reservation.suggestedTime!)}
-                  </div>
-                  <div className="profile-row-value profile-row-value--soft">
-                    Waiting for the guest to accept on their reservation page.
-                  </div>
+                  </span>
                 </div>
-              </div>
-            ) : null}
-
-            {reservation.notes ? (
-              <div className="profile-row">
-                <div className="profile-row-icon">
-                  <Users size={18} strokeWidth={2.2} />
-                </div>
-                <div className="profile-row-copy">
-                  <div className="profile-row-label">Guest note</div>
-                  <div className="profile-row-value profile-row-value--soft">
-                    {reservation.notes}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {reservation.declineReason ? (
-              <div className="profile-row">
-                <div className="profile-row-icon">
-                  <X size={18} strokeWidth={2.2} />
-                </div>
-                <div className="profile-row-copy">
-                  <div className="profile-row-label">Decline reason</div>
-                  <div className="profile-row-value profile-row-value--soft">
+              ) : null}
+              {reservation.declineReason ? (
+                <div className="resv-drawer-detail">
+                  <span className="resv-drawer-detail-label">Decline reason</span>
+                  <span className="resv-drawer-detail-value">
                     {reservation.declineReason}
-                  </div>
+                  </span>
                 </div>
-              </div>
-            ) : null}
-          </div>
+              ) : null}
+            </div>
+          )}
 
-          <div className="merchant-settings-group">
+          <div className="merchant-settings-group resv-drawer-timeline">
             <h3 className="merchant-settings-title">Timeline</h3>
             <div className="resv-timeline">
               {buildReservationTimeline(reservation).map((step, index, all) => {
@@ -301,7 +337,7 @@ export function ReservationDrawer({
             </div>
           </div>
 
-          <label className="auth-field">
+          <label className="auth-field resv-drawer-notes">
             <span className="auth-label">Merchant notes</span>
             <textarea
               className="auth-input merchant-textarea"
@@ -313,7 +349,7 @@ export function ReservationDrawer({
             {notesDirty ? (
               <button
                 type="button"
-                className="merchant-action-btn merchant-action-btn--reject"
+                className="merchant-action-btn merchant-action-btn--reject merchant-action-btn--block"
                 disabled={savingNotes}
                 onClick={() => {
                   setSavingNotes(true);
@@ -403,44 +439,69 @@ export function ReservationDrawer({
                 </button>
               </div>
             </div>
+          ) : actions.length === 0 ? (
+            <p className="merchant-field-hint resv-drawer-closed">
+              This reservation is closed — no further action needed.
+            </p>
           ) : (
-            <div className="merchant-drawer-actions merchant-drawer-actions--stack">
-              {actions.length === 0 ? (
-                <p className="merchant-field-hint" style={{ margin: 0 }}>
-                  This reservation is closed — no further action needed.
-                </p>
-              ) : (
-                <div className="resv-row-actions">
-                  {actions.map((action) => (
-                    <button
-                      key={action}
-                      type="button"
-                      className={`merchant-action-btn ${
-                        action === "confirm" || action === "complete"
-                          ? "merchant-action-btn--approve"
-                          : action === "decline"
-                            ? "merchant-action-btn--danger"
-                            : "merchant-action-btn--reject"
-                      }`}
-                      disabled={busy}
-                      onClick={() => void runAction(action)}
-                    >
-                      {action === "confirm" || action === "complete" ? (
-                        <Check size={16} strokeWidth={2.3} />
-                      ) : action === "suggest" ? (
-                        <CalendarDays size={16} strokeWidth={2.3} />
-                      ) : (
-                        <X size={16} strokeWidth={2.3} />
-                      )}
-                      {RESERVATION_ACTION_LABELS[action]}
-                    </button>
-                  ))}
+            /* Grouped, not gridded: the outcome you'll pick most sits on its
+               own line, the two ways a booking falls through share the next,
+               and rescheduling closes. A flat grid left long labels wrapping
+               onto two lines at uneven heights. */
+            <div className="resv-drawer-controls">
+              {actionGroups.primary.map(renderAction)}
+              {actionGroups.negative.length > 0 ? (
+                <div className="resv-drawer-control-pair">
+                  {actionGroups.negative.map(renderAction)}
                 </div>
-              )}
+              ) : null}
+              {actionGroups.alternate.map(renderAction)}
             </div>
           )}
         </div>
       )}
     </BottomSheet>
+
+    {/* Same picker the board and the queue use, so a table is chosen the same
+        way wherever staff are standing. */}
+    <AssignTableSheet
+      open={tablePickerOpen}
+      branchId={reservation?.branchId}
+      partySize={reservation?.partySize ?? 1}
+      guestName={reservation?.customerName ?? "guest"}
+      purpose="assign"
+      date={reservation?.date}
+      time={reservation?.time}
+      ignoreReservationId={reservation?.id}
+      selectedTableId={reservation?.diningTableId ?? null}
+      busy={assigningTable}
+      onClose={() => setTablePickerOpen(false)}
+      onConfirm={(tableId) => {
+        if (!reservation) return;
+        setAssigningTable(true);
+        void assignReservationTable({
+          reservationId: reservation.id,
+          tableId,
+        })
+          .then((result) => {
+            if (!result.ok) {
+              toast.error(result.error ?? "Couldn't assign table.");
+              return;
+            }
+            onTableAssigned?.({
+              diningTableId: tableId,
+              tableNumber: result.tableNumber ?? null,
+            });
+            toast.success(
+              result.tableNumber != null
+                ? `Assigned Table ${result.tableNumber}`
+                : "Table cleared",
+            );
+            setTablePickerOpen(false);
+          })
+          .finally(() => setAssigningTable(false));
+      }}
+    />
+    </>
   );
 }

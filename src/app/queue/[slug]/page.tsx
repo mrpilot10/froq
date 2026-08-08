@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { resolveQueuePage } from "@/app/queue/actions";
 import { QueueJoinScreen } from "@/components/queue/queue-join-screen";
+import { BrandThemeStyle } from "@/components/shared/brand-theme-style";
 import { FroqFooter } from "@/components/shared/froq-footer";
 
 export const metadata: Metadata = {
@@ -8,11 +9,19 @@ export const metadata: Metadata = {
   description: "Add yourself to the waitlist and we'll text you when your table is ready.",
 };
 
-export default async function QueueJoinPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function QueueJoinPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ b?: string }>;
+}) {
   const { slug } = await params;
-  const resolved = await resolveQueuePage(slug);
+  const { b: branchSlug } = await searchParams;
+  const resolved = await resolveQueuePage(slug, branchSlug ?? null);
 
   if (!resolved.ok) {
+    // No merchant → no social links; Powered by only.
     return (
       <div className="loyalty-page">
         <div className="loyalty-screen auth-screen">
@@ -31,15 +40,24 @@ export default async function QueueJoinPage({ params }: { params: Promise<{ slug
   const { merchant, initialTicket } = resolved;
 
   return (
-    <QueueJoinScreen
-      slug={merchant.slug}
-      businessName={merchant.businessName}
-      brandColor={merchant.brandColor}
-      logoUrl={merchant.logoUrl}
-      banner={merchant.banner}
-      bannerLink={merchant.bannerLink}
-      aiMenuEnabled={merchant.aiMenuEnabled}
-      initialTicket={initialTicket}
-    />
+    <>
+      <BrandThemeStyle color={merchant.brandColor} />
+      <QueueJoinScreen
+        slug={merchant.slug}
+        branchSlug={branchSlug ?? null}
+        businessName={merchant.businessName}
+        brandColor={merchant.brandColor}
+        logoUrl={merchant.logoUrl}
+        banner={merchant.banner}
+        bannerLink={merchant.bannerLink}
+        phone={merchant.phone}
+        address={merchant.address}
+        googleMapsUrl={merchant.googleMapsUrl}
+        socialLinks={merchant.socialLinks}
+        joinGate={merchant.joinGate}
+        aiMenuEnabled={merchant.aiMenuEnabled}
+        initialTicket={initialTicket}
+      />
+    </>
   );
 }

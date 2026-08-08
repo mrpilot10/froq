@@ -321,7 +321,12 @@ export function LoyaltyHistoryScreen() {
                     </span>
 
                     <div className="lhist-copy">
-                      <div className="lhist-title">{event.customerName}</div>
+                      <div className="lhist-title-row">
+                        <div className="lhist-title">{event.customerName}</div>
+                        {event.customerBanned ? (
+                          <span className="merchant-badge merchant-badge--banned">Banned</span>
+                        ) : null}
+                      </div>
                       {allBranches && event.branchName ? (
                         <span className="merchant-branch-badge">{event.branchName}</span>
                       ) : null}

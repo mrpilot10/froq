@@ -18,27 +18,25 @@ import {
   sendBirthdayBonusStamps,
   sendWhatsAppTemplate,
 } from "@/lib/whatsapp/notifications";
+import { buildReservationWhatsAppVars } from "@/lib/whatsapp/templates";
 import {
-  isTransactionalSmsConfigured,
-  sendTransactionalSms,
-} from "@/lib/notifications/sms";
-import {
-  buildSmsBody,
-  isLoyaltyNotificationTemplate,
-  isQueueNotificationTemplate,
-  isReservationNotificationTemplate,
-  shouldSendWhatsApp,
-  smsTemplateIdFor,
   type CustomerNotificationDataMap,
   type CustomerNotificationTemplate,
   type NotifiableCustomer,
   type NotificationChannel,
 } from "@/lib/notifications/types";
+import {
+  sendCustomerNotificationEmail,
+  type CustomerEmailSendResult,
+} from "@/lib/notifications/customer-email-channel";
 
 export interface SendCustomerNotificationResult {
   ok: boolean;
+  /** Primary messaging channel attempted (WhatsApp). */
   channel: NotificationChannel;
   error?: string;
+  /** Parallel email attempt (independent of WhatsApp outcome). */
+  email?: CustomerEmailSendResult;
 }
 
 function notifLog(
@@ -143,25 +141,25 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
       });
       return;
     }
-    // Reservation Meta body: {{1}} name, {{2}} restaurant, {{3}} date,
-    // {{4}} time, {{5}} party size. URL button {{1}} is the rsv_… token.
     case "reservation_request_received":
     case "reservation_confirmed":
     case "reservation_updated":
     case "reservation_reminder":
     case "reservation_declined": {
       const d = data as CustomerNotificationDataMap["reservation_confirmed"];
+      const vars = buildReservationWhatsAppVars({
+        customerName: customer.name,
+        businessName: d.businessName,
+        date: d.date,
+        time: d.time,
+        partySize: d.partySize ?? 1,
+        reservationToken: d.reservationToken,
+      });
       await sendWhatsAppTemplate({
         templateName: template,
         mobile: customer.phone,
-        bodyParams: [
-          customer.name,
-          d.businessName,
-          d.date,
-          d.time,
-          d.partySize != null ? String(d.partySize) : "1",
-        ],
-        reservationToken: d.reservationToken,
+        bodyParams: [...vars.body],
+        reservationToken: vars.reservationToken,
       });
       return;
     }
@@ -291,40 +289,59 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
 /**
  * Single entry point for all customer notifications.
  *
- * - Loyalty templates: WhatsApp first (Meta templates), SMS fallback when configured.
- * - Queue templates: WhatsApp only (Meta templates; no SMS fallback).
- * - Reservation templates: WhatsApp first, SMS fallback.
- * - Other: WhatsApp only when whatsappAvailable + preferred WhatsApp; else SMS.
+ * - WhatsApp always (product Meta templates).
+ * - Email in parallel when `customer.email` is set — independent of WhatsApp.
+ * - No SMS fallback for product alerts (OTP SMS remains separate).
  */
 export async function sendCustomerNotification<T extends CustomerNotificationTemplate>(input: {
   customer: NotifiableCustomer;
   template: T;
   data: CustomerNotificationDataMap[T];
+  /** Optional stable key so retries don't double-email. Auto-derived when omitted. */
+  dedupeKey?: string;
 }): Promise<SendCustomerNotificationResult> {
   const { customer, template, data } = input;
-  const queueTemplate = isQueueNotificationTemplate(template);
-  const loyaltyTemplate = isLoyaltyNotificationTemplate(template);
-  // Reservation guests are messaged on WhatsApp by default (that is the product
-  // promise), but unlike queue they keep the SMS fallback.
-  const useWhatsApp =
-    shouldSendWhatsApp(customer) ||
-    queueTemplate ||
-    loyaltyTemplate ||
-    isReservationNotificationTemplate(template);
-  const channel: NotificationChannel = useWhatsApp ? "whatsapp" : "sms";
+  const channel: NotificationChannel = "whatsapp";
 
   notifLog("info", "dispatch", {
     template,
     channel,
-    queueTemplate,
-    loyaltyTemplate,
     whatsappAvailable: customer.whatsappAvailable,
     preferred: customer.preferredNotificationChannel,
+    hasEmail: Boolean(customer.email?.trim()),
     publicToken: customer.publicToken,
   });
 
-  // Fail fast if a non-token slipped through — except templates with no URL button
-  // (loyaltycard_reward_claimed), which must still send when publicToken is missing.
+  const emailTask = sendCustomerNotificationEmail({
+    customer,
+    template,
+    data,
+    dedupeKey: input.dedupeKey,
+  });
+
+  const withEmail = async (
+    primary: SendCustomerNotificationResult,
+  ): Promise<SendCustomerNotificationResult> => {
+    const email = await emailTask.catch(
+      (err): CustomerEmailSendResult => ({
+        ok: false,
+        error: err instanceof Error ? err.message : "email_failed",
+      }),
+    );
+    notifLog(email.ok ? "info" : "warn", "email_dispatch", {
+      template,
+      ok: email.ok,
+      skipped: "skipped" in email ? email.skipped : false,
+      reason:
+        "skipped" in email && email.skipped
+          ? email.reason
+          : "error" in email
+            ? email.error
+            : null,
+    });
+    return { ...primary, email };
+  };
+
   const needsPublicToken = template !== "reward_redeemed";
   if (needsPublicToken) {
     try {
@@ -333,58 +350,16 @@ export async function sendCustomerNotification<T extends CustomerNotificationTem
     } catch (error) {
       const reason = error instanceof Error ? error.message : "invalid publicToken";
       notifLog("error", "invalid_public_token", { template, reason });
-      return { ok: false, channel, error: reason };
+      return withEmail({ ok: false, channel, error: reason });
     }
   }
 
   try {
-    if (useWhatsApp) {
-      try {
-        await sendWhatsAppForTemplate(template, customer, data);
-        return { ok: true, channel: "whatsapp" };
-      } catch (waError) {
-        const waReason = waError instanceof Error ? waError.message : "whatsapp_failed";
-        notifLog("warn", "whatsapp_dispatch_failed", { template, error: waReason });
-
-        if (queueTemplate) {
-          return { ok: false, channel: "whatsapp", error: waReason };
-        }
-
-        if (!isTransactionalSmsConfigured()) {
-          return { ok: false, channel: "whatsapp", error: waReason };
-        }
-        // Fall through to SMS when configured.
-        notifLog("info", "fallback_to_sms", { template });
-      }
-    }
-
-    if (!isTransactionalSmsConfigured()) {
-      return {
-        ok: false,
-        channel: "sms",
-        error:
-          "No delivery channel available. WhatsApp was not used and transactional SMS is not configured.",
-      };
-    }
-
-    const message = buildSmsBody(
-      template,
-      customer,
-      data as CustomerNotificationDataMap[CustomerNotificationTemplate],
-    );
-    const sms = await sendTransactionalSms({
-      mobile: customer.phone,
-      message,
-      templateId: smsTemplateIdFor(template),
-    });
-    if (!sms.ok) {
-      notifLog("error", "sms_dispatch_failed", { template, error: sms.message });
-      return { ok: false, channel: "sms", error: sms.message };
-    }
-    return { ok: true, channel: "sms" };
+    await sendWhatsAppForTemplate(template, customer, data);
+    return withEmail({ ok: true, channel: "whatsapp" });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "unknown";
-    notifLog("error", "dispatch_failed", { template, channel, reason });
-    return { ok: false, channel, error: reason };
+    const reason = error instanceof Error ? error.message : "whatsapp_failed";
+    notifLog("warn", "whatsapp_dispatch_failed", { template, error: reason });
+    return withEmail({ ok: false, channel: "whatsapp", error: reason });
   }
 }

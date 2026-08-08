@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { loyaltyHubRedirectPath } from "@/lib/customer/hub";
 import { JoinScreen } from "@/components/loyalty/join-screen";
+import { BrandThemeStyle } from "@/components/shared/brand-theme-style";
 import { FroqFooter } from "@/components/shared/froq-footer";
 
 export default async function JoinPage({
@@ -52,16 +53,19 @@ export default async function JoinPage({
   }
 
   return (
-    <JoinScreen
-      slug={merchant.slug}
-      branchSlug={branchSlug ?? null}
-      businessName={merchant.business_name}
-      rewardTitle={merchant.reward_title}
-      rewardName={merchant.reward_name}
-      totalStamps={merchant.total_stamps}
-      brandColor={merchant.brand_color}
-      logoUrl={merchant.logo_url}
-      nextPath={nextPath}
-    />
+    <>
+      <BrandThemeStyle color={merchant.brand_color} />
+      <JoinScreen
+        slug={merchant.slug}
+        branchSlug={branchSlug ?? null}
+        businessName={merchant.business_name}
+        rewardTitle={merchant.reward_title}
+        rewardName={merchant.reward_name}
+        totalStamps={merchant.total_stamps}
+        brandColor={merchant.brand_color}
+        logoUrl={merchant.logo_url}
+        nextPath={nextPath}
+      />
+    </>
   );
 }

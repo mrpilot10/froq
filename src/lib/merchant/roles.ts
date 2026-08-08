@@ -10,9 +10,19 @@ export function canModerateCustomers(role: MemberRole): boolean {
   return role === "owner";
 }
 
+/** Permanently delete an archived queue session and its guest records. */
+export function canDeleteQueueSessions(role: MemberRole): boolean {
+  return role === "owner" || role === "manager";
+}
+
 /** Invite / edit / remove team members (owners only). */
 export function canManageTeam(role: MemberRole): boolean {
   return role === "owner";
+}
+
+/** Edit dishes, upload menus, and guest feature toggles (not floor staff). */
+export function canEditMenu(role: MemberRole): boolean {
+  return role === "owner" || role === "manager";
 }
 
 /** Workspace-level All customers hub (owners only). */
@@ -25,8 +35,16 @@ export function canViewAnalytics(role: MemberRole): boolean {
   return role === "owner" || role === "manager";
 }
 
-/** Global business settings (`/merchant/settings`) — owners and managers only. */
+/**
+ * Global store settings (logo, brand color, business name) — owners only.
+ * Managers still reach `/merchant/settings` for Account / branch details.
+ */
 export function canViewBusinessSettings(role: MemberRole): boolean {
+  return role === "owner";
+}
+
+/** Business settings page — owners and managers (staff are denied). */
+export function canAccessBusinessSettingsPage(role: MemberRole): boolean {
   return role === "owner" || role === "manager";
 }
 
@@ -40,9 +58,9 @@ export const ROLE_LABELS: Record<MemberRole, string> = {
 };
 
 export const ROLE_HINTS: Record<MemberRole, string> = {
-  owner: "Full access — team, settings, customers, analytics, and billing.",
-  manager: "Sees customer details, analytics, business settings, and can offer stamps via OTP.",
-  staff: "Can offer stamps via OTP only — contact details, analytics, and business settings stay hidden.",
+  owner: "Full access to team, settings, customers, analytics, and billing.",
+  manager: "Customer details, analytics, settings, and stamps via OTP.",
+  staff: "Stamps via OTP only — no customer data, analytics, or settings.",
 };
 
 export function normalizeMemberRole(role: string | null | undefined): MemberRole {

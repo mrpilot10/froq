@@ -1,64 +1,97 @@
 "use client";
 
-import { memo, useEffect, useState } from "react";
-import { Clock3 } from "lucide-react";
+import { memo } from "react";
 import {
   formatTimeLabel,
-  formatWindowCountdown,
-  reservationWindowStatus,
   type ReservationSettings,
 } from "@/lib/merchant/reservations";
 
+export interface ReservationPulseItem {
+  id: string;
+  label: string;
+  value: number;
+  active?: boolean;
+  accent?: boolean;
+}
+
 interface ReservationWindowCardProps {
   settings: Pick<ReservationSettings, "openTime" | "closeTime">;
-  /** Merchant stopped taking requests — overrides the hours. */
+  /** Merchant stopped taking requests. */
   paused?: boolean;
+  /** Compact day pulse under the status — usually tappable filters. */
+  pulse?: ReservationPulseItem[];
+  onPulseSelect?: (id: string) => void;
 }
 
 /**
- * How much longer guests can book today. Owns its own 1s clock so the ticking
- * countdown never re-renders the bookings list beside it.
+ * Online bookings stay open around the clock. Store timings only set the
+ * seating slots guests can pick — they don't shut the request form.
  */
 export const ReservationWindowCard = memo(function ReservationWindowCard({
   settings,
   paused = false,
+  pulse,
+  onPulseSelect,
 }: ReservationWindowCardProps) {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    // Nothing counts down while paused, so don't keep a timer running.
-    if (paused) return;
-    const id = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(id);
-  }, [paused]);
-
-  const status = reservationWindowStatus(settings, now);
-  const label = paused
-    ? "Bookings stopped"
-    : status.open
-      ? "Bookings close in"
-      : "Bookings open in";
-  const value = paused ? "Paused" : formatWindowCountdown(status.secondsLeft);
+  const value = paused ? "Stopped" : "Open";
   const meta = paused
-    ? "Guests can't request a table"
-    : `${formatTimeLabel(settings.openTime)} – ${formatTimeLabel(settings.closeTime)}`;
-  const badge = paused ? "paused" : status.open ? "live" : "idle";
+    ? "Guests can't request a table right now"
+    : `Guests can book anytime · seats ${formatTimeLabel(settings.openTime)}–${formatTimeLabel(settings.closeTime)} (store timings)`;
+  const badge = paused ? "paused" : "live";
+  const tone = paused ? "paused" : "open";
 
   return (
-    <div className="panel-card resv-window">
-      <span className="resv-window-icon" aria-hidden="true">
-        <Clock3 size={18} strokeWidth={2.2} />
-      </span>
-
-      <div className="resv-window-copy">
-        <span className="resv-window-label">{label}</span>
-        <span className="resv-window-value">{value}</span>
-        <span className="resv-window-meta">{meta}</span>
+    <div className={`panel-card resv-hero resv-hero--${tone}`}>
+      <div className="resv-hero-top">
+        <div className="resv-hero-copy">
+          <div className="resv-hero-kicker">
+            <span className="resv-hero-label">Online bookings</span>
+            <span className={`queue-state-badge queue-state-badge--${badge}`}>
+              <span className="queue-state-dot" aria-hidden="true" />
+              {paused ? "Paused" : "Open"}
+            </span>
+          </div>
+          <span className="resv-hero-value">{value}</span>
+          <span className="resv-hero-meta">{meta}</span>
+        </div>
       </div>
 
-      <span className={`queue-state-badge queue-state-badge--${badge}`}>
-        <span className="queue-state-dot" aria-hidden="true" />
-        {paused ? "Paused" : status.open ? "Open" : "Closed"}
-      </span>
+      {pulse && pulse.length > 0 ? (
+        <div className="resv-hero-pulse" role="group" aria-label="Today at a glance">
+          {pulse.map((item) => {
+            const interactive = Boolean(onPulseSelect);
+            const className = [
+              "resv-hero-metric",
+              item.active ? "resv-hero-metric--active" : "",
+              item.accent ? "resv-hero-metric--accent" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+
+            if (!interactive) {
+              return (
+                <div key={item.id} className={className}>
+                  <span className="resv-hero-metric-value">{item.value}</span>
+                  <span className="resv-hero-metric-label">{item.label}</span>
+                </div>
+              );
+            }
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={className}
+                aria-pressed={item.active}
+                onClick={() => onPulseSelect?.(item.id)}
+              >
+                <span className="resv-hero-metric-value">{item.value}</span>
+                <span className="resv-hero-metric-label">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 });

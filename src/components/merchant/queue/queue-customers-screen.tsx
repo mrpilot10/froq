@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ChevronDown,
+  ChevronRight,
   Search,
   Users,
   X,
 } from "lucide-react";
-import { getUnifiedCustomers } from "@/app/merchant/actions";
 import { useMerchantWorkspace } from "@/components/merchant/merchant-workspace-context";
+import { useUnifiedCustomers } from "@/components/merchant/use-unified-customers";
 import { formatWaitShort } from "@/lib/queue/format";
-import type { UnifiedCustomer } from "@/lib/merchant/unified-customers";
+import { queueGuestStatusLabel } from "@/lib/queue/session-history";
+import { QueueCustomerSheet } from "./queue-customer-sheet";
 
 type SortKey = "recent" | "name" | "visits" | "seated";
 
@@ -46,41 +48,17 @@ function relativeFrom(ms: number | null, nowMs: number) {
   return `${Math.round(months / 12)}y ago`;
 }
 
-interface Snapshot {
-  key: string;
-  customers: UnifiedCustomer[];
-  fetchedAtMs: number;
-}
-
-/** Queue product customers — everyone who has joined a waitlist. */
+/** Queue product customers — every guest who has ever joined, any status. */
 export function QueueCustomersScreen() {
-  const { profile, activeBranchId } = useMerchantWorkspace();
+  const { profile, activeBranchId, branches } = useMerchantWorkspace();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const { customers, loading, fetchedAtMs: now } = useUnifiedCustomers("queue");
 
-  const requestKey = activeBranchId ?? "all";
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const result = await getUnifiedCustomers({ branchId: activeBranchId });
-      if (cancelled) return;
-      setSnapshot({
-        key: requestKey,
-        customers: result.customers.filter((row) => row.queue),
-        fetchedAtMs: Date.now(),
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeBranchId, requestKey]);
-
-  const fresh = snapshot?.key === requestKey ? snapshot : null;
-  const loading = fresh === null;
-  const customers = useMemo(() => fresh?.customers ?? [], [fresh]);
-  const now = fresh?.fetchedAtMs ?? Date.now();
+  const activeBranch = branches.find((b) => b.id === activeBranchId) ?? null;
+  const viewingAllBranches = activeBranchId === null && branches.length > 1;
+  const branchLabel = activeBranch?.name ?? null;
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -101,18 +79,42 @@ export function QueueCustomersScreen() {
   }, [customers, query, sort]);
 
   const searching = query.trim().length > 0;
+  // Keep the open sheet stable even if the search no longer matches them.
+  const selected = customers.find((row) => row.key === selectedKey) ?? null;
+
+  const headSub = (() => {
+    if (loading) {
+      if (branchLabel) {
+        return `Guest directory for the ${branchLabel} queue at ${profile.businessName}`;
+      }
+      if (viewingAllBranches) {
+        return `Guests across every branch queue at ${profile.businessName}`;
+      }
+      return `Guests who have joined a queue at ${profile.businessName}`;
+    }
+    if (searching) return `${visible.length} of ${customers.length} guests`;
+    if (branchLabel) {
+      return `${customers.length} guest${customers.length === 1 ? "" : "s"} at ${branchLabel}`;
+    }
+    if (viewingAllBranches) {
+      return `${customers.length} guest${customers.length === 1 ? "" : "s"} across all branches`;
+    }
+    return `${customers.length} guest${customers.length === 1 ? "" : "s"} across all queue sessions`;
+  })();
+
+  const emptySub = searching
+    ? "Try a different name or number."
+    : branchLabel
+      ? `This is the guest directory for ${branchLabel} — waiting, called, seated, and left all appear here after they join this branch’s queue.`
+      : viewingAllBranches
+        ? "Guests from every branch’s queue appear here — waiting, called, seated, or left. Switch to a branch to narrow the list."
+        : "Waiting, called, seated, and left guests appear here as soon as they join your queue.";
 
   return (
     <div className="tab-screen">
       <div className="tab-head">
         <h2 className="tab-title">Queue customers</h2>
-        <p className="tab-sub">
-          {loading
-            ? `Guests who have joined a waitlist at ${profile.businessName}`
-            : searching
-              ? `${visible.length} of ${customers.length} guests`
-              : `${customers.length} guests on the waitlist`}
-        </p>
+        <p className="tab-sub">{headSub}</p>
       </div>
 
       <label className="merchant-customer-search-field">
@@ -182,45 +184,73 @@ export function QueueCustomersScreen() {
           <p className="merchant-empty-title">
             {searching ? "No matches" : "No queue guests yet"}
           </p>
-          <p className="merchant-empty-sub">
-            {searching
-              ? "Try a different name or number."
-              : "Guests appear here as soon as they join your waitlist."}
-          </p>
+          <p className="merchant-empty-sub">{emptySub}</p>
         </div>
       ) : (
-        <div className="panel-card merchant-list-panel">
+        <div className="panel-card merchant-list-panel qcust-list-scroll">
           <ul className="merchant-list">
-            {visible.map((customer) => (
-              <li key={customer.key} className="merchant-list-item">
-                <div className="merchant-list-btn">
-                  <div className="merchant-avatar">{initials(customer.name)}</div>
-                  <div className="merchant-list-copy">
-                    <div className="merchant-list-title">{customer.name}</div>
-                    <div className="merchant-list-sub">
-                      {displayPhone(customer.phone)} ·{" "}
-                      {relativeFrom(customer.queue?.lastJoinedMs ?? customer.lastSeenMs, now)}
+            {visible.map((customer) => {
+              const lastStatus = customer.queue?.lastStatus ?? null;
+              return (
+                <li key={customer.key} className="merchant-list-item">
+                  <button
+                    type="button"
+                    className="merchant-list-btn qcust-row"
+                    onClick={() => setSelectedKey(customer.key)}
+                    aria-label={`Open ${customer.name}`}
+                  >
+                    <div className="merchant-avatar">{initials(customer.name)}</div>
+                    <div className="merchant-list-copy">
+                      <div className="merchant-list-title">
+                        {customer.name}
+                        {lastStatus ? (
+                          <span
+                            className={`qhist-guest-status qhist-guest-status--${lastStatus} qcust-last-status`}
+                          >
+                            {queueGuestStatusLabel(lastStatus)}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="merchant-list-sub">
+                        {displayPhone(customer.phone)} ·{" "}
+                        {relativeFrom(customer.queue?.lastJoinedMs ?? customer.lastSeenMs, now)}
+                      </div>
+                      <div className="merchant-list-sub" style={{ marginTop: 4 }}>
+                        {customer.queue?.visits ?? 0} visit
+                        {(customer.queue?.visits ?? 0) === 1 ? "" : "s"} ·{" "}
+                        {customer.queue?.seated ?? 0} seated
+                        {(customer.queue?.left ?? 0) > 0
+                          ? ` · ${customer.queue?.left} left`
+                          : ""}
+                      </div>
                     </div>
-                    <div className="merchant-list-sub" style={{ marginTop: 4 }}>
-                      {customer.queue?.visits ?? 0} visit
-                      {(customer.queue?.visits ?? 0) === 1 ? "" : "s"} ·{" "}
-                      {customer.queue?.seated ?? 0} seated
+                    <div className="merchant-list-trailing">
+                      <span className="merchant-ltv-amount">
+                        {customer.queue?.avgWaitMinutes != null
+                          ? formatWaitShort(customer.queue.avgWaitMinutes)
+                          : "—"}
+                      </span>
+                      <span className="merchant-list-sub">Avg wait</span>
                     </div>
-                  </div>
-                  <div className="merchant-list-trailing">
-                    <span className="merchant-ltv-amount">
-                      {customer.queue?.avgWaitMinutes != null
-                        ? formatWaitShort(customer.queue.avgWaitMinutes)
-                        : "—"}
-                    </span>
-                    <span className="merchant-list-sub">Avg wait</span>
-                  </div>
-                </div>
-              </li>
-            ))}
+                    <ChevronRight
+                      size={16}
+                      strokeWidth={2.2}
+                      className="merchant-list-arrow"
+                      aria-hidden
+                    />
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
+
+      <QueueCustomerSheet
+        customer={selected}
+        branchId={activeBranchId}
+        onClose={() => setSelectedKey(null)}
+      />
     </div>
   );
 }

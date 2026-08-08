@@ -6,7 +6,7 @@ import { HELP_CATEGORIES } from "@/lib/support/help-content";
 export const metadata: Metadata = {
   title: "Documentation — Froq Help",
   description:
-    "Guides for Froq Loyalty Stamps and Queue Management, plus answers on billing, plans and your account.",
+    "Guides for Froq Loyalty Stamps and Smart Queue, plus answers on billing, plans and your account.",
 };
 
 export default function HelpIndexPage() {
@@ -16,7 +16,7 @@ export default function HelpIndexPage() {
         <span className="docs-kicker">Documentation</span>
         <h1>Froq help centre</h1>
         <p className="docs-lead">
-          Everything you need to run Loyalty Stamps and Queue Management, from first setup to
+          Everything you need to run Loyalty Stamps and Smart Queue, from first setup to
           billing. Pick a section below, or search the docs from the sidebar.
         </p>
       </header>

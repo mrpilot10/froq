@@ -34,7 +34,7 @@ export function DashboardScreen() {
     goToTab,
   } = useMerchantWorkspace();
 
-  const allBranches = activeBranchId === null;
+  const allBranches = activeBranchId === null && branches.length > 1;
   const businessName = profile.businessName;
   const pendingLabel =
     approvals.length === 0

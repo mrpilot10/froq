@@ -31,7 +31,7 @@ export interface HistoryEntry {
   id: string;
   date: string;
   label: string;
-  status: "approved" | "pending" | "redeemed";
+  status: "approved" | "pending" | "rejected" | "redeemed";
   /** Newest reward claim — keep visually emphasized in the activity list. */
   highlight?: boolean;
 }

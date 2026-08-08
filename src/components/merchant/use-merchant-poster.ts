@@ -1,13 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { MerchantProduct } from "@/lib/merchant/types";
 
 /**
  * Fetches the merchant's QR poster (generated server-side) once, keeps a blob
  * object URL for preview, and reuses the same blob for download so we never
  * hit the endpoint twice. The object URL is revoked on unmount / reload.
  */
-export function useMerchantPoster() {
+export function useMerchantPoster(
+  product: MerchantProduct = "loyalty",
+  branchSlug?: string | null,
+) {
   const [posterUrl, setPosterUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +21,9 @@ export function useMerchantPoster() {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/merchant/poster", { cache: "no-store" });
+      const params = new URLSearchParams({ product });
+      if (branchSlug) params.set("branch", branchSlug);
+      const res = await fetch(`/api/merchant/poster?${params}`, { cache: "no-store" });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(body?.error ?? "Could not generate the poster.");
@@ -32,7 +38,7 @@ export function useMerchantPoster() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [product, branchSlug]);
 
   useEffect(() => {
     void load();
@@ -45,11 +51,18 @@ export function useMerchantPoster() {
     if (!posterUrl) return;
     const link = document.createElement("a");
     link.href = posterUrl;
-    link.download = "qr-poster.png";
+    link.download =
+      product === "queue"
+        ? "queue-qr-poster.png"
+        : product === "reservation"
+          ? "reservation-qr-poster.png"
+          : product === "menu"
+            ? "menu-qr-poster.png"
+            : "qr-poster.png";
     document.body.appendChild(link);
     link.click();
     link.remove();
-  }, [posterUrl]);
+  }, [posterUrl, product]);
 
   return { posterUrl, isLoading, error, download, reload: load };
 }

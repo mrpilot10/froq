@@ -13,6 +13,7 @@ import {
   Stamp,
   Trash2,
   UserRound,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
@@ -177,7 +178,9 @@ export function CustomerDrawer({
                   ? Gift
                   : event.type === "joined"
                     ? UserRound
-                    : Stamp;
+                    : event.type === "rejected"
+                      ? X
+                      : Stamp;
               return (
                 <div key={event.id} className="cust-timeline-step is-done">
                   <div className="cust-timeline-rail">
@@ -279,18 +282,30 @@ export function CustomerDrawer({
               </div>
 
               <div className="merchant-drawer-rows">
-                <div className="profile-row">
-                  <div className="profile-row-icon">
-                    <Phone size={18} strokeWidth={2.2} />
+                {customer.phone ? (
+                  <a className="profile-row profile-row--link" href={`tel:${customer.phone.replace(/[^\d+]/g, "")}`}>
+                    <div className="profile-row-icon">
+                      <Phone size={18} strokeWidth={2.2} />
+                    </div>
+                    <div className="profile-row-copy">
+                      <div className="profile-row-label">Call</div>
+                      <div className="profile-row-value">{formatPhoneDisplay(customer.phone)}</div>
+                    </div>
+                  </a>
+                ) : (
+                  <div className="profile-row">
+                    <div className="profile-row-icon">
+                      <Phone size={18} strokeWidth={2.2} />
+                    </div>
+                    <div className="profile-row-copy">
+                      <div className="profile-row-label">Mobile</div>
+                      <div className="profile-row-value">Not provided</div>
+                    </div>
                   </div>
-                  <div className="profile-row-copy">
-                    <div className="profile-row-label">Mobile</div>
-                    <div className="profile-row-value">{formatPhoneDisplay(customer.phone)}</div>
-                  </div>
-                </div>
+                )}
 
                 {customer.email ? (
-                  <div className="profile-row">
+                  <a className="profile-row profile-row--link" href={`mailto:${customer.email}`}>
                     <div className="profile-row-icon">
                       <Mail size={18} strokeWidth={2.2} />
                     </div>
@@ -298,7 +313,7 @@ export function CustomerDrawer({
                       <div className="profile-row-label">Email</div>
                       <div className="profile-row-value">{customer.email}</div>
                     </div>
-                  </div>
+                  </a>
                 ) : null}
               </div>
 

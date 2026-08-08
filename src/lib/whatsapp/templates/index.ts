@@ -7,6 +7,7 @@
  */
 
 export { WhatsAppTemplateName, froqPublicOrigin, loyaltyCardUrl } from "./names";
+export type { WhatsAppTemplateName as WhatsAppTemplateNameValue } from "./names";
 
 export {
   WHATSAPP_TEMPLATE_CATEGORIES,
@@ -20,7 +21,6 @@ export type {
   WhatsAppTemplateCategoryRow,
   ApitxtTemplateCatalogName,
 } from "./categories";
-export type { WhatsAppTemplateName as WhatsAppTemplateNameValue } from "./names";
 
 export {
   WhatsAppTemplateValidationError,
@@ -68,3 +68,12 @@ export {
   canonicalQueueTemplateName,
 } from "./queue";
 export type { QueueJoinedTemplateInput, QueuePartyTemplateInput } from "./queue";
+
+export {
+  buildReservationWhatsAppVars,
+  requireCustomerDisplayName,
+} from "./reservation-vars";
+export type {
+  ReservationWhatsAppVarInput,
+  ReservationWhatsAppVars,
+} from "./reservation-vars";

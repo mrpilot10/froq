@@ -27,7 +27,7 @@ const PRODUCT_CARDS: ProductCard[] = [
   {
     id: "queue",
     Icon: Users,
-    name: "Queue Management",
+    name: "Smart Queue",
     tagline: "Live waitlists",
     description:
       "A live digital waitlist for your entrance. Guests join by scanning, wait wherever they like, and get a WhatsApp alert the moment their table is ready.",

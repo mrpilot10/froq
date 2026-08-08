@@ -2,14 +2,25 @@
 
 import type { ReactNode } from "react";
 import { Download, Loader2, RefreshCw } from "lucide-react";
+import type { MerchantProduct } from "@/lib/merchant/types";
 import { useMerchantPoster } from "./use-merchant-poster";
 
 interface MerchantPosterCardProps {
   caption?: ReactNode;
+  product?: MerchantProduct;
+  /** Branch slug encoded into the poster QR (`?b=`). */
+  branchSlug?: string | null;
 }
 
-export function MerchantPosterCard({ caption }: MerchantPosterCardProps) {
-  const { posterUrl, isLoading, error, download, reload } = useMerchantPoster();
+export function MerchantPosterCard({
+  caption,
+  product = "loyalty",
+  branchSlug = null,
+}: MerchantPosterCardProps) {
+  const { posterUrl, isLoading, error, download, reload } = useMerchantPoster(
+    product,
+    branchSlug,
+  );
 
   return (
     <div className="merchant-poster-card">

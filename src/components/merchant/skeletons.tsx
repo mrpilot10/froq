@@ -2,6 +2,7 @@ import { FROQ_LOGO_SRC } from "@/lib/brand";
 import Image from "next/image";
 import type { MerchantTab } from "@/lib/merchant/types";
 import { FroqFooter } from "@/components/shared/froq-footer";
+import { MenuItemsSkeleton } from "./menu/menu-skeletons";
 
 function SkHead() {
   return (
@@ -263,6 +264,8 @@ export function MerchantTabSkeleton({ tab }: { tab: MerchantTab }) {
     case "customers":
     case "loyalty-customers":
     case "queue-customers":
+    case "reservations-customers":
+    case "menu-customers":
       return <CustomersSkeleton />;
     case "approvals":
       return <ApprovalsSkeleton />;
@@ -271,7 +274,16 @@ export function MerchantTabSkeleton({ tab }: { tab: MerchantTab }) {
     case "profile":
     case "loyalty-settings":
     case "queue-settings":
+    case "menu-settings":
       return <ProfileSkeleton />;
+    case "menu-items":
+      return (
+        <div className="tab-screen" aria-busy="true">
+          <SkHead />
+          <MenuItemsSkeleton />
+        </div>
+      );
+    case "menu-home":
     case "analytics":
     case "loyalty-history":
     default:

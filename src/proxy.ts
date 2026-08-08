@@ -1,17 +1,11 @@
-import { NextResponse, type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
 export async function proxy(request: NextRequest) {
-  // Exact /merchant is redirect-only. Handle it here so client soft-nav
-  // (e.g. marketing "Log in") does not land on Next's not-found UI from
-  // a page that only throws NEXT_REDIRECT.
-  if (request.nextUrl.pathname === "/merchant") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/merchant/loyalty";
-    return NextResponse.redirect(url);
-  }
-
-  return updateSession(request);
+  // Exact /merchant is handled by app/merchant/page.tsx (last-used + access).
+  const response = await updateSession(request);
+  response.headers.set("x-pathname", request.nextUrl.pathname);
+  return response;
 }
 
 export const config = {
@@ -21,6 +15,8 @@ export const config = {
     // login cookies are set by exchangeCodeForSession in the callback route.
     "/merchant",
     "/merchant/:path*",
+    "/admin",
+    "/admin/:path*",
     "/c/:path*",
     "/join/:path*",
     "/queue/:path*",

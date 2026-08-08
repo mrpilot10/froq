@@ -30,7 +30,7 @@ export interface ReservationNotifyTarget {
   enabled: boolean;
   customer: Pick<
     GuestCustomer,
-    "phone" | "name" | "publicToken" | "whatsappAvailable" | "preferred"
+    "phone" | "name" | "email" | "publicToken" | "whatsappAvailable" | "preferred"
   > | null;
 }
 
@@ -127,12 +127,14 @@ export async function sendReservationNotification(input: {
       customer: {
         phone: target.customer.phone,
         name: target.customer.name,
+        email: target.customer.email,
         publicToken: target.customer.publicToken,
         whatsappAvailable: target.customer.whatsappAvailable,
         preferredNotificationChannel: target.customer.preferred,
       },
       template,
       data,
+      dedupeKey: `reservation:${input.reservationToken}:${template}`,
     });
     if (!result.ok) {
       reservationLog("error", "send_failed", { template, error: result.error });
@@ -171,7 +173,7 @@ export async function resolveReservationTarget(input: {
     input.customerId
       ? admin
           .from("customers")
-          .select("name, phone, public_token, whatsapp_available, preferred_notification_channel")
+          .select("name, phone, email, public_token, whatsapp_available, preferred_notification_channel")
           .eq("id", input.customerId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -186,6 +188,7 @@ export async function resolveReservationTarget(input: {
         ? {
             name: customerRow.name,
             phone: customerRow.phone,
+            email: (customerRow.email as string | null) ?? null,
             publicToken: customerRow.public_token,
             whatsappAvailable: customerRow.whatsapp_available === true,
             preferred:

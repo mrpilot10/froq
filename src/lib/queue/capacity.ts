@@ -33,7 +33,7 @@ export async function checkQueueCapacity(
     return {
       ok: false,
       reason: "locked",
-      error: "Queue Management isn't active on your account.",
+      error: "Smart Queue isn't active on your account.",
     };
   }
 

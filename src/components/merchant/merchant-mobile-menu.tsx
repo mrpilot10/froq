@@ -6,7 +6,7 @@ import { Fragment, useEffect, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowUpRight, ChevronRight, LifeBuoy, LogOut, X } from "lucide-react";
+import { ChevronRight, LifeBuoy, LogOut, QrCode, X } from "lucide-react";
 import {
   PRODUCT_DEFAULT_TAB,
   PRODUCTS,
@@ -19,14 +19,12 @@ import {
   type NavItem,
 } from "@/lib/merchant/nav";
 import { ROLE_LABELS } from "@/lib/merchant/roles";
-import { planUpgradeSummary } from "@/lib/merchant/plan-summary";
 import type { MemberRole, MerchantProduct, MerchantTab } from "@/lib/merchant/types";
+import type { Entitlements } from "@/lib/merchant/entitlements";
 import {
-  isProductEnabled,
-  isTrialActive,
-  trialDaysLeft,
-  type Entitlements,
-} from "@/lib/merchant/entitlements";
+  MerchantSidePlanCard,
+  type MerchantSidePlanUsage,
+} from "./merchant-side-plan-card";
 
 function getInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -42,12 +40,15 @@ interface MerchantMobileMenuProps {
   role: MemberRole;
   entitlements: Entitlements;
   canPurchase?: boolean;
+  planUsage?: MerchantSidePlanUsage;
   userName?: string;
   onTabChange: (tab: MerchantTab) => void;
   onProductChange: (product: MerchantProduct) => void;
   onComingSoonProduct?: (product: ComingSoonProduct) => void;
   onUpgrade?: (product: MerchantProduct) => void;
   onOpenAccount?: () => void;
+  /** Opens the one QR that points at the merchant's public landing page. */
+  onShowHubQr?: () => void;
   onLogout?: () => void;
   onClose: () => void;
 }
@@ -59,30 +60,19 @@ export function MerchantMobileMenu({
   role,
   entitlements,
   canPurchase = true,
+  planUsage,
   userName = "",
   onTabChange,
   onProductChange,
   onComingSoonProduct,
   onUpgrade,
   onOpenAccount,
+  onShowHubQr,
   onLogout,
   onClose,
 }: MerchantMobileMenuProps) {
   const [mounted, setMounted] = useState(false);
   const [menuPanel, setMenuPanel] = useState<"business" | "products">("business");
-  const product = PRODUCTS.find((p) => p.id === activeProduct) ?? PRODUCTS[0];
-  const entitlement = entitlements[activeProduct];
-  const enabled = isProductEnabled(entitlements, activeProduct);
-  const onTrial = isTrialActive(entitlement);
-  const summary = planUpgradeSummary({
-    product: activeProduct,
-    planId: entitlement?.planId,
-  });
-  const statusLabel = onTrial
-    ? `${trialDaysLeft(entitlement)}d trial left`
-    : enabled
-      ? "Active"
-      : "Not enabled";
   const workspaceItems = workspaceNavForRole();
   const displayName = userName.trim() || "Team member";
   const initials = getInitials(displayName);
@@ -291,52 +281,16 @@ export function MerchantMobileMenu({
         </div>
 
         <div className="merchant-menu-foot">
-          <div className={`merchant-side-plan${enabled ? "" : " is-locked"}`}>
-            <div className="merchant-side-plan-top">
-              <span className="merchant-side-plan-name">
-                {product.name}
-                {summary.currentTier ? (
-                  <span className="merchant-side-plan-tier">{summary.currentTier}</span>
-                ) : null}
-              </span>
-              <span className={`merchant-side-plan-status${enabled ? " is-active" : ""}`}>
-                {statusLabel}
-              </span>
-            </div>
-
-            {/* No plan in force means no current price — the CTA carries one. */}
-            {summary.currentPriceLabel ? (
-              <div className="merchant-side-plan-price">
-                {summary.currentPriceLabel}
-                <span>{summary.currentCycleLabel}</span>
-              </div>
-            ) : null}
-
-            {summary.nextPlan && summary.nextHighlights.length > 0 ? (
-              <p className="merchant-side-plan-gain">
-                {summary.currentTier ? `${summary.nextPlan.name}: ` : null}
-                {summary.nextHighlights.join(" · ")}
-              </p>
-            ) : null}
-
-            {canPurchase && summary.nextPlan ? (
-              <button
-                type="button"
-                className="merchant-side-plan-cta"
-                onClick={() => {
-                  onUpgrade?.(activeProduct);
-                  onClose();
-                }}
-              >
-                <span>{summary.currentTier ? "Upgrade" : "Get started"}</span>
-                <span className="merchant-side-plan-cta-price">
-                  {summary.nextPlan.priceLabel}
-                  {summary.currentCycleLabel}
-                </span>
-                <ArrowUpRight size={14} strokeWidth={2.4} />
-              </button>
-            ) : null}
-          </div>
+          <MerchantSidePlanCard
+            product={activeProduct}
+            entitlements={entitlements}
+            canPurchase={canPurchase}
+            usage={planUsage}
+            onAction={(productId) => {
+              onUpgrade?.(productId);
+              onClose();
+            }}
+          />
 
           <button
             type="button"
@@ -361,6 +315,22 @@ export function MerchantMobileMenu({
               aria-hidden="true"
             />
           </button>
+
+          {onShowHubQr ? (
+            <button
+              type="button"
+              className="merchant-menu-item"
+              onClick={() => {
+                onShowHubQr();
+                onClose();
+              }}
+            >
+              <span className="merchant-menu-item-icon">
+                <QrCode size={19} strokeWidth={2} />
+              </span>
+              <span>Your QR</span>
+            </button>
+          ) : null}
 
           <Link href="/help" className="merchant-menu-item" onClick={onClose}>
             <span className="merchant-menu-item-icon">

@@ -35,18 +35,21 @@ export function OnboardingVerifyStep({
 }: OnboardingVerifyStepProps) {
   const [email, setEmail] = useState(emailProp);
   const [phone, setPhone] = useState(phoneProp);
+  const [contactFor, setContactFor] = useState({ email: emailProp, phone: phoneProp });
   const [active, setActive] = useState<Channel | null>(null);
-  const [code, setCode] = useState("");
+  const [codes, setCodes] = useState<Record<Channel, string>>({ email: "", phone: "" });
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busyChannel, setBusyChannel] = useState<Channel | null>(null);
   const emailCooldown = useResendCooldown();
   const phoneCooldown = useResendCooldown();
 
-  useEffect(() => {
+  // Keep local contact values in sync when checkout props arrive without an effect.
+  if (contactFor.email !== emailProp || contactFor.phone !== phoneProp) {
+    setContactFor({ email: emailProp, phone: phoneProp });
     setEmail(emailProp);
     setPhone(phoneProp);
-  }, [emailProp, phoneProp]);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -75,101 +78,106 @@ export function OnboardingVerifyStep({
   const send = useCallback(
     async (channel: Channel) => {
       const cooldown = channel === "email" ? emailCooldown : phoneCooldown;
-      if (!cooldown.canResend) return;
+      if (!cooldown.canResend || busyChannel) return;
 
-      setBusy(true);
+      // Switch channel first so the OTP panel can't stay on the other one,
+      // and clear any leftover code/error from a previous attempt.
+      setActive(channel);
+      setCodes((prev) => ({ ...prev, [channel]: "" }));
       setError("");
       setInfo("");
-      if (channel === "email") {
-        const res = await sendMerchantEmailVerification();
-        setBusy(false);
-        if (!res.ok) {
-          setError(res.message);
-          setActive("email");
-          if (res.retryAfter) emailCooldown.start(res.retryAfter);
-          return;
-        }
-        setActive("email");
-        setCode("");
-        emailCooldown.start(res.retryAfter ?? RESEND_SECONDS);
-        setInfo(res.message);
-        return;
-      }
+      setBusyChannel(channel);
 
-      const res = await sendMerchantPhoneVerification();
-      setBusy(false);
+      const res =
+        channel === "email"
+          ? await sendMerchantEmailVerification()
+          : await sendMerchantPhoneVerification();
+
+      setBusyChannel(null);
+
       if (!res.ok) {
         setError(res.message);
-        setActive("phone");
-        if (res.retryAfter) phoneCooldown.start(res.retryAfter);
+        if (res.retryAfter) cooldown.start(res.retryAfter);
         return;
       }
-      setActive("phone");
-      setCode("");
-      phoneCooldown.start(res.retryAfter ?? RESEND_SECONDS);
+
+      cooldown.start(res.retryAfter ?? RESEND_SECONDS);
       setInfo(res.message);
     },
-    [emailCooldown, phoneCooldown],
+    [busyChannel, emailCooldown, phoneCooldown],
   );
 
-  const verify = useCallback(async () => {
-    if (!active) return;
-    if (code.length !== OTP_LENGTH) {
-      setError(`Enter the ${OTP_LENGTH}-digit code we sent you.`);
-      return;
-    }
-    setBusy(true);
-    setError("");
-    const res =
-      active === "email"
-        ? await verifyMerchantEmailVerification(code)
-        : await verifyMerchantPhoneVerification(code);
-    setBusy(false);
-    if (!res.ok) {
-      setError(res.message);
-      return;
-    }
-    setInfo(res.message);
-    setActive(null);
-    setCode("");
-    if (active === "email") onEmailVerified();
-    else onPhoneVerified();
-  }, [active, code, onEmailVerified, onPhoneVerified]);
+  const verify = useCallback(
+    async (channel: Channel) => {
+      const code = codes[channel];
+      if (code.length !== OTP_LENGTH) {
+        setError(`Enter the ${OTP_LENGTH}-digit code we sent you.`);
+        setActive(channel);
+        return;
+      }
+      if (busyChannel) return;
+
+      setBusyChannel(channel);
+      setError("");
+      setActive(channel);
+
+      const res =
+        channel === "email"
+          ? await verifyMerchantEmailVerification(code)
+          : await verifyMerchantPhoneVerification(code);
+
+      setBusyChannel(null);
+
+      if (!res.ok) {
+        setError(res.message);
+        return;
+      }
+
+      setInfo(res.message);
+      setActive(null);
+      setCodes((prev) => ({ ...prev, [channel]: "" }));
+      if (channel === "email") onEmailVerified();
+      else onPhoneVerified();
+    },
+    [busyChannel, codes, onEmailVerified, onPhoneVerified],
+  );
 
   return (
     <div className="onboarding-verify">
       <VerifySection
+        channel="email"
         Icon={Mail}
         label="Email"
         value={email || "—"}
         verified={emailVerified}
-        disabled={busy}
         expanded={active === "email"}
-        code={code}
+        code={codes.email}
         error={active === "email" ? error : ""}
         info={active === "email" ? info : ""}
-        busy={busy}
+        busy={busyChannel === "email"}
+        locked={busyChannel !== null && busyChannel !== "email"}
         resendIn={emailCooldown.secondsLeft}
         onSend={() => void send("email")}
-        onCodeChange={setCode}
-        onVerify={() => void verify()}
+        onCodeChange={(value) => setCodes((prev) => ({ ...prev, email: value }))}
+        onVerify={() => void verify("email")}
         onResend={() => void send("email")}
       />
       <VerifySection
+        channel="phone"
         Icon={Phone}
         label="Mobile number"
         value={phoneDisplay ? formatPhoneDisplay(phoneDisplay) : "—"}
         verified={phoneVerified}
-        disabled={busy || !phoneDisplay}
         expanded={active === "phone"}
-        code={code}
+        code={codes.phone}
         error={active === "phone" ? error : ""}
         info={active === "phone" ? info : ""}
-        busy={busy}
+        busy={busyChannel === "phone"}
+        locked={(busyChannel !== null && busyChannel !== "phone") || !phoneDisplay}
         resendIn={phoneCooldown.secondsLeft}
         onSend={() => void send("phone")}
-        onCodeChange={setCode}
-        onVerify={() => void verify()}
+        onCodeChange={(value) => setCodes((prev) => ({ ...prev, phone: value }))}
+        onVerify={() => void verify("phone")}
         onResend={() => void send("phone")}
       />
     </div>
@@ -177,32 +185,34 @@ export function OnboardingVerifyStep({
 }
 
 function VerifySection({
+  channel,
   Icon,
   label,
   value,
   verified,
-  disabled,
   expanded,
   code,
   error,
   info,
   busy,
+  locked,
   resendIn,
   onSend,
   onCodeChange,
   onVerify,
   onResend,
 }: {
+  channel: Channel;
   Icon: typeof Mail;
   label: string;
   value: string;
   verified: boolean;
-  disabled: boolean;
   expanded: boolean;
   code: string;
   error: string;
   info: string;
   busy: boolean;
+  locked: boolean;
   resendIn: number;
   onSend: () => void;
   onCodeChange: (value: string) => void;
@@ -210,67 +220,94 @@ function VerifySection({
   onResend: () => void;
 }) {
   const coolingDown = resendIn > 0;
-  const sendDisabled = disabled || coolingDown;
+  const sendDisabled = locked || busy || coolingDown;
+  const destination = channel === "email" ? "email" : "phone";
 
   return (
-    <div
+    <section
       className={`onboarding-verify-card${verified ? " is-verified" : ""}${
         expanded ? " is-expanded" : ""
       }`}
+      aria-label={`${label} verification`}
     >
       <div className="onboarding-verify-card-top">
-        <span className="onboarding-verify-icon">
+        <span className="onboarding-verify-icon" aria-hidden>
           {verified ? <Check size={18} strokeWidth={2.6} /> : <Icon size={18} strokeWidth={2.2} />}
         </span>
         <div className="onboarding-verify-copy">
           <span className="onboarding-verify-label">{label}</span>
           <span className="onboarding-verify-value">{value}</span>
         </div>
-        {verified ? (
-          <span className="onboarding-verify-status">Verified</span>
-        ) : (
-          <button
-            type="button"
-            className="onboarding-verify-send"
-            disabled={sendDisabled}
-            onClick={onSend}
-          >
-            {busy && expanded ? "Sending…" : coolingDown ? `Resend in ${resendIn}s` : "Send Code"}
-          </button>
-        )}
+        {verified ? <span className="onboarding-verify-status">Verified</span> : null}
       </div>
 
-      {expanded && !verified && (
+      {!verified && !expanded ? (
+        <button
+          type="button"
+          className="onboarding-verify-send"
+          disabled={sendDisabled}
+          aria-label={`Send ${destination} verification code`}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onSend();
+          }}
+        >
+          {busy ? "Sending…" : coolingDown ? `Resend in ${resendIn}s` : "Send code"}
+        </button>
+      ) : null}
+
+      {expanded && !verified ? (
         <div className="onboarding-verify-code">
-          <p className="onboarding-verify-code-label">
-            Enter the code sent to your {label.toLowerCase().includes("email") ? "email" : "phone"}
-          </p>
-          {info && <p className="merchant-field-hint">{info}</p>}
-          <OtpInput value={code} length={OTP_LENGTH} onChange={onCodeChange} />
-          {error && (
+          <p className="onboarding-verify-code-label">Enter the code we sent</p>
+          {info ? <p className="merchant-field-hint">{info}</p> : null}
+          <OtpInput
+            key={channel}
+            value={code}
+            length={OTP_LENGTH}
+            disabled={busy}
+            onChange={onCodeChange}
+          />
+          {error ? (
             <p className="auth-error" role="alert">
               {error}
             </p>
-          )}
+          ) : null}
           <button
             type="button"
             className="cta-btn merchant-cta-accent onboarding-verify-confirm"
             disabled={busy || code.length !== OTP_LENGTH}
-            onClick={onVerify}
+            aria-label={`Verify ${destination} code`}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onVerify();
+            }}
           >
             {busy ? "Verifying…" : "Verify code"}
           </button>
           <p className="auth-resend" aria-live="polite">
             {coolingDown ? (
-              <>Resend code in <strong>{resendIn}s</strong></>
+              <>
+                Resend code in <strong>{resendIn}s</strong>
+              </>
             ) : (
-              <button type="button" className="auth-link" disabled={busy} onClick={onResend}>
+              <button
+                type="button"
+                className="auth-link"
+                disabled={busy || locked}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onResend();
+                }}
+              >
                 Resend code
               </button>
             )}
           </p>
         </div>
-      )}
-    </div>
+      ) : null}
+    </section>
   );
 }

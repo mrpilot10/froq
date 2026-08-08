@@ -97,7 +97,7 @@ export async function processBirthdayBonusStampNotifications(): Promise<Birthday
   const { data: customers, error: customersError } = await admin
     .from("customers")
     .select(
-      "id, merchant_id, name, phone, public_token, whatsapp_available, preferred_notification_channel, birthdate, birthday_notify_year, banned",
+      "id, merchant_id, name, phone, email, public_token, whatsapp_available, preferred_notification_channel, birthdate, birthday_notify_year, banned",
     )
     .in("merchant_id", merchantIds)
     .eq("banned", false)
@@ -145,6 +145,7 @@ export async function processBirthdayBonusStampNotifications(): Promise<Birthday
       customer: {
         phone: customer.phone,
         name: customer.name,
+        email: (customer.email as string | null) ?? null,
         whatsappAvailable: customer.whatsapp_available === true,
         preferredNotificationChannel:
           customer.preferred_notification_channel === "whatsapp" ? "whatsapp" : "sms",
@@ -155,6 +156,7 @@ export async function processBirthdayBonusStampNotifications(): Promise<Birthday
         businessName: merchant.business_name,
         rewardName,
       },
+      dedupeKey: `birthday:${customer.id}:${year}`,
     });
 
     if (!result.ok) {

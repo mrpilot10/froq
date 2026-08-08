@@ -19,6 +19,14 @@ const TIER_RANK: Record<string, number> = {
   "queue-pro": 3,
   /** Legacy single-tier queue id → Growth. */
   queue: 2,
+  "reservation-starter": 1,
+  "reservation-growth": 2,
+  "reservation-pro": 3,
+  reservation: 2,
+  "menu-starter": 1,
+  "menu-growth": 2,
+  "menu-pro": 3,
+  menu: 2,
 };
 
 /** Public billing policy shown in manage-plan UI and FAQ. */
@@ -26,9 +34,9 @@ export const BILLING_POLICY = {
   moneyBack:
     "7-day money-back guarantee for first-time subscriptions only. After that, payments are non-refundable.",
   planChanges:
-    "Plan changes are handled automatically at the next renewal. Your current plan stays active until then.",
+    "Upgrades apply immediately after payment. Downgrades and cancellations take effect at the next renewal — your current plan stays active until then.",
   cancellations:
-    "You can cancel anytime to prevent future renewals. Access continues until the end of the paid period, then moves to Free.",
+    "You can cancel anytime to stop future renewals. Access continues until the end of the paid period, then the product locks until you subscribe again.",
   nonRefundable: "After the first-time refund window, all payments are non-refundable.",
   refundHelp: "To request a refund, go to /help.",
 } as const;
@@ -85,8 +93,8 @@ export function defaultPeriodEnd(
 }
 
 /**
- * Prorated upgrade charge (INR). Kept for order/API compatibility; plan changes
- * for existing subscribers are scheduled at renewal instead of charged mid-cycle.
+ * Prorated upgrade charge (INR). Kept for order/API compatibility; manage-plan
+ * upgrades charge the full new plan via Razorpay and apply immediately.
  */
 export function proratedUpgradeAmount(
   fromPlanId: string,
@@ -119,7 +127,7 @@ export function formatPlanChangeCta(
   opts?: { effectiveOn?: string | null },
 ): string {
   const when = formatBillingDate(opts?.effectiveOn);
-  if (kind === "upgrade") return `Upgrade to ${plan.name} on ${when}`;
+  if (kind === "upgrade") return `Upgrade to ${plan.name} now`;
   if (kind === "downgrade") return `Downgrade to ${plan.name} on ${when}`;
   return `Switch to ${plan.name} on ${when}`;
 }

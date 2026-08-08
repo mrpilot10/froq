@@ -1,5 +1,6 @@
 import type { MerchantProductKind, ProductStatus } from "@/lib/supabase/database.types";
 import type { MerchantProduct } from "./types";
+import { MENU_PREVIEW } from "./feature-flags";
 import { isFreePlanId } from "./pricing";
 
 /**
@@ -26,6 +27,7 @@ export const EMPTY_ENTITLEMENTS: Entitlements = {
   loyalty: null,
   queue: null,
   reservation: null,
+  menu: null,
 };
 
 /** Length of the free trial offered on the product paywall. */
@@ -83,6 +85,8 @@ export function isProductEnabled(
   entitlements: Entitlements,
   product: MerchantProduct,
 ): boolean {
+  // AI Menu can't be bought yet, so the paywall would lock out the preview.
+  if (product === "menu") return MENU_PREVIEW;
   const entitlement = entitlements[product];
   if (!entitlement || entitlement.status !== "active") return false;
   if (isTrialRow(entitlement)) return isTrialActive(entitlement);
@@ -127,7 +131,7 @@ export function entitlementsFromRows(
     trial_ends_at?: string | null;
   }>,
 ): Entitlements {
-  const map: Entitlements = { loyalty: null, queue: null, reservation: null };
+  const map: Entitlements = { ...EMPTY_ENTITLEMENTS };
   for (const row of rows) {
     map[row.product] = {
       product: row.product,

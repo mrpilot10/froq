@@ -12,6 +12,8 @@ interface BranchSwitcherProps {
   allowAllBranches?: boolean;
   onSelect: (branchId: string | null) => void | Promise<void>;
   onAddBranch: () => void;
+  /** Shown in the menu when there are no branches to pick from. */
+  emptyCta?: { label: string; onClick: () => void };
 }
 
 export function BranchSwitcher({
@@ -21,6 +23,7 @@ export function BranchSwitcher({
   allowAllBranches = true,
   onSelect,
   onAddBranch,
+  emptyCta,
 }: BranchSwitcherProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -34,9 +37,21 @@ export function BranchSwitcher({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const label = activeBranch ? activeBranch.name : allowAllBranches ? "All branches" : "Branch";
-  // With a single branch there's nothing to switch between.
-  const hasChoices = allowAllBranches ? branches.length > 1 : branches.length > 1;
+  const soleBranch = branches.length === 1 ? branches[0] : null;
+  const displayBranch = activeBranch ?? soleBranch;
+  const isEmpty = branches.length === 0;
+  const showEmptyCta = isEmpty && Boolean(emptyCta);
+  const label = isEmpty
+    ? "No branch selected"
+    : displayBranch
+      ? displayBranch.name
+      : allowAllBranches && branches.length > 1
+        ? "All branches"
+        : "Branch";
+  // With a single branch there's nothing to switch between — only "Add" remains.
+  const showAllOption = allowAllBranches && branches.length > 1;
+  const hasChoices = showAllOption || branches.length > 1;
+  const canOpen = hasChoices || canManage || showEmptyCta;
 
   const pick = (branchId: string | null) => {
     setOpen(false);
@@ -50,19 +65,19 @@ export function BranchSwitcher({
         className="branch-switcher-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
-        disabled={!hasChoices && !canManage}
+        disabled={!canOpen}
         onClick={() => setOpen((v) => !v)}
       >
         <MapPin size={13} strokeWidth={2.4} className="branch-switcher-pin" />
         <span className="branch-switcher-label">{label}</span>
-        {(hasChoices || canManage) && (
+        {canOpen && (
           <ChevronDown size={14} strokeWidth={2.4} className="branch-switcher-caret" />
         )}
       </button>
 
       {open && (
         <div className="branch-switcher-menu" role="listbox">
-          {allowAllBranches && branches.length > 1 && (
+          {showAllOption && (
             <button
               type="button"
               role="option"
@@ -82,7 +97,7 @@ export function BranchSwitcher({
           )}
 
           {branches.map((branch) => {
-            const isActive = activeBranch?.id === branch.id;
+            const isActive = displayBranch?.id === branch.id;
             return (
               <button
                 key={branch.id}
@@ -105,6 +120,20 @@ export function BranchSwitcher({
               </button>
             );
           })}
+
+          {showEmptyCta && emptyCta && (
+            <button
+              type="button"
+              className="branch-switcher-add"
+              onClick={() => {
+                setOpen(false);
+                emptyCta.onClick();
+              }}
+            >
+              <MapPin size={15} strokeWidth={2.4} />
+              {emptyCta.label}
+            </button>
+          )}
 
           {canManage && (
             <button

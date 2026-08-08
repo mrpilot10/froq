@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isCustomerPublicToken } from "@/lib/customer/hub";
 import type { BusinessInfo, HistoryEntry, RewardCardGroup } from "@/lib/loyalty/types";
-import type { MerchantRow } from "@/lib/supabase/database.types";
+import type { BranchRow, MerchantRow } from "@/lib/supabase/database.types";
+import { resolveGuestSocialLinks } from "@/lib/merchant/guest-social-links";
 
 export interface CardData {
   customerId: string;
@@ -13,6 +14,8 @@ export interface CardData {
   totalStamps: number;
   status: "active" | "reward_ready" | "claimed";
   pending: boolean;
+  /** Merchant blocked this guest from collecting stamps. */
+  banned: boolean;
   /** Random FROQ-XXXXX code the customer shows to redeem (only when ready). */
   rewardCode: string;
   /** Stamp-collection lock after a reward is redeemed. */
@@ -62,20 +65,20 @@ export interface ShopMembershipCheck {
   publicToken?: string;
 }
 
-/** Ensures a stored link (often saved without a scheme) is an absolute URL. */
-function toExternalUrl(raw?: string | null): string | undefined {
-  const trimmed = raw?.trim();
-  if (!trimmed) return undefined;
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return `https://${trimmed.replace(/^\/+/, "")}`;
-}
+/**
+ * Contact details and links belong to the branch the customer joined at; the
+ * merchant row is the fallback for pre-0069 data and unassigned customers.
+ * Name, logo, brand color, and the reward program stay merchant-wide.
+ */
+function toBusinessInfo(m: MerchantRow, branch?: BranchRow | null): BusinessInfo {
+  const pick = (branchValue: string | null | undefined, merchantValue: string | null | undefined) =>
+    branchValue?.trim() || merchantValue?.trim() || undefined;
 
-function toBusinessInfo(m: MerchantRow): BusinessInfo {
   return {
     name: m.business_name,
-    address: m.address ?? "",
-    phone: m.phone?.trim() || undefined,
-    googleMapsUrl: m.google_maps_url?.trim() || undefined,
+    address: pick(branch?.address, m.address) ?? "",
+    phone: pick(branch?.phone, m.phone),
+    googleMapsUrl: pick(branch?.google_maps_url, m.google_maps_url),
     brandColor: m.brand_color,
     logoUrl: m.logo_url ?? null,
     rewardTitle: m.reward_title,
@@ -85,13 +88,34 @@ function toBusinessInfo(m: MerchantRow): BusinessInfo {
     rewardImage: m.reward_image_url || "/reward-coffee.png",
     totalStamps: m.total_stamps,
     restartAfterReward: m.restart_after_reward !== false,
-    socialLinks: {
-      instagram: toExternalUrl(m.instagram_url),
-      facebook: toExternalUrl(m.facebook_url),
-      website: toExternalUrl(m.website_url),
-      googleReviews: toExternalUrl(m.google_business_url),
-    },
+    socialLinks: resolveGuestSocialLinks(branch, m),
   };
+}
+
+/**
+ * The branch whose details the card should show: where this card was created,
+ * else where the customer signed up, else the merchant's main branch.
+ */
+async function resolveCustomerBranch(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  merchantId: string,
+  branchId: string | null | undefined,
+): Promise<BranchRow | null> {
+  if (branchId) {
+    const { data } = await supabase
+      .from("branches")
+      .select("*")
+      .eq("id", branchId)
+      .maybeSingle();
+    if (data) return data as BranchRow;
+  }
+  const { data } = await supabase
+    .from("branches")
+    .select("*")
+    .eq("merchant_id", merchantId)
+    .eq("is_default", true)
+    .maybeSingle();
+  return (data as BranchRow | null) ?? null;
 }
 
 function monthYear(iso: string) {
@@ -111,6 +135,8 @@ type CustomerCore = {
   member_since: string;
   public_token: string;
   merchant_id: string;
+  branch_id?: string | null;
+  banned?: boolean | null;
 };
 
 async function buildReadyHome(
@@ -123,13 +149,13 @@ async function buildReadyHome(
     supabase
       .from("loyalty_cards")
       .select(
-        "stamps, status, reward_code, cooldown_until, reward_status, reward_unlock_at",
+        "stamps, status, reward_code, cooldown_until, reward_status, reward_unlock_at, branch_id",
       )
       .eq("customer_id", customer.id)
       .maybeSingle(),
     supabase
       .from("approvals")
-      .select("id, status, requested_at")
+      .select("id, status, requested_at, resolved_at")
       .eq("customer_id", customer.id)
       .order("requested_at", { ascending: false })
       .limit(20),
@@ -183,15 +209,24 @@ async function buildReadyHome(
 
   type HistoryRow = HistoryEntry & { at: number };
   const historyRows: HistoryRow[] = [
-    ...approvals
-      .filter((a) => a.status === "pending" || a.status === "approved")
-      .map((a) => ({
+    ...approvals.map((a) => {
+      // A rejection is dated when the merchant declined it, not when it was asked for.
+      const at =
+        a.status === "rejected" ? (a.resolved_at ?? a.requested_at) : a.requested_at;
+      const label =
+        a.status === "pending"
+          ? "Stamp request submitted"
+          : a.status === "rejected"
+            ? "Stamp request declined"
+            : "Stamp collected";
+      return {
         id: a.id,
-        date: a.status === "pending" ? "Today" : shortDate(a.requested_at),
-        label: a.status === "pending" ? "Stamp request submitted" : "Stamp collected",
-        status: (a.status === "pending" ? "pending" : "approved") as HistoryEntry["status"],
-        at: new Date(a.requested_at).getTime() || 0,
-      })),
+        date: a.status === "pending" ? "Today" : shortDate(at),
+        label,
+        status: a.status as HistoryEntry["status"],
+        at: new Date(at).getTime() || 0,
+      };
+    }),
     ...redemptions.map((r, i) => ({
       id: r.id,
       date: shortDate(r.redeemed_at),
@@ -211,17 +246,24 @@ async function buildReadyHome(
 
   const history: HistoryEntry[] = historyRows.map(({ at: _at, ...entry }) => entry);
 
+  const branch = await resolveCustomerBranch(
+    supabase,
+    merchant.id,
+    card?.branch_id ?? customer.branch_id,
+  );
+
   return {
     status: "ready",
     slug: merchant.slug,
     publicToken: customer.public_token,
-    business: toBusinessInfo(merchant),
+    business: toBusinessInfo(merchant, branch),
     card: {
       customerId: customer.id,
       filled,
       totalStamps,
       status: card?.status ?? "active",
       pending,
+      banned: Boolean(customer.banned),
       rewardCode:
         card?.reward_code ?? `FROQ-${customer.id.slice(0, 5).toUpperCase()}`,
       cooldownUntil: card?.cooldown_until ?? null,
@@ -256,7 +298,7 @@ async function loadCustomerHomeBySlug(slug: string): Promise<CustomerHome> {
 
   const { data: customer } = await supabase
     .from("customers")
-    .select("id, name, phone, email, member_since, public_token, user_id, merchant_id")
+    .select("id, name, phone, email, member_since, public_token, user_id, merchant_id, branch_id, banned")
     .eq("merchant_id", merchant.id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -264,6 +306,49 @@ async function loadCustomerHomeBySlug(slug: string): Promise<CustomerHome> {
   if (!customer) return { status: "no_membership", slug };
 
   return buildReadyHome(merchant as MerchantRow, customer);
+}
+
+/**
+ * Just the merchant's brand colour behind a hub token or slug.
+ *
+ * The hub loads its card client-side, so without this the skeleton would paint
+ * in the default Froq green and then snap to the merchant's colour. Kept as its
+ * own tiny query so the page can stamp `--brand` into the HTML immediately.
+ */
+export async function resolveCustomerBrandColor(
+  tokenOrSlug: string,
+): Promise<string | null> {
+  try {
+    const decoded = decodeURIComponent(tokenOrSlug).trim();
+    if (!decoded) return null;
+
+    const admin = createAdminClient();
+
+    if (!isCustomerPublicToken(decoded)) {
+      const { data } = await admin
+        .from("merchants")
+        .select("brand_color")
+        .eq("slug", decoded)
+        .maybeSingle();
+      return data?.brand_color ?? null;
+    }
+
+    const { data: customer } = await admin
+      .from("customers")
+      .select("merchant_id")
+      .eq("public_token", decoded)
+      .maybeSingle();
+    if (!customer) return null;
+
+    const { data: merchant } = await admin
+      .from("merchants")
+      .select("brand_color")
+      .eq("id", customer.merchant_id)
+      .maybeSingle();
+    return merchant?.brand_color ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -287,7 +372,7 @@ export async function getCustomerHub(token: string): Promise<CustomerHome> {
     if (isCustomerPublicToken(decoded)) {
       const { data } = await admin
         .from("customers")
-        .select("id, user_id, name, phone, email, member_since, public_token, merchant_id")
+        .select("id, user_id, name, phone, email, member_since, public_token, merchant_id, branch_id, banned")
         .eq("public_token", decoded)
         .maybeSingle();
       customer = data;
@@ -303,7 +388,7 @@ export async function getCustomerHub(token: string): Promise<CustomerHome> {
 
       const { data } = await admin
         .from("customers")
-        .select("id, user_id, name, phone, email, member_since, public_token, merchant_id")
+        .select("id, user_id, name, phone, email, member_since, public_token, merchant_id, branch_id, banned")
         .eq("merchant_id", merchantBySlug.id)
         .eq("user_id", user.id)
         .maybeSingle();
@@ -443,6 +528,17 @@ export async function joinMerchant(
 
 export async function requestStamp(customerId: string): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
+
+  const { data: customer } = await supabase
+    .from("customers")
+    .select("id, name, merchant_id, banned")
+    .eq("id", customerId)
+    .maybeSingle();
+  if (!customer) return { ok: false, error: "Membership not found." };
+  if (customer.banned) {
+    return { ok: false, error: "You have been banned. Please contact the restaurant directly." };
+  }
+
   const { error } = await supabase.rpc("request_stamp", { p_customer_id: customerId });
   if (error) return { ok: false, error: error.message };
 
@@ -456,12 +552,7 @@ export async function requestStamp(customerId: string): Promise<{ ok: boolean; e
     tag: string;
   } | null = null;
   try {
-    const { data: customer } = await supabase
-      .from("customers")
-      .select("name, merchant_id")
-      .eq("id", customerId)
-      .maybeSingle();
-    if (customer?.merchant_id) {
+    if (customer.merchant_id) {
       captured = {
         merchantId: customer.merchant_id,
         title: "New stamp request",

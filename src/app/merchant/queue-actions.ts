@@ -13,7 +13,11 @@ import {
 } from "@/lib/merchant/server-context";
 import { resolveBranchFilterForUser } from "@/lib/merchant/branch-access";
 import { dashboardRangeStart } from "@/lib/merchant/analytics";
-import { canViewAnalytics } from "@/lib/merchant/roles";
+import {
+  canDeleteQueueSessions,
+  canViewAnalytics,
+  canViewCustomerData,
+} from "@/lib/merchant/roles";
 import {
   computeQueueAnalytics,
   filterQueueDataByStaff,
@@ -26,25 +30,45 @@ import {
 import type { DashboardDateRange, MemberRole } from "@/lib/merchant/types";
 import { buildReminderSchedule } from "@/lib/queue/call-reminders";
 import { checkQueueCapacity } from "@/lib/queue/capacity";
+import { maskPhone } from "@/lib/auth/otp/phone";
 import {
   getOpenQueueSession,
   listSessionEntries,
+  liveQueuePosition,
   mapQueueEntryRow,
   mapQueueSessionRow,
+  resolveStartBranchId,
   type LiveQueueEntry,
   type LiveQueueSession,
 } from "@/lib/queue/live-board";
+import { nextCallableEntry } from "@/lib/queue/ordering";
+import { syncTodayReservationHolds } from "@/lib/queue/reservation-holds";
+import { recordReservationEvent } from "@/lib/reservations/events";
+import { formatTimeForInput, normalizeTimeInput } from "@/lib/merchant/queue-hours";
+import {
+  reservationStartMs,
+  reservationToday,
+} from "@/lib/merchant/reservations";
+import {
+  buildQueueGuestTimeline,
+  isQueueDbSessionId,
+  type QueueCustomerVisit,
+  type QueueHistoryGuest,
+  type QueueHistoryGuestDetail,
+} from "@/lib/queue/session-history";
 import { callAcceptDeadlineMs } from "@/lib/merchant/queue-settings";
 import {
   queueJoinNotifyTemplate,
   queueSeatedNotifyTemplate,
 } from "@/lib/queue/ai-menu";
+import type { QueueEntryRow, QueueSessionRow } from "@/lib/supabase/database.types";
 
 type QueueCallResolveStatus = "seated" | "skipped" | "left";
 
 type QueueNotifiableCustomer = {
   phone: string;
   name: string;
+  email?: string | null;
   publicToken: string;
   whatsappAvailable: boolean;
   preferred: "sms" | "whatsapp";
@@ -54,6 +78,7 @@ function toNotifiable(customer: QueueNotifiableCustomer) {
   return {
     phone: customer.phone,
     name: customer.name,
+    email: customer.email ?? null,
     publicToken: customer.publicToken,
     whatsappAvailable: customer.whatsappAvailable,
     preferredNotificationChannel: customer.preferred,
@@ -183,9 +208,15 @@ async function runCapturedQueueNotify(captured: CapturedQueueNotify): Promise<vo
       template: captured.template,
       error: notified.error,
       markJoinedEntryId: captured.markJoinedEntryId ?? null,
+      phone: maskPhone(captured.customer.phone.replace(/\D/g, "")),
     });
     return;
   }
+  logQueueAfter("info", "send_ok", {
+    template: captured.template,
+    markJoinedEntryId: captured.markJoinedEntryId ?? null,
+    phone: maskPhone(captured.customer.phone.replace(/\D/g, "")),
+  });
   if (captured.markJoinedEntryId) {
     await admin
       .from("queue_entries")
@@ -476,6 +507,13 @@ export async function fetchLiveQueueBoard(input?: {
     const open = await getOpenQueueSession(ctx.merchantId, input?.branchId ?? null);
     if (!open) return { ok: true, session: null, entries: [] };
 
+    // Activate due holds, attach today's confirmed bookings, release grace no-shows.
+    await syncTodayReservationHolds({
+      merchantId: ctx.merchantId,
+      sessionId: open.id,
+      branchId: open.branch_id,
+    });
+
     const rows = await listSessionEntries(open.id);
     const entries = rows.map(mapQueueEntryRow);
 
@@ -527,9 +565,20 @@ export async function startLiveQueueSession(input?: {
     const ctx = await requireMerchantContext();
     if (!ctx.ok) return { ok: false, error: ctx.error };
 
-    const branchId = input?.branchId ?? null;
+    const resolved = await resolveStartBranchId(
+      ctx.merchantId,
+      input?.branchId ?? null,
+    );
+    if (!resolved.ok) return { ok: false, error: resolved.error };
+    const branchId = resolved.branchId;
+
     const existing = await getOpenQueueSession(ctx.merchantId, branchId);
     if (existing) {
+      await syncTodayReservationHolds({
+        merchantId: ctx.merchantId,
+        sessionId: existing.id,
+        branchId: existing.branch_id,
+      });
       return { ok: true, session: mapQueueSessionRow(existing) };
     }
 
@@ -560,6 +609,13 @@ export async function startLiveQueueSession(input?: {
     if (error || !created) {
       return { ok: false, error: error?.message ?? "Could not start the queue." };
     }
+
+    await syncTodayReservationHolds({
+      merchantId: ctx.merchantId,
+      sessionId: created.id,
+      branchId: created.branch_id,
+    });
+
     return { ok: true, session: mapQueueSessionRow(created) };
   } catch (error) {
     return {
@@ -573,6 +629,8 @@ export async function setLiveQueueSessionStatus(input: {
   status: "live" | "paused" | "ended";
   branchId?: string | null;
 }): Promise<{ ok: boolean; error?: string; summary?: {
+  /** Real `queue_sessions.id` — stored in client history for guest drill-down. */
+  sessionId: string;
   number: number;
   startedAtMs: number;
   endedAtMs: number;
@@ -601,7 +659,7 @@ export async function setLiveQueueSessionStatus(input: {
         .from("queue_entries")
         .update({ status: "left", left_at: nowIso })
         .eq("session_id", open.id)
-        .in("status", ["waiting", "called"]);
+        .in("status", ["held", "waiting", "called"]);
 
       const rows = await listSessionEntries(open.id);
       const seated = rows.filter((r) => r.status === "seated");
@@ -629,7 +687,9 @@ export async function setLiveQueueSessionStatus(input: {
         .eq("id", open.id);
 
       // Cancel reminder jobs for open parties.
-      for (const row of rows.filter((r) => r.status === "waiting" || r.status === "called")) {
+      for (const row of rows.filter(
+        (r) => r.status === "held" || r.status === "waiting" || r.status === "called",
+      )) {
         await admin
           .from("queue_call_jobs")
           .update({ status: "left", resolved_at: nowIso })
@@ -644,6 +704,7 @@ export async function setLiveQueueSessionStatus(input: {
       return {
         ok: true,
         summary: {
+          sessionId: open.id,
           number: open.number,
           startedAtMs: new Date(open.started_at).getTime(),
           endedAtMs: Date.now(),
@@ -714,6 +775,25 @@ export async function addLiveQueueEntry(input: {
       return { ok: false, error: "Enter a valid 10-digit mobile number." };
     }
 
+    const kind = input.kind ?? "walkin";
+    const nowMs = Date.now();
+    let reservationTime = input.reservationTime?.trim() || null;
+    let joinedAtIso: string | undefined;
+    let status: "held" | "waiting" = "waiting";
+
+    if (kind === "reservation") {
+      const time = normalizeTimeInput(reservationTime ?? "")
+        ?? formatTimeForInput(reservationTime ?? "");
+      if (!normalizeTimeInput(time)) {
+        return { ok: false, error: "Pick a reservation time." };
+      }
+      reservationTime = time;
+      const dateKey = reservationToday(new Date(nowMs));
+      const joinedAtMs = reservationStartMs(dateKey, time);
+      joinedAtIso = new Date(joinedAtMs).toISOString();
+      status = joinedAtMs <= nowMs ? "waiting" : "held";
+    }
+
     const admin = createAdminClient();
     const { data: entry, error } = await admin
       .from("queue_entries")
@@ -726,9 +806,10 @@ export async function addLiveQueueEntry(input: {
         phone: customer.phone,
         email: input.email?.trim() || null,
         party_size: partySize,
-        kind: input.kind ?? "walkin",
-        reservation_time: input.reservationTime?.trim() || null,
-        status: "waiting",
+        kind,
+        reservation_time: reservationTime,
+        status,
+        ...(joinedAtIso ? { joined_at: joinedAtIso } : {}),
       })
       .select("*")
       .single();
@@ -737,26 +818,24 @@ export async function addLiveQueueEntry(input: {
       return { ok: false, error: error?.message ?? "Could not add guest." };
     }
 
-    const waiting = await admin
-      .from("queue_entries")
-      .select("id")
-      .eq("session_id", open.id)
-      .eq("status", "waiting")
-      .lte("joined_at", entry.joined_at);
-    const queuePosition = waiting.data?.length ?? 1;
+    const queuePosition = await liveQueuePosition(open.id, entry.joined_at);
     const businessName = await businessNameFor(ctx.merchantId);
 
-    scheduleQueueNotifyAfter({
-      customer,
-      template: await queueJoinNotifyTemplate(ctx.merchantId),
-      data: {
-        businessName,
-        bookingSize: partySize,
-        queuePosition,
-        estimatedWaitMinutes: Math.max(0, Math.round(input.estimatedWaitMinutes)),
-      },
-      markJoinedEntryId: entry.id,
-    });
+    // Held upcoming reservations don't get a waitlist joined WhatsApp —
+    // they already have reservation confirmation / reminders.
+    if (status === "waiting") {
+      scheduleQueueNotifyAfter({
+        customer,
+        template: await queueJoinNotifyTemplate(ctx.merchantId),
+        data: {
+          businessName,
+          bookingSize: partySize,
+          queuePosition,
+          estimatedWaitMinutes: Math.max(0, Math.round(input.estimatedWaitMinutes)),
+        },
+        markJoinedEntryId: entry.id,
+      });
+    }
 
     return { ok: true, entry: mapQueueEntryRow(entry) };
   } catch (error) {
@@ -767,10 +846,64 @@ export async function addLiveQueueEntry(input: {
   }
 }
 
+/**
+ * Call the next party by effective service time — skips future held
+ * reservations so walk-ins ahead of a later booking are served first.
+ */
+export async function callNextLiveQueueEntry(input?: {
+  branchId?: string | null;
+}): Promise<{ ok: boolean; error?: string; entry?: LiveQueueEntry }> {
+  try {
+    const ctx = await requireMerchantContext();
+    if (!ctx.ok) return { ok: false, error: ctx.error };
+
+    const open = await getOpenQueueSession(ctx.merchantId, input?.branchId ?? null);
+    if (!open || open.status !== "live") {
+      return { ok: false, error: "Start the queue before calling guests." };
+    }
+
+    await syncTodayReservationHolds({
+      merchantId: ctx.merchantId,
+      sessionId: open.id,
+      branchId: open.branch_id,
+    });
+
+    const rows = await listSessionEntries(open.id);
+    const entries = rows.map(mapQueueEntryRow);
+    const next = nextCallableEntry(entries);
+    if (!next) {
+      return { ok: false, error: "No one is waiting in the queue." };
+    }
+
+    // Activate held → waiting first so the call transition lock still works.
+    if (next.status === "held") {
+      const admin = createAdminClient();
+      await admin
+        .from("queue_entries")
+        .update({ status: "waiting" })
+        .eq("id", next.id)
+        .eq("status", "held");
+    }
+
+    return updateLiveQueueEntryStatus({
+      entryId: next.id,
+      status: "called",
+      branchId: input?.branchId,
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not call next guest.",
+    };
+  }
+}
+
 export async function updateLiveQueueEntryStatus(input: {
   entryId: string;
   status: "called" | "seated" | "left";
   branchId?: string | null;
+  /** Optional dining table — set when calling or seating. */
+  tableId?: string | null;
 }): Promise<{ ok: boolean; error?: string; entry?: LiveQueueEntry }> {
   try {
     const ctx = await requireMerchantContext();
@@ -785,22 +918,64 @@ export async function updateLiveQueueEntryStatus(input: {
       .maybeSingle();
     if (!existing) return { ok: false, error: "Guest not found." };
 
+    const merchantId = ctx.merchantId;
+    const partySize = existing.party_size as number;
     const nowIso = new Date().toISOString();
 
+    async function resolveTablePatch(
+      tableId: string | null | undefined,
+    ): Promise<{ ok: true; patch: Record<string, unknown> } | { ok: false; error: string }> {
+      if (!tableId) return { ok: true, patch: {} };
+      const { data: table } = await admin
+        .from("dining_tables")
+        .select("id, table_number, seats, status, branch_id")
+        .eq("id", tableId)
+        .eq("merchant_id", merchantId)
+        .maybeSingle();
+      if (!table || table.status !== "active") {
+        return { ok: false, error: "Table not found." };
+      }
+      if (table.seats < partySize) {
+        return { ok: false, error: "That table is too small for this party." };
+      }
+      return {
+        ok: true,
+        patch: {
+          dining_table_id: table.id,
+          table_number: table.table_number,
+        },
+      };
+    }
+
     if (input.status === "called") {
+      // Held reservation: activate to waiting first (same joined_at — no reinsert).
+      if (existing.status === "held") {
+        await admin
+          .from("queue_entries")
+          .update({ status: "waiting" })
+          .eq("id", input.entryId)
+          .eq("merchant_id", ctx.merchantId)
+          .eq("status", "held");
+      }
+
+      const tableResolved = await resolveTablePatch(input.tableId);
+      if (!tableResolved.ok) return tableResolved;
+
       // Atomic claim: `neq('called')` makes the transition itself the lock, so
       // two overlapping taps can't both mint a call event (and therefore two
       // queue_call_now sends). A read-then-write guard loses that race.
+      // Only waiting → called. Never resurrect seated/left (e.g. after session end).
       const { data: claimed, error: claimError } = await admin
         .from("queue_entries")
         .update({
           status: "called",
           called_at: nowIso,
           accept_by: new Date(callAcceptDeadlineMs(Date.parse(nowIso))).toISOString(),
+          ...tableResolved.patch,
         })
         .eq("id", input.entryId)
         .eq("merchant_id", ctx.merchantId)
-        .neq("status", "called")
+        .eq("status", "waiting")
         .select("*")
         .maybeSingle();
 
@@ -839,6 +1014,9 @@ export async function updateLiveQueueEntryStatus(input: {
     const patch: Record<string, unknown> = { status: input.status };
     if (input.status === "seated") {
       patch.seated_at = nowIso;
+      const tableResolved = await resolveTablePatch(input.tableId);
+      if (!tableResolved.ok) return tableResolved;
+      Object.assign(patch, tableResolved.patch);
     } else if (input.status === "left") {
       patch.left_at = nowIso;
     }
@@ -851,6 +1029,57 @@ export async function updateLiveQueueEntryStatus(input: {
       .single();
     if (error || !updated) {
       return { ok: false, error: error?.message ?? "Could not update guest." };
+    }
+
+    // Booked guests handled from the queue board still close out their booking:
+    // seating them is the arrival, releasing the slot is the no-show. Mirrors
+    // the Reservations board, where "Arrived" seats the linked queue entry.
+    if (updated.reservation_id) {
+      const bookingClose =
+        input.status === "seated"
+          ? ({
+              status: "completed",
+              stamp: "completed_at",
+              event: "completed",
+            } as const)
+          : input.status === "left" &&
+              (existing.status === "held" ||
+                existing.status === "waiting" ||
+                existing.status === "called")
+            ? ({ status: "no_show", stamp: "no_show_at", event: "no_show" } as const)
+            : null;
+
+      if (bookingClose) {
+        // The `confirmed` guard makes the update the lock, so a booking already
+        // closed from the other board can't be rewritten or double-logged.
+        const { data: closed } = await admin
+          .from("reservations")
+          .update({
+            status: bookingClose.status,
+            [bookingClose.stamp]: nowIso,
+            updated_at: nowIso,
+          })
+          .eq("id", updated.reservation_id)
+          .eq("merchant_id", ctx.merchantId)
+          .eq("status", "confirmed")
+          .select("id")
+          .maybeSingle();
+
+        if (closed) {
+          await recordReservationEvent({
+            reservationId: closed.id,
+            merchantId: ctx.merchantId,
+            event: bookingClose.event,
+            actor: {
+              kind: "staff",
+              userId: ctx.userId,
+              name: ctx.actorName,
+              role: ctx.role,
+            },
+            detail: "From the queue board",
+          });
+        }
+      }
     }
 
     await resolveQueueCall({
@@ -994,6 +1223,448 @@ export async function getQueueAnalytics(input?: {
       ok: false,
       error: error instanceof Error ? error.message : "Could not load queue analytics.",
       ...EMPTY_QUEUE_ANALYTICS,
+    };
+  }
+}
+
+const SESSION_MATCH_WINDOW_MS = 5 * 60_000;
+
+function msFromIso(iso: string | null | undefined): number | undefined {
+  if (!iso) return undefined;
+  const n = new Date(iso).getTime();
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function waitMinutesForEntry(row: QueueEntryRow): number | null {
+  if (row.status !== "seated" || !row.seated_at) return null;
+  const joined = msFromIso(row.joined_at);
+  const seated = msFromIso(row.seated_at);
+  if (joined == null || seated == null) return null;
+  return Math.max(0, Math.round((seated - joined) / 60_000));
+}
+
+function mapHistoryGuest(
+  row: QueueEntryRow,
+  showPhone: boolean,
+): QueueHistoryGuest {
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    name: row.name,
+    phone: showPhone ? row.phone : maskPhone(row.phone),
+    partySize: row.party_size,
+    kind: row.kind,
+    status: row.status,
+    joinedAtMs: msFromIso(row.joined_at) ?? Date.now(),
+    waitMinutes: waitMinutesForEntry(row),
+  };
+}
+
+/**
+ * Resolve an archived (or live) `queue_sessions` row for History drill-down.
+ * Prefers a real DB id; falls back to number + started_at proximity for older
+ * localStorage records that used synthetic `qs-…` ids.
+ */
+async function resolveHistorySession(input: {
+  merchantId: string;
+  sessionId?: string | null;
+  number?: number;
+  startedAtMs?: number;
+  branchId?: string | null;
+}): Promise<QueueSessionRow | null> {
+  const admin = createAdminClient();
+
+  if (input.sessionId && isQueueDbSessionId(input.sessionId)) {
+    const { data } = await admin
+      .from("queue_sessions")
+      .select("*")
+      .eq("id", input.sessionId)
+      .eq("merchant_id", input.merchantId)
+      .maybeSingle();
+    if (data) return data as QueueSessionRow;
+  }
+
+  if (input.number == null || input.startedAtMs == null) return null;
+
+  let query = admin
+    .from("queue_sessions")
+    .select("*")
+    .eq("merchant_id", input.merchantId)
+    .eq("number", input.number)
+    .order("started_at", { ascending: false })
+    .limit(10);
+
+  if (input.branchId) {
+    query = query.eq("branch_id", input.branchId);
+  }
+
+  const { data } = await query;
+  const rows = (data as QueueSessionRow[] | null) ?? [];
+  if (rows.length === 0) return null;
+
+  let best: QueueSessionRow | null = null;
+  let bestDelta = Number.POSITIVE_INFINITY;
+  for (const row of rows) {
+    const started = msFromIso(row.started_at);
+    if (started == null) continue;
+    const delta = Math.abs(started - input.startedAtMs);
+    if (delta < bestDelta) {
+      best = row;
+      bestDelta = delta;
+    }
+  }
+
+  if (!best || bestDelta > SESSION_MATCH_WINDOW_MS) return null;
+  return best;
+}
+
+/**
+ * Permanently delete an archived session and everything hanging off it.
+ *
+ * `queue_entries` cascade from the session row, but `queue_call_jobs` correlate
+ * on a plain text `client_entry_id` with no foreign key, so they are cleared
+ * first — a surviving reminder would otherwise message a guest about a session
+ * that no longer exists.
+ */
+export async function deleteQueueSession(input: {
+  sessionId?: string | null;
+  number?: number;
+  startedAtMs?: number;
+  branchId?: string | null;
+}): Promise<{ ok: boolean; error?: string; deletedGuests: number }> {
+  try {
+    const ctx = await requireMerchantContext();
+    if (!ctx.ok) return { ok: false, error: ctx.error, deletedGuests: 0 };
+    if (!canDeleteQueueSessions(ctx.role)) {
+      return {
+        ok: false,
+        error: "You do not have access to delete sessions.",
+        deletedGuests: 0,
+      };
+    }
+
+    const session = await resolveHistorySession({
+      merchantId: ctx.merchantId,
+      sessionId: input.sessionId,
+      number: input.number,
+      startedAtMs: input.startedAtMs,
+      branchId: input.branchId,
+    });
+    if (!session) return { ok: false, error: "Session not found.", deletedGuests: 0 };
+    // Deleting the row a live board is still writing to would strand the
+    // in-progress queue, so only archived sessions can go.
+    if (session.status !== "ended") {
+      return {
+        ok: false,
+        error: "End this session before deleting it.",
+        deletedGuests: 0,
+      };
+    }
+
+    const admin = createAdminClient();
+    const { data: entries } = await admin
+      .from("queue_entries")
+      .select("id")
+      .eq("merchant_id", ctx.merchantId)
+      .eq("session_id", session.id);
+    const entryIds = (entries ?? []).map((row) => row.id);
+
+    if (entryIds.length > 0) {
+      const { error: jobsError } = await admin
+        .from("queue_call_jobs")
+        .delete()
+        .eq("merchant_id", ctx.merchantId)
+        .in("client_entry_id", entryIds);
+      if (jobsError) {
+        console.error("deleteQueueSession jobs", jobsError);
+        return {
+          ok: false,
+          error: "Could not delete session.",
+          deletedGuests: 0,
+        };
+      }
+    }
+
+    const { error } = await admin
+      .from("queue_sessions")
+      .delete()
+      .eq("id", session.id)
+      .eq("merchant_id", ctx.merchantId);
+    if (error) {
+      console.error("deleteQueueSession", error);
+      return { ok: false, error: "Could not delete session.", deletedGuests: 0 };
+    }
+
+    return { ok: true, deletedGuests: entryIds.length };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not delete session.",
+      deletedGuests: 0,
+    };
+  }
+}
+
+/** Guests who joined a specific queue session (History → Sessions detail). */
+export async function fetchQueueSessionGuests(input: {
+  sessionId?: string | null;
+  number?: number;
+  startedAtMs?: number;
+  branchId?: string | null;
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  session?: { id: string; number: number };
+  guests: QueueHistoryGuest[];
+}> {
+  try {
+    const ctx = await requireMerchantContext();
+    if (!ctx.ok) return { ok: false, error: ctx.error, guests: [] };
+
+    const session = await resolveHistorySession({
+      merchantId: ctx.merchantId,
+      sessionId: input.sessionId,
+      number: input.number,
+      startedAtMs: input.startedAtMs,
+      branchId: input.branchId,
+    });
+    if (!session) {
+      return { ok: false, error: "Session not found.", guests: [] };
+    }
+
+    const rows = await listSessionEntries(session.id);
+    const showPhone = canViewCustomerData(ctx.role);
+    return {
+      ok: true,
+      session: { id: session.id, number: session.number },
+      guests: rows.map((row) => mapHistoryGuest(row, showPhone)),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not load guests.",
+      guests: [],
+    };
+  }
+}
+
+/** Cap on visits pulled for one person — far beyond any real guest history. */
+const CUSTOMER_VISIT_LIMIT = 200;
+
+/**
+ * Every queue visit by one person, newest first, for Queue → Customers.
+ *
+ * Entries carry `customer_id` only when the guest was matched to a customer
+ * record, so phone is the fallback join — and phones are stored in mixed forms
+ * (`+91…`, `91…`, bare national), hence the variant list.
+ */
+export async function fetchQueueCustomerVisits(input: {
+  customerId?: string | null;
+  phone?: string | null;
+  branchId?: string | null;
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  visits: QueueCustomerVisit[];
+  /** Customer row behind these visits, when one exists. Enables notes. */
+  customerId: string | null;
+  merchantNotes: string;
+  /**
+   * Best known email. Reservation-created entries carry none (reservations
+   * never collect one), so the customer record is the reliable source.
+   */
+  email: string | null;
+}> {
+  const empty = { visits: [], customerId: null, merchantNotes: "", email: null };
+  try {
+    const ctx = await requireMerchantContext();
+    if (!ctx.ok) return { ok: false, error: ctx.error, ...empty };
+    if (!canViewCustomerData(ctx.role)) {
+      return { ok: false, error: "You do not have access to guest history.", ...empty };
+    }
+
+    const customerId = input.customerId?.trim() || null;
+    const national = (input.phone ?? "").replace(/\D/g, "").slice(-10);
+    const phoneVariants =
+      national.length === 10
+        ? [national, `91${national}`, `+91${national}`]
+        : [];
+    if (!customerId && phoneVariants.length === 0) {
+      return { ok: false, error: "Guest not found.", ...empty };
+    }
+
+    const admin = createAdminClient();
+    let query = admin
+      .from("queue_entries")
+      .select("*")
+      .eq("merchant_id", ctx.merchantId)
+      .order("joined_at", { ascending: false })
+      .limit(CUSTOMER_VISIT_LIMIT);
+
+    const matchers = [
+      customerId ? `customer_id.eq.${customerId}` : null,
+      phoneVariants.length > 0 ? `phone.in.(${phoneVariants.join(",")})` : null,
+    ].filter((clause): clause is string => clause !== null);
+    query = query.or(matchers.join(","));
+
+    if (input.branchId) query = query.eq("branch_id", input.branchId);
+
+    const { data, error } = await query;
+    if (error) {
+      console.error("fetchQueueCustomerVisits", error);
+      return { ok: false, error: "Could not load visits.", ...empty };
+    }
+
+    const rows = (data as QueueEntryRow[] | null) ?? [];
+    const sessionIds = [...new Set(rows.map((row) => row.session_id).filter(Boolean))];
+    const numberBySession = new Map<string, number>();
+    if (sessionIds.length > 0) {
+      const { data: sessions } = await admin
+        .from("queue_sessions")
+        .select("id, number")
+        .eq("merchant_id", ctx.merchantId)
+        .in("id", sessionIds);
+      for (const session of sessions ?? []) {
+        numberBySession.set(session.id, session.number);
+      }
+    }
+
+    // A queue-only guest still gets a customers row from ensureGuestCustomer,
+    // so notes are reachable even when the caller had no customer id.
+    const resolvedCustomerId =
+      customerId ?? rows.find((row) => row.customer_id)?.customer_id ?? null;
+    let merchantNotes = "";
+    let email: string | null = null;
+    if (resolvedCustomerId) {
+      const { data: customer } = await admin
+        .from("customers")
+        .select("merchant_notes, email")
+        .eq("id", resolvedCustomerId)
+        .eq("merchant_id", ctx.merchantId)
+        .maybeSingle();
+      merchantNotes = customer?.merchant_notes?.trim() ?? "";
+      email = customer?.email?.trim() || null;
+    }
+    // Guests with no customer record can still have left an email on a visit.
+    email ??= rows.find((row) => row.email?.trim())?.email?.trim() ?? null;
+
+    return {
+      ok: true,
+      visits: rows.map((row) => ({
+        ...mapHistoryGuest(row, true),
+        sessionId: row.session_id,
+        sessionNumber: numberBySession.get(row.session_id) ?? null,
+        branchId: row.branch_id,
+      })),
+      customerId: resolvedCustomerId,
+      merchantNotes,
+      email,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not load visits.",
+      ...empty,
+    };
+  }
+}
+
+/** One guest's visit timeline + merchant notes for History → Sessions. */
+export async function fetchQueueSessionGuestDetail(input: {
+  entryId: string;
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  guest?: QueueHistoryGuestDetail;
+}> {
+  try {
+    const ctx = await requireMerchantContext();
+    if (!ctx.ok) return { ok: false, error: ctx.error };
+
+    const entryId = input.entryId.trim();
+    if (!entryId) return { ok: false, error: "Guest not found." };
+
+    const admin = createAdminClient();
+    const { data: row } = await admin
+      .from("queue_entries")
+      .select("*")
+      .eq("id", entryId)
+      .eq("merchant_id", ctx.merchantId)
+      .maybeSingle();
+    if (!row) return { ok: false, error: "Guest not found." };
+
+    const entry = row as QueueEntryRow;
+    const showData = canViewCustomerData(ctx.role);
+
+    const { data: jobs } = await admin
+      .from("queue_call_jobs")
+      .select(
+        "called_notified_at, reminder_1_sent_at, reminder_2_sent_at, reminder_3_sent_at, called_at",
+      )
+      .eq("merchant_id", ctx.merchantId)
+      .eq("client_entry_id", entry.id)
+      .order("called_at", { ascending: false })
+      .limit(5);
+
+    // Prefer the job that matches this entry's call; else the latest job.
+    const calledAt = entry.called_at;
+    const matched =
+      (calledAt
+        ? (jobs ?? []).find((j) => j.called_at === calledAt)
+        : null) ??
+      jobs?.[0] ??
+      null;
+
+    let merchantNotes = "";
+    let email: string | null = null;
+    if (showData && entry.customer_id) {
+      const { data: customer } = await admin
+        .from("customers")
+        .select("merchant_notes, email")
+        .eq("id", entry.customer_id)
+        .eq("merchant_id", ctx.merchantId)
+        .maybeSingle();
+      merchantNotes = customer?.merchant_notes?.trim() ?? "";
+      email = customer?.email?.trim() || null;
+    }
+    // Reservation-created entries never collect an email, so the customer
+    // record is the reliable source. A guest with no customer row can still
+    // have left one on the entry itself.
+    if (showData) email ??= entry.email?.trim() || null;
+
+    const joinedAtMs = msFromIso(entry.joined_at) ?? Date.now();
+    const timeline = buildQueueGuestTimeline(
+      {
+        id: entry.id,
+        joinedAtMs,
+        notifiedJoinedAtMs: msFromIso(entry.notified_joined_at),
+        calledAtMs: msFromIso(entry.called_at),
+        seatedAtMs: msFromIso(entry.seated_at),
+        leftAtMs: msFromIso(entry.left_at),
+        status: entry.status,
+      },
+      matched
+        ? {
+            calledNotifiedAtMs: msFromIso(matched.called_notified_at),
+            reminder1SentAtMs: msFromIso(matched.reminder_1_sent_at),
+            reminder2SentAtMs: msFromIso(matched.reminder_2_sent_at),
+            reminder3SentAtMs: msFromIso(matched.reminder_3_sent_at),
+          }
+        : null,
+    );
+
+    const guest: QueueHistoryGuestDetail = {
+      ...mapHistoryGuest(entry, showData),
+      email: email ?? undefined,
+      merchantNotes: showData ? merchantNotes : "",
+      timeline,
+    };
+
+    return { ok: true, guest };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not load guest.",
     };
   }
 }

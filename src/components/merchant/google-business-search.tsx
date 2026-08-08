@@ -2,9 +2,9 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { Check, Loader2, MapPin, Search, X } from "lucide-react";
+import { searchPlacesAction } from "@/app/merchant/places-actions";
 import {
-  PlacesSearchError,
-  searchGooglePlaces,
+  type GoogleAddressParts,
   type GooglePlaceResult,
   type PlacesSearchLocation,
 } from "@/lib/merchant/places";
@@ -15,6 +15,8 @@ export type GoogleBusinessSelection = {
   name: string;
   address: string;
   googleMapsUrl: string;
+  /** Absent for manual entries — branch naming falls back to the raw address. */
+  addressParts?: GoogleAddressParts;
 };
 
 type EntryMode = "search" | "manual";
@@ -28,6 +30,8 @@ interface GoogleBusinessSearchProps {
   onSelectedAndContinue?: (place: GoogleBusinessSelection) => void;
   placeholder?: string;
   autoFocus?: boolean;
+  /** Overrides the copy under the search field (branches word this differently). */
+  hint?: string;
 }
 
 function normalizeMapsUrl(raw: string): string {
@@ -65,6 +69,7 @@ export function GoogleBusinessSearch({
   onSelectedAndContinue,
   placeholder = "Search business name or Google listing…",
   autoFocus = false,
+  hint = "We’ll fill your business name and address from the listing you pick.",
 }: GoogleBusinessSearchProps) {
   const listId = useId();
   const [mode, setMode] = useState<EntryMode>(() =>
@@ -114,22 +119,27 @@ export function GoogleBusinessSearch({
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const next = await searchGooglePlaces(trimmed, location);
+          const result = await searchPlacesAction({
+            query: trimmed,
+            location,
+          });
           if (requestId !== requestIdRef.current) return;
-          setResults(next);
+          if (!result.ok) {
+            setResults([]);
+            setOpen(true);
+            setError(result.message);
+            return;
+          }
+          setResults(result.results);
           setOpen(true);
-          if (next.length === 0) {
+          if (result.results.length === 0) {
             setError("No businesses found. Try adding your city, e.g. “Cafe Pune”.");
           }
-        } catch (err) {
+        } catch {
           if (requestId !== requestIdRef.current) return;
           setResults([]);
           setOpen(true);
-          setError(
-            err instanceof PlacesSearchError
-              ? err.message
-              : "Places search failed. Try again.",
-          );
+          setError("Places search failed. Try again.");
         } finally {
           if (requestId === requestIdRef.current) setLoading(false);
         }
@@ -164,6 +174,7 @@ export function GoogleBusinessSearch({
         name: place.name,
         address: place.address,
         googleMapsUrl: place.googleMapsUrl,
+        addressParts: place.addressParts,
       },
       true,
     );
@@ -332,9 +343,7 @@ export function GoogleBusinessSearch({
             </div>
           ) : null}
 
-          <span className="merchant-field-hint">
-            We’ll fill your business name and address from the listing you pick.
-          </span>
+          {hint ? <span className="merchant-field-hint">{hint}</span> : null}
         </>
       ) : (
         <div className="google-place-manual">

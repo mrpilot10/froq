@@ -1,9 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Download, Search, Users, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  Mail,
+  Phone,
+  Search,
+  Users,
+  X,
+} from "lucide-react";
 import type { MemberRole, MerchantCustomer } from "@/lib/merchant/types";
 import { canViewCustomerData } from "@/lib/merchant/roles";
+import { formatPhoneDisplay } from "@/lib/auth/format";
 import { CustomerDrawer } from "./customer-drawer";
 import type { RequestOfferStampOtpResult } from "./offer-stamp-otp";
 
@@ -60,6 +70,11 @@ function getInitials(name: string) {
 function stampProgress(customer: MerchantCustomer) {
   const total = Math.max(1, customer.totalStamps);
   return Math.min(100, Math.round((customer.stamps / total) * 100));
+}
+
+function telHref(phone: string) {
+  const digits = phone.replace(/[^\d+]/g, "");
+  return digits ? `tel:${digits}` : null;
 }
 
 function exportCsv(customers: MerchantCustomer[], includeContact: boolean) {
@@ -264,8 +279,9 @@ export function CustomersScreen({
             {sorted.map((customer) => {
               const badge = badgeFor(customer);
               const progress = stampProgress(customer);
+              const callHref = showData ? telHref(customer.phone) : null;
               return (
-                <li key={customer.id} className="merchant-list-item">
+                <li key={customer.id} className="merchant-list-item merchant-cust-card">
                   <button
                     type="button"
                     className={`merchant-cust-row${customer.banned ? " is-banned" : ""}`}
@@ -287,6 +303,9 @@ export function CustomersScreen({
                           </span>
                         ) : null}
                         <span className="merchant-list-sub">
+                          {showData && customer.phone
+                            ? `${formatPhoneDisplay(customer.phone)} · `
+                            : ""}
                           Member since {customer.memberSince}
                         </span>
                       </div>
@@ -333,6 +352,31 @@ export function CustomersScreen({
                       aria-hidden
                     />
                   </button>
+
+                  {showData && (callHref || customer.email) ? (
+                    <div className="merchant-cust-actions">
+                      {callHref ? (
+                        <a
+                          className="merchant-cust-act merchant-cust-act--call"
+                          href={callHref}
+                          aria-label={`Call ${customer.name}`}
+                        >
+                          <Phone size={14} strokeWidth={2.3} />
+                          Call
+                        </a>
+                      ) : null}
+                      {customer.email ? (
+                        <a
+                          className="merchant-cust-act"
+                          href={`mailto:${customer.email}`}
+                          aria-label={`Email ${customer.name}`}
+                        >
+                          <Mail size={14} strokeWidth={2.3} />
+                          Email
+                        </a>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </li>
               );
             })}

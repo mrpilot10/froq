@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   Branch,
+  BranchContact,
   DashboardDateRange,
   DashboardFilteredStats,
   MemberRole,
@@ -15,6 +16,7 @@ import type {
   MerchantProfile,
   PendingApproval,
 } from "@/lib/merchant/types";
+import type { BranchRow, MerchantRow } from "@/lib/supabase/database.types";
 import { normalizeMemberProductIds } from "@/lib/merchant/product-access";
 import {
   ESCALATION_ACTION_LABEL,
@@ -23,6 +25,7 @@ import {
 import {
   slugify,
   toBranch,
+  toBranchRowPatch,
   toCustomer,
   toMember,
   toMerchantProfile,
@@ -51,7 +54,9 @@ import {
   classifyPlanChange,
   defaultPeriodEnd,
 } from "@/lib/merchant/billing";
+import { grantMenuAiCreditsOnPlanApply } from "@/lib/menu/ai-credits";
 import { FREE_PLAN } from "@/lib/merchant/pricing";
+import { cancelRazorpaySubscription } from "@/lib/payments/razorpay";
 import { userIsMerchantAccount } from "@/lib/merchant/account";
 import { verifyTurnstileToken } from "@/lib/turnstile/verify";
 import { TURNSTILE_REJECTED_MESSAGE, isCaptchaAuthError } from "@/lib/turnstile/config";
@@ -64,6 +69,13 @@ import {
   normalizeEmail,
 } from "@/lib/auth/format";
 import { sendPasswordResetEmail, sendTeamAccessChangedEmail, sendTeamInviteEmail } from "@/lib/email/resend";
+import {
+  notifyPlanCanceled,
+  notifyPlanCancelScheduled,
+  notifyPlanDowngraded,
+  notifyPlanDowngradeScheduled,
+  notifyPlanUpgraded,
+} from "@/lib/notifications/billing-emails";
 import { getPublicAppOrigin } from "@/lib/app-url";
 import {
   ASSIGNABLE_ROLES,
@@ -73,6 +85,13 @@ import {
   ROLE_LABELS,
 } from "@/lib/merchant/roles";
 import { resolveBranchFilterForUser } from "@/lib/merchant/branch-access";
+import {
+  buildProductBranchMap,
+  branchCreatedUnassignedMessage,
+  maxActiveBranches,
+  productBranchLimitError,
+  type ProductBranchMap,
+} from "@/lib/merchant/branch-assignments";
 import { mergeUnifiedCustomers } from "@/lib/merchant/unified-customers";
 import type { UnifiedCustomer } from "@/lib/merchant/unified-customers";
 
@@ -232,6 +251,8 @@ export type MerchantBundle =
       inAppNotifications: MerchantInAppNotification[];
       entitlements: Entitlements;
       branches: Branch[];
+      /** Active branch ids per product (global branches filtered per product). */
+      productBranches: ProductBranchMap;
       members: MerchantMember[];
       role: MemberRole;
       activeBranchId: string | null;
@@ -397,6 +418,7 @@ export type MerchantSessionResult =
       profile: MerchantProfile;
       entitlements: Entitlements;
       branches: Branch[];
+      productBranches: ProductBranchMap;
       members: MerchantMember[];
       role: MemberRole;
       activeBranchId: string | null;
@@ -434,6 +456,7 @@ type VerifiedMerchantAccess = {
   members: MerchantMember[];
   role: MemberRole;
   branches: Branch[];
+  productBranches: ProductBranchMap;
   branchFilter: string | null;
   canViewAllBranches: boolean;
   /** Raw product rows before {@link applyDueBillingChanges}. */
@@ -500,6 +523,7 @@ export async function getMerchantBundle(activeBranchId?: string | null): Promise
       inAppNotifications: workspace.inAppNotifications,
       entitlements: session.entitlements,
       branches: session.branches,
+      productBranches: session.productBranches,
       members: session.members,
       role: session.role,
       activeBranchId: session.activeBranchId,
@@ -521,11 +545,11 @@ export async function getMerchantBundle(activeBranchId?: string | null): Promise
  * Intentionally omits short_name and created_at (unused on this path).
  */
 const MERCHANT_ACCESS_COLUMNS =
-  "id, owner_user_id, slug, business_name, owner_first_name, owner_last_name, email, phone, address, brand_color, logo_url, website_url, google_business_url, google_place_id, google_maps_url, instagram_url, facebook_url, x_url, reward_title, reward_name, reward_image_url, total_stamps, restart_after_reward, reward_cooldown_value, reward_cooldown_unit, min_purchase_amount, stamp_notifications, approval_notifications, marketing_emails, queue_banner, queue_banner_link, queue_open_time, queue_close_time, queue_hours_timezone, queue_open_days, queue_auto_start, queue_auto_close, reservation_description, reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes, reservation_auto_decline_hours, reservation_whatsapp_enabled, reservation_paused";
+  "id, owner_user_id, slug, business_name, owner_first_name, owner_last_name, email, phone, address, brand_color, logo_url, website_url, google_business_url, google_place_id, google_maps_url, instagram_url, facebook_url, x_url, reward_title, reward_name, reward_image_url, total_stamps, restart_after_reward, reward_cooldown_value, reward_cooldown_unit, min_purchase_amount, stamp_notifications, approval_notifications, marketing_emails, queue_banner, queue_banner_link, queue_open_time, queue_close_time, queue_hours_timezone, queue_open_days, queue_auto_start, queue_auto_close, reservation_description, reservation_max_party_size, reservation_interval_minutes, reservation_open_time, reservation_close_time, reservation_allow_same_day, reservation_allow_notes, reservation_auto_decline_hours, reservation_whatsapp_enabled, reservation_grace_minutes, reservation_paused";
 
-/** Optional toggles — selected separately so missing migrations can't take down the dashboard. */
+/** Optional columns — selected separately so missing migrations can't take down the dashboard. */
 const MERCHANT_OPTIONAL_TOGGLE_COLUMNS =
-  "notify_staff_pending_approvals, notify_manager_pending_approvals, notify_owner_pending_approvals, birthday_double_stamps, queue_ai_menu_enabled";
+  "notify_staff_pending_approvals, notify_manager_pending_approvals, notify_owner_pending_approvals, birthday_double_stamps, reservation_auto_assign_tables, menu_table_ordering, menu_server_notify, menu_show_loyalty_stamps, queue_ai_menu_enabled, menu_cgst_percent, menu_sgst_percent, menu_service_charge_percent";
 
 /**
  * Resolve the merchant this user can access — as owner or as a team member.
@@ -566,7 +590,14 @@ async function loadEscalationToggles(
   notify_manager_pending_approvals?: boolean;
   notify_owner_pending_approvals?: boolean;
   birthday_double_stamps?: boolean;
+  reservation_auto_assign_tables?: boolean;
+  menu_table_ordering?: boolean;
+  menu_server_notify?: boolean;
+  menu_show_loyalty_stamps?: boolean;
   queue_ai_menu_enabled?: boolean;
+  menu_cgst_percent?: number | null;
+  menu_sgst_percent?: number | null;
+  menu_service_charge_percent?: number | null;
 }> {
   const { data, error } = await supabase
     .from("merchants")
@@ -630,6 +661,8 @@ export interface LoyaltyHistoryEvent {
   customerId: string | null;
   customerName: string;
   customerPhone: string;
+  /** True when this guest is currently banned. */
+  customerBanned: boolean;
   atMs: number;
   /** Teammate who performed it; null for rows written before attribution. */
   staffName: string | null;
@@ -738,15 +771,19 @@ export async function getLoyaltyHistory(input?: {
       ),
     ];
 
-    const nameById = new Map<string, { name: string; phone: string }>();
+    const nameById = new Map<string, { name: string; phone: string; banned: boolean }>();
     if (customerIds.length > 0) {
       const { data: customerRows } = await supabase
         .from("customers")
-        .select("id, name, phone")
+        .select("id, name, phone, banned")
         .eq("merchant_id", merchantId)
         .in("id", customerIds);
       for (const row of customerRows ?? []) {
-        nameById.set(row.id, { name: row.name, phone: row.phone });
+        nameById.set(row.id, {
+          name: row.name,
+          phone: row.phone,
+          banned: Boolean(row.banned),
+        });
       }
     }
 
@@ -761,6 +798,7 @@ export async function getLoyaltyHistory(input?: {
       return {
         customerName: found?.name?.trim() || "Deleted customer",
         customerPhone: found?.phone ?? "",
+        customerBanned: found?.banned ?? false,
       };
     };
 
@@ -808,7 +846,7 @@ export async function getLoyaltyHistory(input?: {
   }
 }
 
-export type CustomerTimelineEventType = "joined" | "stamp" | "reward";
+export type CustomerTimelineEventType = "joined" | "stamp" | "reward" | "rejected";
 
 export interface CustomerTimelineEvent {
   id: string;
@@ -840,7 +878,7 @@ export async function getCustomerLoyaltyTimeline(
     const id = customerId.trim();
     if (!id) return empty;
 
-    const [customerRes, visitsRes, redemptionsRes] = await Promise.all([
+    const [customerRes, visitsRes, redemptionsRes, rejectionsRes] = await Promise.all([
       supabase
         .from("customers")
         .select("id, member_since")
@@ -860,6 +898,15 @@ export async function getCustomerLoyaltyTimeline(
         .eq("merchant_id", ctx.id)
         .eq("customer_id", id)
         .order("redeemed_at", { ascending: false })
+        .limit(CUSTOMER_TIMELINE_LIMIT),
+      // approvals carry no actor columns, so rejections show unattributed.
+      supabase
+        .from("approvals")
+        .select("id, requested_at, resolved_at")
+        .eq("merchant_id", ctx.id)
+        .eq("customer_id", id)
+        .eq("status", "rejected")
+        .order("resolved_at", { ascending: false })
         .limit(CUSTOMER_TIMELINE_LIMIT),
     ]);
 
@@ -889,6 +936,14 @@ export async function getCustomerLoyaltyTimeline(
         label: "Reward claimed",
         atMs: new Date(row.redeemed_at).getTime(),
         ...staffOf(row),
+      })),
+      ...(rejectionsRes.data ?? []).map((row) => ({
+        id: `rejected:${row.id}`,
+        type: "rejected" as const,
+        label: "Stamp request declined",
+        atMs: new Date(row.resolved_at ?? row.requested_at).getTime(),
+        staffName: null,
+        staffRole: null,
       })),
       {
         id: `joined:${customerRes.data.id}`,
@@ -950,10 +1005,16 @@ export interface UnifiedCustomersResult {
 
 /** Ceilings for the unified customers page. */
 const UNIFIED_QUEUE_FETCH_LIMIT = 5000;
+const UNIFIED_MENU_FETCH_LIMIT = 5000;
+const UNIFIED_RESERVATION_FETCH_LIMIT = 5000;
 
 /**
- * Every person the merchant knows, across loyalty and queue, in one list.
- * Owner/manager only — the payload is entirely contact PII.
+ * Every person the merchant knows, across loyalty, queue and reservations, in
+ * one list. Owner/manager only — the payload is entirely contact PII.
+ *
+ * Queue / reservation rows are read with the admin client: RLS often yields an
+ * empty set for the user-scoped client (no error), while live board /
+ * analytics already bypass RLS the same way.
  */
 export async function getUnifiedCustomers(input?: {
   branchId?: string | null;
@@ -986,7 +1047,9 @@ export async function getUnifiedCustomers(input?: {
       .order("created_at", { ascending: false })
       .range(0, CUSTOMERS_FETCH_LIMIT - 1);
 
-    let queueQuery = supabase
+    // Admin after authz — same pattern as getQueueAnalytics / listSessionEntries.
+    const admin = createAdminClient();
+    let queueQuery = admin
       .from("queue_entries")
       .select(
         "customer_id, name, phone, email, party_size, status, joined_at, seated_at",
@@ -996,18 +1059,79 @@ export async function getUnifiedCustomers(input?: {
       .order("joined_at", { ascending: false })
       .range(0, UNIFIED_QUEUE_FETCH_LIMIT - 1);
 
+    let reservationQuery = admin
+      .from("reservations")
+      .select(
+        "customer_id, customer_name, customer_phone, party_size, status, reservation_date, reservation_time, created_at",
+        { count: "exact" },
+      )
+      .eq("merchant_id", merchant.id)
+      .order("created_at", { ascending: false })
+      .range(0, UNIFIED_RESERVATION_FETCH_LIMIT - 1);
+
+    let menuQuery = admin
+      .from("menu_dining_sessions")
+      .select(
+        "customer_id, guest_name, guest_phone, party_size, opened_at, notes",
+        { count: "exact" },
+      )
+      .eq("merchant_id", merchant.id)
+      .or("customer_id.not.is.null,guest_phone.not.is.null")
+      .order("opened_at", { ascending: false })
+      .range(0, UNIFIED_MENU_FETCH_LIMIT - 1);
+
     if (branchFilter) {
+      // Legacy guest rows may still have null branch_id. Attach them to the
+      // default branch so branch-scoped Customers matches the live boards.
+      const { data: defaultBranch } = await admin
+        .from("branches")
+        .select("id")
+        .eq("merchant_id", merchant.id)
+        .eq("is_default", true)
+        .maybeSingle();
+      if (defaultBranch?.id === branchFilter) {
+        await Promise.all([
+          admin
+            .from("reservations")
+            .update({ branch_id: branchFilter })
+            .eq("merchant_id", merchant.id)
+            .is("branch_id", null),
+          admin
+            .from("queue_entries")
+            .update({ branch_id: branchFilter })
+            .eq("merchant_id", merchant.id)
+            .is("branch_id", null),
+        ]);
+      }
+
       loyaltyQuery = loyaltyQuery.eq("branch_id", branchFilter);
+      // Strict branch scope — do not pull in null-branch guests from another queue.
       queueQuery = queueQuery.eq("branch_id", branchFilter);
+      reservationQuery = reservationQuery.eq("branch_id", branchFilter);
+      menuQuery = menuQuery.eq("branch_id", branchFilter);
     }
 
-    const [loyaltyRes, queueRes] = await Promise.all([loyaltyQuery, queueQuery]);
+    const [loyaltyRes, queueRes, reservationRes, menuRes] = await Promise.all([
+      loyaltyQuery,
+      queueQuery,
+      reservationQuery,
+      menuQuery,
+    ]);
 
+    // One product failing must not wipe the others (Queue / Reservations →
+    // Customers depend on their own rows).
     if (loyaltyRes.error) {
       console.error("getUnifiedCustomers loyalty", loyaltyRes.error);
-      return empty;
     }
-    if (queueRes.error) console.error("getUnifiedCustomers queue", queueRes.error);
+    if (queueRes.error) {
+      console.error("getUnifiedCustomers queue", queueRes.error);
+    }
+    if (reservationRes.error) {
+      console.error("getUnifiedCustomers reservations", reservationRes.error);
+    }
+    if (menuRes.error) {
+      console.error("getUnifiedCustomers menu", menuRes.error);
+    }
 
     warnIfTruncated(
       "getUnifiedCustomers.loyalty",
@@ -1021,17 +1145,33 @@ export async function getUnifiedCustomers(input?: {
       queueRes.count,
       UNIFIED_QUEUE_FETCH_LIMIT,
     );
+    warnIfTruncated(
+      "getUnifiedCustomers.reservations",
+      merchant.id,
+      reservationRes.count,
+      UNIFIED_RESERVATION_FETCH_LIMIT,
+    );
+    warnIfTruncated(
+      "getUnifiedCustomers.menu",
+      merchant.id,
+      menuRes.count,
+      UNIFIED_MENU_FETCH_LIMIT,
+    );
 
     const customers = mergeUnifiedCustomers({
-      loyalty: loyaltyRes.data ?? [],
-      queue: queueRes.data ?? [],
+      loyalty: loyaltyRes.error ? [] : (loyaltyRes.data ?? []),
+      queue: queueRes.error ? [] : (queueRes.data ?? []),
+      reservations: reservationRes.error ? [] : (reservationRes.data ?? []),
+      menu: menuRes.error ? [] : (menuRes.data ?? []),
     });
 
     return {
       customers,
       truncated:
         (loyaltyRes.count ?? 0) > CUSTOMERS_FETCH_LIMIT ||
-        (queueRes.count ?? 0) > UNIFIED_QUEUE_FETCH_LIMIT,
+        (queueRes.count ?? 0) > UNIFIED_QUEUE_FETCH_LIMIT ||
+        (reservationRes.count ?? 0) > UNIFIED_RESERVATION_FETCH_LIMIT ||
+        (menuRes.count ?? 0) > UNIFIED_MENU_FETCH_LIMIT,
     };
   } catch (error) {
     console.error("getUnifiedCustomers exception", error);
@@ -1090,7 +1230,7 @@ async function establishMerchantAccess(
   const profile = toMerchantProfile({ ...merchantRow, ...escalationToggles });
 
   const admin = createAdminClient();
-  const [branchesRes, membersRes, productsRes] = await Promise.all([
+  const [branchesRes, membersRes, productsRes, assignmentsRes] = await Promise.all([
     supabase
       .from("branches")
       .select("*")
@@ -1108,12 +1248,24 @@ async function establishMerchantAccess(
     admin
       .from("merchant_products")
       .select(
-        "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at, trial_started_at, trial_ends_at",
+        "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at, trial_started_at, trial_ends_at, razorpay_subscription_id",
       )
+      .eq("merchant_id", merchantId),
+    // Empty until migration 0089 lands; dashboard still boots with {}.
+    supabase
+      .from("product_branch_assignments")
+      .select("product, branch_id, status")
       .eq("merchant_id", merchantId),
   ]);
 
   const allBranches = (branchesRes.data ?? []).map(toBranch);
+  const productBranches = buildProductBranchMap(
+    (assignmentsRes.data ?? []).map((row) => ({
+      product: row.product as MerchantProduct,
+      branchId: row.branch_id,
+      status: row.status,
+    })),
+  );
   const members = (membersRes.data ?? []).map((row) => ({
     ...toMember(row),
     isPrimaryOwner: row.user_id === merchantRow.owner_user_id,
@@ -1138,6 +1290,7 @@ async function establishMerchantAccess(
 
   // Resolve the active branch. Restricted staff can never use the combined
   // "all branches" view — force them onto one of their allowed branches.
+  // With a single location there's nothing to combine, so pin that branch.
   let branchFilter: string | null = null;
   if (allowedBranchIds) {
     if (activeBranchId && allowedBranchIds.has(activeBranchId)) {
@@ -1147,7 +1300,7 @@ async function establishMerchantAccess(
     }
   } else if (activeBranchId && allBranches.some((b) => b.id === activeBranchId)) {
     branchFilter = activeBranchId;
-  } else if (!canViewAllBranches) {
+  } else if (!canViewAllBranches || allBranches.length <= 1) {
     branchFilter =
       allBranches.find((b) => b.isDefault)?.id ?? allBranches[0]?.id ?? null;
   }
@@ -1161,6 +1314,7 @@ async function establishMerchantAccess(
     members,
     role,
     branches,
+    productBranches,
     branchFilter,
     canViewAllBranches,
     productRowsRaw: (productsRes.data ?? []) as ProductBillingRow[],
@@ -1204,6 +1358,7 @@ async function finalizeMerchantSession(
     profile: access.profile,
     entitlements: entitlementsFromRows(productRows),
     branches: access.branches,
+    productBranches: access.productBranches,
     members: access.members,
     role: access.role,
     activeBranchId: access.branchFilter,
@@ -1421,9 +1576,9 @@ export async function merchantExistsForPhone(
  * Rejects sessions that aren't tied to a merchant store / onboarding flag so a
  * loyalty customer can't enter the merchant area with the same auth pool.
  *
- * The Turnstile token goes to GoTrue rather than being checked here: password
- * grant is a CAPTCHA-enforced endpoint, so Supabase validates it for us and the
- * single-use token is spent exactly once.
+ * Turnstile is verified here via canonical siteverify (not GoTrue): the widget
+ * secret lives in our env, and Cloudflare Analytics needs our siteverify call.
+ * Tokens are single-use, so we must not also hand them to signInWithPassword.
  */
 export async function signInMerchantWithPassword(
   email: string,
@@ -1439,11 +1594,15 @@ export async function signInMerchantWithPassword(
       return { ok: false, error: "Enter your password." };
     }
 
+    const captcha = await verifyTurnstileToken(captchaToken, {
+      source: "merchant-sign-in",
+    });
+    if (!captcha.ok) return { ok: false, error: captcha.error };
+
     const supabase = await createClient();
     const { data, error } = await supabase.auth.signInWithPassword({
       email: normalized,
       password,
-      options: { captchaToken },
     });
     if (error || !data.user) {
       if (isCaptchaAuthError(error?.message)) {
@@ -1475,10 +1634,8 @@ export async function signInMerchantWithPassword(
  * Creates (or signs into) a merchant email/password account during checkout.
  * Phone stays as contact metadata — customers keep SMS OTP separately.
  *
- * Turnstile: the account is created with the service-role key, which skips
- * GoTrue's CAPTCHA middleware, so the token is forwarded to the sign-in that
- * always follows instead. Either branch below spends it exactly once, and
- * neither can produce a usable session without a valid challenge.
+ * Turnstile: account create uses the service-role key (no GoTrue CAPTCHA). We
+ * siteverify once up front, then sign in without reusing the spent token.
  */
 export async function signUpMerchantWithPassword(input: {
   email: string;
@@ -1510,6 +1667,11 @@ export async function signUpMerchantWithPassword(input: {
       return { ok: false, error: "Enter a valid 10-digit mobile number." };
     }
     if (!city || !state) return { ok: false, error: "Select your city." };
+
+    const captcha = await verifyTurnstileToken(input.captchaToken, {
+      source: "merchant-sign-up",
+    });
+    if (!captcha.ok) return { ok: false, error: captcha.error };
 
     const supabase = await createClient();
     const admin = createAdminClient();
@@ -1544,7 +1706,6 @@ export async function signUpMerchantWithPassword(input: {
       const { data: signedIn, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
-        options: { captchaToken: input.captchaToken },
       });
       if (signInError || !signedIn.user) {
         if (isCaptchaAuthError(signInError?.message)) {
@@ -1574,7 +1735,6 @@ export async function signUpMerchantWithPassword(input: {
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
-      options: { captchaToken: input.captchaToken },
     });
     if (signInError) {
       return {
@@ -2214,8 +2374,8 @@ export async function updateAccountName(input: {
  *
  * Protected despite being an authenticated action: re-authenticating with a
  * password grant is a credential-stuffing surface (a hijacked session could be
- * used to guess the real password and lock the owner out), and GoTrue enforces
- * its CAPTCHA on that endpoint regardless of who is calling it.
+ * used to guess the real password and lock the owner out). Turnstile is checked
+ * here via siteverify; the token is not forwarded to GoTrue.
  */
 export async function changeMerchantPassword(
   currentPassword: string,
@@ -2231,6 +2391,11 @@ export async function changeMerchantPassword(
       return { ok: false, error: "New password must be different from the current one." };
     }
 
+    const captcha = await verifyTurnstileToken(captchaToken, {
+      source: "merchant-change-password",
+    });
+    if (!captcha.ok) return { ok: false, error: captcha.error };
+
     const supabase = await createClient();
     const {
       data: { user },
@@ -2240,7 +2405,6 @@ export async function changeMerchantPassword(
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: user.email,
       password: currentPassword,
-      options: { captchaToken },
     });
     if (signInError) {
       if (isCaptchaAuthError(signInError.message)) {
@@ -2487,6 +2651,7 @@ export async function markMerchantOnboarding(
 export async function purchaseProduct(
   product: MerchantProduct,
   planId?: string,
+  opts?: { razorpaySubscriptionId?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const supabase = await createClient();
@@ -2502,18 +2667,95 @@ export async function purchaseProduct(
       .maybeSingle();
     if (!merchant) return { ok: false, error: "Merchant account not found." };
 
-    const { error } = await supabase
+    const periodEnd = planId ? defaultPeriodEnd(planId).toISOString() : null;
+    const hasSubOpt = Boolean(opts && "razorpaySubscriptionId" in opts);
+    const nextSubId = hasSubOpt
+      ? opts?.razorpaySubscriptionId?.trim() || null
+      : undefined;
+
+    const { data: existing } = await supabase
       .from("merchant_products")
-      .upsert(
-        {
-          merchant_id: merchant.id,
-          product,
+      .select("id, plan_id, razorpay_subscription_id")
+      .eq("merchant_id", merchant.id)
+      .eq("product", product)
+      .maybeSingle();
+
+    if (existing) {
+      const previousSubId =
+        typeof existing.razorpay_subscription_id === "string"
+          ? existing.razorpay_subscription_id
+          : null;
+      const fromPlanId =
+        typeof existing.plan_id === "string" ? existing.plan_id : null;
+      if (
+        nextSubId !== undefined &&
+        previousSubId &&
+        previousSubId !== nextSubId
+      ) {
+        await cancelRazorpaySubscription(previousSubId, { cancelAtCycleEnd: false });
+      }
+
+      const { error } = await supabase
+        .from("merchant_products")
+        .update({
           plan_id: planId ?? null,
           status: "active",
-        },
-        { onConflict: "merchant_id,product", ignoreDuplicates: true },
+          pending_plan_id: null,
+          cancel_at_period_end: false,
+          current_period_end: periodEnd,
+          ...(nextSubId !== undefined
+            ? { razorpay_subscription_id: nextSubId }
+            : {}),
+        })
+        .eq("id", existing.id);
+      if (error) return { ok: false, error: error.message };
+      if (planId) {
+        await grantMenuAiCreditsOnPlanApply({
+          merchantId: merchant.id as string,
+          product,
+          fromPlanId,
+          toPlanId: planId,
+        });
+        after(() =>
+          notifyPlanUpgraded({
+            merchantId: merchant.id as string,
+            product,
+            fromPlanId,
+            toPlanId: planId,
+            effectiveOn: new Date().toISOString(),
+          }),
+        );
+      }
+      return { ok: true };
+    }
+
+    const { error } = await supabase.from("merchant_products").insert({
+      merchant_id: merchant.id,
+      product,
+      plan_id: planId ?? null,
+      status: "active",
+      current_period_end: periodEnd,
+      ...(nextSubId !== undefined ? { razorpay_subscription_id: nextSubId } : {}),
+    });
+    if (error) return { ok: false, error: error.message };
+    if (planId) {
+      await grantMenuAiCreditsOnPlanApply({
+        merchantId: merchant.id as string,
+        product,
+        fromPlanId: null,
+        toPlanId: planId,
+      });
+      after(() =>
+        notifyPlanUpgraded({
+          merchantId: merchant.id as string,
+          product,
+          fromPlanId: null,
+          toPlanId: planId,
+          effectiveOn: new Date().toISOString(),
+        }),
       );
-    return error ? { ok: false, error: error.message } : { ok: true };
+    }
+    return { ok: true };
   } catch (error) {
     return {
       ok: false,
@@ -2603,6 +2845,7 @@ type ProductBillingRow = {
   purchased_at: string;
   trial_started_at: string | null;
   trial_ends_at: string | null;
+  razorpay_subscription_id: string | null;
 };
 
 /** Applies due downgrades / cancellations when the paid period has ended. */
@@ -2622,21 +2865,47 @@ async function applyDueBillingChanges(
     const due = periodEnd != null && periodEnd <= now;
 
     if (due && current.cancel_at_period_end) {
+      const previousPlanId = current.plan_id;
+      if (current.razorpay_subscription_id) {
+        try {
+          await cancelRazorpaySubscription(current.razorpay_subscription_id, {
+            cancelAtCycleEnd: false,
+          });
+        } catch (error) {
+          console.error(
+            "[billing] failed to cancel Razorpay subscription on lock",
+            current.razorpay_subscription_id,
+            error,
+          );
+        }
+      }
       const { data } = await admin
         .from("merchant_products")
         .update({
-          plan_id: FREE_PLAN.id,
-          status: "active",
+          plan_id: null,
+          status: "canceled",
           pending_plan_id: null,
           cancel_at_period_end: false,
           current_period_end: null,
+          razorpay_subscription_id: null,
         })
         .eq("id", current.id)
         .eq("merchant_id", merchantId)
         .select(PRODUCT_BILLING_COLUMNS)
         .maybeSingle();
       if (data) current = data as ProductBillingRow;
+      after(() =>
+        notifyPlanCanceled({
+          merchantId,
+          product: current.product,
+          planId: previousPlanId,
+          effectiveOn: new Date().toISOString(),
+        }),
+      );
     } else if (due && current.pending_plan_id) {
+      const fromPlanId = current.plan_id;
+      const toPlanId = current.pending_plan_id;
+      const kind = classifyPlanChange(fromPlanId, toPlanId);
       const nextPeriodEnd = defaultPeriodEnd(current.pending_plan_id).toISOString();
       const { data } = await admin
         .from("merchant_products")
@@ -2652,6 +2921,33 @@ async function applyDueBillingChanges(
         .select(PRODUCT_BILLING_COLUMNS)
         .maybeSingle();
       if (data) current = data as ProductBillingRow;
+      if (kind === "downgrade") {
+        after(() =>
+          notifyPlanDowngraded({
+            merchantId,
+            product: current.product,
+            fromPlanId,
+            toPlanId,
+            effectiveOn: new Date().toISOString(),
+          }),
+        );
+      } else if (kind === "upgrade" || !fromPlanId || fromPlanId === FREE_PLAN.id) {
+        await grantMenuAiCreditsOnPlanApply({
+          merchantId,
+          product: current.product,
+          fromPlanId,
+          toPlanId,
+        });
+        after(() =>
+          notifyPlanUpgraded({
+            merchantId,
+            product: current.product,
+            fromPlanId,
+            toPlanId,
+            effectiveOn: new Date().toISOString(),
+          }),
+        );
+      }
     }
 
     next.push(current);
@@ -2661,7 +2957,7 @@ async function applyDueBillingChanges(
 }
 
 const PRODUCT_BILLING_COLUMNS =
-  "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at, trial_started_at, trial_ends_at";
+  "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at, trial_started_at, trial_ends_at, razorpay_subscription_id";
 
 /**
  * Resolves the merchant's billing row for a product. `createIfMissing` is for
@@ -2716,17 +3012,30 @@ async function requireOwnedProduct(
 
 /**
  * Applies a plan immediately (first-time paid subscription / renewal apply).
- * Clears any scheduled change or cancellation.
+ * Clears any scheduled change or cancellation. When a new Razorpay subscription
+ * id is provided, cancels any previous subscription first.
  */
 export async function updateProductPlan(
   product: MerchantProduct,
   planId: string,
+  opts?: { razorpaySubscriptionId?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const ctx = await requireOwnedProduct(product, { createIfMissing: true });
     if (!ctx.ok) return { ok: false, error: ctx.error };
 
+    const nextSubId =
+      opts && "razorpaySubscriptionId" in opts
+        ? opts.razorpaySubscriptionId?.trim() || null
+        : undefined;
+    const previousSubId = ctx.existing.razorpay_subscription_id?.trim() || null;
+
+    if (nextSubId !== undefined && previousSubId && previousSubId !== nextSubId) {
+      await cancelRazorpaySubscription(previousSubId, { cancelAtCycleEnd: false });
+    }
+
     const periodEnd = defaultPeriodEnd(planId).toISOString();
+    const fromPlanId = ctx.existing.plan_id;
     const { error } = await ctx.supabase
       .from("merchant_products")
       .update({
@@ -2735,9 +3044,40 @@ export async function updateProductPlan(
         pending_plan_id: null,
         cancel_at_period_end: false,
         current_period_end: periodEnd,
+        ...(nextSubId !== undefined ? { razorpay_subscription_id: nextSubId } : {}),
       })
       .eq("id", ctx.existing.id);
-    return error ? { ok: false, error: error.message } : { ok: true };
+    if (error) return { ok: false, error: error.message };
+
+    const kind = classifyPlanChange(fromPlanId, planId);
+    if (kind === "upgrade" || !fromPlanId || fromPlanId === FREE_PLAN.id) {
+      await grantMenuAiCreditsOnPlanApply({
+        merchantId: ctx.merchantId,
+        product,
+        fromPlanId,
+        toPlanId: planId,
+      });
+      after(() =>
+        notifyPlanUpgraded({
+          merchantId: ctx.merchantId,
+          product,
+          fromPlanId,
+          toPlanId: planId,
+          effectiveOn: new Date().toISOString(),
+        }),
+      );
+    } else if (kind === "downgrade") {
+      after(() =>
+        notifyPlanDowngraded({
+          merchantId: ctx.merchantId,
+          product,
+          fromPlanId,
+          toPlanId: planId,
+          effectiveOn: new Date().toISOString(),
+        }),
+      );
+    }
+    return { ok: true };
   } catch (error) {
     return {
       ok: false,
@@ -2784,6 +3124,21 @@ export async function schedulePlanChange(
       })
       .eq("id", ctx.existing.id);
     if (error) return { ok: false, error: error.message };
+
+    // Upgrades usually run immediately via updateProductPlan; scheduled changes
+    // are predominantly downgrades — email the owner with the effective date.
+    if (kind === "downgrade") {
+      after(() =>
+        notifyPlanDowngradeScheduled({
+          merchantId: ctx.merchantId,
+          product,
+          fromPlanId: ctx.existing.plan_id,
+          toPlanId: planId,
+          effectiveOn: periodEnd,
+        }),
+      );
+    }
+
     return { ok: true, effectiveOn: periodEnd };
   } catch (error) {
     return {
@@ -2793,7 +3148,7 @@ export async function schedulePlanChange(
   }
 }
 
-/** Cancels at period end to prevent future renewals; then moves to Free. */
+/** Cancels at period end; after that the product locks (no Free tier). */
 export async function cancelProductPlan(
   product: MerchantProduct,
 ): Promise<{ ok: boolean; error?: string; effectiveOn?: string }> {
@@ -2801,8 +3156,8 @@ export async function cancelProductPlan(
     const ctx = await requireOwnedProduct(product);
     if (!ctx.ok) return { ok: false, error: ctx.error };
 
-    if (ctx.existing.plan_id === FREE_PLAN.id) {
-      return { ok: false, error: "You're already on the Free plan." };
+    if (!ctx.existing.plan_id || ctx.existing.plan_id === FREE_PLAN.id) {
+      return { ok: false, error: "You're not on a paid plan." };
     }
     if (ctx.existing.cancel_at_period_end) {
       return { ok: false, error: "Cancellation is already scheduled." };
@@ -2811,6 +3166,14 @@ export async function cancelProductPlan(
     const periodEnd =
       ctx.existing.current_period_end ??
       defaultPeriodEnd(ctx.existing.plan_id, new Date(ctx.existing.purchased_at)).toISOString();
+
+    // Stop Razorpay renewals at the end of the current billing cycle so it
+    // matches "access until period end, then lock".
+    if (ctx.existing.razorpay_subscription_id) {
+      await cancelRazorpaySubscription(ctx.existing.razorpay_subscription_id, {
+        cancelAtCycleEnd: true,
+      });
+    }
 
     const { error } = await ctx.supabase
       .from("merchant_products")
@@ -2821,6 +3184,16 @@ export async function cancelProductPlan(
       })
       .eq("id", ctx.existing.id);
     if (error) return { ok: false, error: error.message };
+
+    after(() =>
+      notifyPlanCancelScheduled({
+        merchantId: ctx.merchantId,
+        product,
+        planId: ctx.existing.plan_id as string,
+        effectiveOn: periodEnd,
+      }),
+    );
+
     return { ok: true, effectiveOn: periodEnd };
   } catch (error) {
     return {
@@ -2854,9 +3227,10 @@ export async function resumeProductPlan(
   }
 }
 
-/** Marks a product's onboarding block as finished. */
+/** Marks a product's onboarding block as finished, and activates selected branches. */
 export async function completeProductOnboarding(
   product: MerchantProduct,
+  branchIds?: string[],
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const supabase = await createClient();
@@ -2871,6 +3245,14 @@ export async function completeProductOnboarding(
       .eq("owner_user_id", user.id)
       .maybeSingle();
     if (!merchant) return { ok: false, error: "Merchant account not found." };
+
+    if (branchIds && branchIds.length > 0) {
+      const assigned = await setProductBranchAssignments({
+        product,
+        branchIds,
+      });
+      if (!assigned.ok) return assigned;
+    }
 
     const { error } = await supabase
       .from("merchant_products")
@@ -2937,7 +3319,12 @@ export async function createMerchant(input: {
   ownerLastName?: string;
   brandColor: string;
   logoDataUrl?: string;
+  /** Name for the seeded main branch. Defaults to "Main branch". */
+  branchName?: string;
   address?: string;
+  /** Public store phone/email shown to customers — not the owner's login. */
+  storePhone?: string;
+  storeEmail?: string;
   websiteUrl?: string;
   googleBusinessUrl?: string;
   googlePlaceId?: string;
@@ -3026,17 +3413,46 @@ export async function createMerchant(input: {
             product,
             status: "active",
             onboarded_at: new Date().toISOString(),
+            // Loyalty is granted Starter at signup so plan meters and
+            // restrictions match enforcement from day one.
+            ...(product === "loyalty" ? { plan_id: "starter" } : {}),
           },
           { onConflict: "merchant_id,product" },
         );
-        // Seed a default branch and the owner's membership.
-        await supabase.from("branches").insert({
+        // Seed the main branch with the contact details the wizard collected —
+        // customers read these off the branch, not the merchant.
+        const { data: seededBranch } = await supabase
+          .from("branches")
+          .insert({
           merchant_id: inserted.id,
-          name: "Main branch",
+          name: input.branchName?.trim() || "Main branch",
           slug: `${slug}-main`,
-          address: input.address?.trim() || null,
           is_default: true,
-        });
+          address: input.address?.trim() || null,
+          phone: input.storePhone?.trim() || null,
+          email: input.storeEmail?.trim() || null,
+          website_url: input.websiteUrl?.trim() || null,
+          instagram_url: input.instagramUrl?.trim() || null,
+          facebook_url: input.facebookUrl?.trim() || null,
+          x_url: input.xUrl?.trim() || null,
+          google_business_url: input.googleBusinessUrl?.trim() || null,
+          google_place_id: input.googlePlaceId?.trim() || null,
+          google_maps_url: input.googleMapsUrl?.trim() || null,
+        })
+          .select("id")
+          .maybeSingle();
+
+        if (seededBranch?.id) {
+          await supabase.from("product_branch_assignments").upsert(
+            {
+              merchant_id: inserted.id,
+              product,
+              branch_id: seededBranch.id,
+              status: "active",
+            },
+            { onConflict: "merchant_id,product,branch_id" },
+          );
+        }
         const ownerMemberName =
           [input.ownerFirstName?.trim(), input.ownerLastName?.trim()]
             .filter(Boolean)
@@ -3091,21 +3507,65 @@ export async function updateMerchantProfile(
     return { ok: false, error: "Only the owner can edit the loyalty program." };
   }
 
+  // Store identity (logo, brand, name) is global — owners only.
+  const storeIdentityKeys: (keyof MerchantProfile)[] = [
+    "businessName",
+    "brandColor",
+    "logoDataUrl",
+  ];
+  if (storeIdentityKeys.some((key) => patch[key] !== undefined) && ctx.role !== "owner") {
+    return { ok: false, error: "Only the owner can edit store details." };
+  }
+
   // Owner-escalation alerts are owner-controlled.
   if (patch.notifyOwnerPendingApprovals !== undefined && ctx.role !== "owner") {
     return { ok: false, error: "Only the owner can change owner approval alerts." };
   }
 
+  const merchantRow = toMerchantRowPatch(patch);
   const { error } = await supabase
     .from("merchants")
-    .update(toMerchantRowPatch(patch))
+    .update(merchantRow)
     .eq("id", ctx.id);
-  return error ? { ok: false, error: error.message } : { ok: true };
+  if (error) return { ok: false, error: error.message };
+
+  // Onboarding / merchant-profile saves still write hours on `merchants`.
+  // Mirror those onto the main branch so createBranch can copy them later and
+  // branch-scoped settings stay aligned with the wizard defaults.
+  const branchHours: Partial<BranchRow> = {};
+  if (merchantRow.queue_open_time !== undefined) {
+    branchHours.queue_open_time = merchantRow.queue_open_time;
+  }
+  if (merchantRow.queue_close_time !== undefined) {
+    branchHours.queue_close_time = merchantRow.queue_close_time;
+  }
+  if (merchantRow.queue_hours_timezone !== undefined) {
+    branchHours.queue_hours_timezone = merchantRow.queue_hours_timezone;
+  }
+  if (merchantRow.queue_open_days !== undefined) {
+    branchHours.queue_open_days = merchantRow.queue_open_days;
+  }
+  if (merchantRow.queue_auto_start !== undefined) {
+    branchHours.queue_auto_start = merchantRow.queue_auto_start;
+  }
+  if (merchantRow.queue_auto_close !== undefined) {
+    branchHours.queue_auto_close = merchantRow.queue_auto_close;
+  }
+  if (Object.keys(branchHours).length > 0) {
+    await supabase
+      .from("branches")
+      .update(branchHours)
+      .eq("merchant_id", ctx.id)
+      .eq("is_default", true);
+  }
+
+  return { ok: true };
 }
 
 type StampNotifCustomer = {
   name: string;
   phone: string | null;
+  email?: string | null;
   public_token: string | null;
   whatsapp_available: boolean | null;
   preferred_notification_channel: string | null;
@@ -3137,14 +3597,15 @@ function loyaltyNotifyLog(
 }
 
 /**
- * Loyalty templates are WhatsApp-first with SMS fallback, so the customer's
- * stored channel prefs only decide the SMS body — never whether WhatsApp runs.
+ * Loyalty templates always send WhatsApp (+ email when available).
+ * Stored channel prefs do not block WhatsApp.
  * publicToken may be empty for templates with no URL button (reward claimed).
  */
 function toLoyaltyNotifiable(customer: StampNotifCustomer) {
   return {
     phone: customer.phone as string,
     name: (customer.name ?? "").trim() || "there",
+    email: customer.email?.trim() || null,
     publicToken: (customer.public_token ?? "").trim(),
     whatsappAvailable: true,
     preferredNotificationChannel: "whatsapp" as const,
@@ -3324,7 +3785,7 @@ export async function approveStamp(approvalId: string) {
       supabase
         .from("customers")
         .select(
-          "name, phone, public_token, whatsapp_available, preferred_notification_channel",
+          "name, phone, email, public_token, whatsapp_available, preferred_notification_channel, banned",
         )
         .eq("id", approval.customer_id)
         .maybeSingle(),
@@ -3336,6 +3797,10 @@ export async function approveStamp(approvalId: string) {
         .eq("id", approval.merchant_id)
         .maybeSingle(),
     ]);
+
+    if (customer?.banned) {
+      return { ok: false, error: "This customer is banned." };
+    }
 
     const { error } = await supabase.rpc("approve_stamp", { p_approval_id: approvalId });
     if (error) return { ok: false, error: error.message };
@@ -3559,7 +4024,7 @@ async function executeOfferStamp(
     const { data: customer } = await supabase
       .from("customers")
       .select(
-        "id, name, phone, public_token, whatsapp_available, preferred_notification_channel, merchant_id, banned",
+        "id, name, phone, email, public_token, whatsapp_available, preferred_notification_channel, merchant_id, banned",
       )
       .eq("id", customerId)
       .maybeSingle();
@@ -3614,7 +4079,7 @@ export async function redeemReward(customerId: string, code: string) {
     supabase
       .from("customers")
       .select(
-        "name, phone, public_token, whatsapp_available, preferred_notification_channel, merchant_id",
+        "name, phone, email, public_token, whatsapp_available, preferred_notification_channel, merchant_id",
       )
       .eq("id", customerId)
       .maybeSingle(),
@@ -3700,7 +4165,7 @@ export async function redeemRewardByCode(
     const { data: customer } = await supabase
       .from("customers")
       .select(
-        "name, phone, public_token, whatsapp_available, preferred_notification_channel",
+        "name, phone, email, public_token, whatsapp_available, preferred_notification_channel",
       )
       .eq("id", target.customer_id)
       .maybeSingle();
@@ -3750,7 +4215,18 @@ export async function setCustomerBanned(customerId: string, banned: boolean) {
   if (ctx.role !== "owner") return { ok: false, error: "Only the owner can ban customers." };
 
   const { error } = await supabase.from("customers").update({ banned }).eq("id", customerId);
-  return error ? { ok: false, error: error.message } : { ok: true };
+  if (error) return { ok: false, error: error.message };
+
+  // Drop open stamp requests so a ban cannot be approved after the fact.
+  if (banned) {
+    await supabase
+      .from("approvals")
+      .update({ status: "rejected", resolved_at: new Date().toISOString() })
+      .eq("customer_id", customerId)
+      .eq("status", "pending");
+  }
+
+  return { ok: true };
 }
 
 /**
@@ -3970,8 +4446,23 @@ const canManageBranches = (role: MemberRole) => role === "owner";
 
 export async function createBranch(input: {
   name: string;
-  address?: string;
-}): Promise<{ ok: boolean; error?: string; branchId?: string }> {
+  contact?: Partial<BranchContact>;
+  /** Seeds the new branch from the main branch's contact details and links. */
+  copyContactFromMainBranch?: boolean;
+  /** Optional store timings; defaults to copying the main branch's hours. */
+  hours?: { openTime: string; closeTime: string; openDays: number[] };
+  /**
+   * When set, try to activate the new branch on this product. Creation always
+   * succeeds globally; activation is plan-gated and may return a warning.
+   */
+  assignToProduct?: MerchantProduct;
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  branchId?: string;
+  assigned?: boolean;
+  warning?: string;
+}> {
   try {
     const supabase = await createClient();
     const {
@@ -3986,37 +4477,92 @@ export async function createBranch(input: {
     const name = input.name.trim();
     if (!name) return { ok: false, error: "Branch name is required." };
 
-    // Branches are shared by both products, so the merchant gets whichever
-    // allowance is larger — including the Queue trial's.
-    const admin = createAdminClient();
-    const { data: productRows } = await admin
-      .from("merchant_products")
-      .select(
-        "product, plan_id, status, onboarded_at, trial_started_at, trial_ends_at",
-      )
-      .eq("merchant_id", ctx.id);
+    // Global branch directory is uncapped — plan limits only gate activation
+    // per product (see setProductBranchAssignment / assignToProduct below).
 
-    const entitlements = entitlementsFromRows(productRows ?? []);
-    const { maxBranchesFor, branchLimitError } = await import(
-      "@/lib/merchant/plan-limits"
-    );
-    const maxBranches = maxBranchesFor({
-      loyaltyPlanId: entitlements.loyalty?.planId,
-      queuePlanId: entitlements.queue?.planId,
-      queueEnabled: isProductEnabled(entitlements, "queue"),
-      queueTrialActive: isTrialActive(entitlements.queue),
-    });
-
-    const { count: branchCount, error: countError } = await supabase
-      .from("branches")
-      .select("id", { count: "exact", head: true })
-      .eq("merchant_id", ctx.id);
-    if (countError) return { ok: false, error: countError.message };
-    if ((branchCount ?? 0) >= maxBranches) {
-      return { ok: false, error: branchLimitError(maxBranches) };
+    // Main branch = is_default; fall back to earliest created. Queue hours +
+    // wait estimate always seed from it so new locations inherit the schedule
+    // the merchant already configured (contact copy stays opt-in).
+    const BRANCH_QUEUE_SELECT =
+      "phone, email, website_url, instagram_url, facebook_url, x_url, google_business_url, queue_open_time, queue_close_time, queue_hours_timezone, queue_open_days, queue_auto_start, queue_auto_close, estimated_wait_minutes";
+    let mainBranch: {
+      phone: string | null;
+      email: string | null;
+      website_url: string | null;
+      instagram_url: string | null;
+      facebook_url: string | null;
+      x_url: string | null;
+      google_business_url: string | null;
+      queue_open_time: string;
+      queue_close_time: string;
+      queue_hours_timezone: string;
+      queue_open_days: number[];
+      queue_auto_start: boolean;
+      queue_auto_close: boolean;
+      estimated_wait_minutes: number;
+    } | null = null;
+    {
+      const { data: defaultBranch } = await supabase
+        .from("branches")
+        .select(BRANCH_QUEUE_SELECT)
+        .eq("merchant_id", ctx.id)
+        .eq("is_default", true)
+        .maybeSingle();
+      if (defaultBranch) {
+        mainBranch = defaultBranch;
+      } else {
+        const { data: earliestBranch } = await supabase
+          .from("branches")
+          .select(BRANCH_QUEUE_SELECT)
+          .eq("merchant_id", ctx.id)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        mainBranch = earliestBranch;
+      }
     }
 
+    let contactRow = toBranchRowPatch(input.contact ?? {});
+    if (input.copyContactFromMainBranch && mainBranch) {
+      // Address and the Google listing stay branch-specific even when copying:
+      // they describe the location, not the business.
+      contactRow = {
+        phone: mainBranch.phone,
+        email: mainBranch.email,
+        website_url: mainBranch.website_url,
+        instagram_url: mainBranch.instagram_url,
+        facebook_url: mainBranch.facebook_url,
+        x_url: mainBranch.x_url,
+        google_business_url: mainBranch.google_business_url,
+        ...contactRow,
+      };
+    }
+
+    const queueSettingsFromMain = mainBranch
+      ? {
+          queue_open_time: mainBranch.queue_open_time,
+          queue_close_time: mainBranch.queue_close_time,
+          queue_hours_timezone: mainBranch.queue_hours_timezone,
+          queue_open_days: mainBranch.queue_open_days,
+          queue_auto_start: mainBranch.queue_auto_start,
+          queue_auto_close: mainBranch.queue_auto_close,
+          estimated_wait_minutes: mainBranch.estimated_wait_minutes,
+        }
+      : null;
+    const queueSettings = input.hours
+      ? {
+          queue_open_time: input.hours.openTime,
+          queue_close_time: input.hours.closeTime,
+          queue_hours_timezone: mainBranch?.queue_hours_timezone ?? "Asia/Kolkata",
+          queue_open_days: input.hours.openDays,
+          queue_auto_start: mainBranch?.queue_auto_start ?? false,
+          queue_auto_close: mainBranch?.queue_auto_close ?? false,
+          estimated_wait_minutes: mainBranch?.estimated_wait_minutes ?? 10,
+        }
+      : queueSettingsFromMain;
+
     const base = `${ctx.slug}-${slugify(name) || "branch"}`;
+    let branchId: string | undefined;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const slug = attempt === 0 ? base : `${base}-${Math.random().toString(36).slice(2, 6)}`;
       const { data, error } = await supabase
@@ -4025,23 +4571,238 @@ export async function createBranch(input: {
           merchant_id: ctx.id,
           name,
           slug,
-          address: input.address?.trim() || null,
           is_default: false,
+          ...contactRow,
+          ...(queueSettings ?? {}),
         })
         .select("id")
         .maybeSingle();
-      if (!error) return { ok: true, branchId: data?.id };
+      if (!error) {
+        branchId = data?.id;
+        break;
+      }
       if (error.code !== "23505") return { ok: false, error: error.message };
     }
-    return { ok: false, error: "Could not create a unique branch link. Please try again." };
+    if (!branchId) {
+      return { ok: false, error: "Could not create a unique branch link. Please try again." };
+    }
+
+    if (!input.assignToProduct) {
+      return { ok: true, branchId, assigned: false };
+    }
+
+    const assign = await activateBranchForProduct(
+      supabase,
+      ctx.id,
+      input.assignToProduct,
+      branchId,
+    );
+    if (assign.ok) {
+      return { ok: true, branchId, assigned: true };
+    }
+    return {
+      ok: true,
+      branchId,
+      assigned: false,
+      warning: assign.warning ?? assign.error,
+    };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Could not add branch." };
   }
 }
 
+/**
+ * Activate or deactivate a global branch for one product. Plan limits apply
+ * only on activation — deactivation and global create are always allowed.
+ */
+export async function setProductBranchAssignment(input: {
+  product: MerchantProduct;
+  branchId: string;
+  active: boolean;
+}): Promise<{ ok: boolean; error?: string; warning?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    const ctx = await currentMerchant(supabase, user.id);
+    if (!ctx) return { ok: false, error: "Merchant account not found." };
+    if (!canManageBranches(ctx.role)) {
+      return { ok: false, error: "You can't manage branches." };
+    }
+
+    const { data: branch } = await supabase
+      .from("branches")
+      .select("id")
+      .eq("id", input.branchId)
+      .eq("merchant_id", ctx.id)
+      .maybeSingle();
+    if (!branch) return { ok: false, error: "Branch not found." };
+
+    if (!input.active) {
+      const { error } = await supabase
+        .from("product_branch_assignments")
+        .upsert(
+          {
+            merchant_id: ctx.id,
+            product: input.product,
+            branch_id: input.branchId,
+            status: "inactive",
+          },
+          { onConflict: "merchant_id,product,branch_id" },
+        );
+      return error ? { ok: false, error: error.message } : { ok: true };
+    }
+
+    return activateBranchForProduct(
+      supabase,
+      ctx.id,
+      input.product,
+      input.branchId,
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update branch assignment.",
+    };
+  }
+}
+
+/**
+ * Replace the active set for a product (onboarding multi-select). Counts must
+ * stay within the plan cap.
+ */
+export async function setProductBranchAssignments(input: {
+  product: MerchantProduct;
+  branchIds: string[];
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    const ctx = await currentMerchant(supabase, user.id);
+    if (!ctx) return { ok: false, error: "Merchant account not found." };
+    if (!canManageBranches(ctx.role)) {
+      return { ok: false, error: "You can't manage branches." };
+    }
+
+    const uniqueIds = [...new Set(input.branchIds.filter(Boolean))];
+    const entitlements = await loadEntitlementsForMerchant(ctx.id);
+    const max = maxActiveBranches(input.product, entitlements);
+    if (uniqueIds.length > max) {
+      return { ok: false, error: productBranchLimitError(input.product, max) };
+    }
+
+    if (uniqueIds.length > 0) {
+      const { data: owned } = await supabase
+        .from("branches")
+        .select("id")
+        .eq("merchant_id", ctx.id)
+        .in("id", uniqueIds);
+      if ((owned ?? []).length !== uniqueIds.length) {
+        return { ok: false, error: "One or more branches were not found." };
+      }
+    }
+
+    // One row per branch — upsert rejects the same conflict target twice.
+    const { data: existing } = await supabase
+      .from("product_branch_assignments")
+      .select("branch_id")
+      .eq("merchant_id", ctx.id)
+      .eq("product", input.product);
+
+    const byBranch = new Map<string, "active" | "inactive">();
+    for (const row of existing ?? []) {
+      byBranch.set(row.branch_id as string, "inactive");
+    }
+    for (const branchId of uniqueIds) {
+      byBranch.set(branchId, "active");
+    }
+
+    const rows = [...byBranch.entries()].map(([branchId, status]) => ({
+      merchant_id: ctx.id,
+      product: input.product,
+      branch_id: branchId,
+      status,
+    }));
+
+    if (rows.length === 0) return { ok: true };
+
+    const { error } = await supabase
+      .from("product_branch_assignments")
+      .upsert(rows, { onConflict: "merchant_id,product,branch_id" });
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not save branch selection.",
+    };
+  }
+}
+
+async function loadEntitlementsForMerchant(merchantId: string): Promise<Entitlements> {
+  const admin = createAdminClient();
+  const { data: productRows } = await admin
+    .from("merchant_products")
+    .select(
+      "product, plan_id, status, onboarded_at, trial_started_at, trial_ends_at",
+    )
+    .eq("merchant_id", merchantId);
+  return entitlementsFromRows(productRows ?? []);
+}
+
+async function activateBranchForProduct(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  merchantId: string,
+  product: MerchantProduct,
+  branchId: string,
+): Promise<{ ok: boolean; error?: string; warning?: string }> {
+  const entitlements = await loadEntitlementsForMerchant(merchantId);
+  const max = maxActiveBranches(product, entitlements);
+
+  const { data: assignmentRows } = await supabase
+    .from("product_branch_assignments")
+    .select("product, branch_id, status")
+    .eq("merchant_id", merchantId)
+    .eq("product", product);
+
+  const map = buildProductBranchMap(
+    (assignmentRows ?? []).map((row) => ({
+      product: row.product as MerchantProduct,
+      branchId: row.branch_id,
+      status: row.status,
+    })),
+  );
+  const activeIds = map[product] ?? [];
+  if (activeIds.includes(branchId)) return { ok: true };
+  if (activeIds.length >= max) {
+    return {
+      ok: false,
+      error: productBranchLimitError(product, max),
+      warning: branchCreatedUnassignedMessage(max),
+    };
+  }
+
+  const { error } = await supabase.from("product_branch_assignments").upsert(
+    {
+      merchant_id: merchantId,
+      product,
+      branch_id: branchId,
+      status: "active",
+    },
+    { onConflict: "merchant_id,product,branch_id" },
+  );
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
 export async function updateBranch(
   branchId: string,
-  patch: { name?: string; address?: string },
+  patch: Partial<BranchContact> & { name?: string },
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const supabase = await createClient();
@@ -4052,14 +4813,20 @@ export async function updateBranch(
 
     const ctx = await currentMerchant(supabase, user.id);
     if (!ctx) return { ok: false, error: "Merchant account not found." };
-    if (!canManageBranches(ctx.role)) return { ok: false, error: "You can't manage branches." };
 
-    const row: { name?: string; address?: string | null } = {};
-    if (patch.name !== undefined) {
-      if (!patch.name.trim()) return { ok: false, error: "Branch name is required." };
-      row.name = patch.name.trim();
+    // Renaming a branch is an owner action; contact details stay editable by
+    // any member, matching how these fields behaved on the merchant record.
+    const { name, ...contact } = patch;
+    if (name !== undefined && !canManageBranches(ctx.role)) {
+      return { ok: false, error: "You can't manage branches." };
     }
-    if (patch.address !== undefined) row.address = patch.address.trim() || null;
+
+    const row: Partial<BranchRow> = toBranchRowPatch(contact);
+    if (name !== undefined) {
+      if (!name.trim()) return { ok: false, error: "Branch name is required." };
+      row.name = name.trim();
+    }
+    if (Object.keys(row).length === 0) return { ok: true };
 
     const { error } = await supabase
       .from("branches")
@@ -4069,6 +4836,125 @@ export async function updateBranch(
     return error ? { ok: false, error: error.message } : { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Could not update branch." };
+  }
+}
+
+/** Queue hours + initial wait estimate — per branch; create copies from main. */
+export async function updateBranchQueueSettings(
+  branchId: string,
+  patch: {
+    queueOpenTime?: string;
+    queueCloseTime?: string;
+    queueHoursTimezone?: string;
+    queueOpenDays?: number[];
+    queueAutoStart?: boolean;
+    queueAutoClose?: boolean;
+    estimatedWaitMinutes?: number;
+  },
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    const ctx = await currentMerchant(supabase, user.id);
+    if (!ctx) return { ok: false, error: "Merchant account not found." };
+
+    const { data: branch } = await supabase
+      .from("branches")
+      .select("id, is_default")
+      .eq("id", branchId)
+      .eq("merchant_id", ctx.id)
+      .maybeSingle();
+    if (!branch) return { ok: false, error: "Branch not found." };
+
+    const row: Partial<BranchRow> = {};
+    if (patch.queueOpenTime !== undefined) row.queue_open_time = patch.queueOpenTime;
+    if (patch.queueCloseTime !== undefined) row.queue_close_time = patch.queueCloseTime;
+    if (patch.queueHoursTimezone !== undefined) {
+      row.queue_hours_timezone = patch.queueHoursTimezone;
+    }
+    if (patch.queueOpenDays !== undefined) {
+      row.queue_open_days = patch.queueOpenDays
+        .map(Number)
+        .filter((d) => Number.isFinite(d) && d >= 0 && d <= 6);
+    }
+    if (patch.queueAutoStart !== undefined) row.queue_auto_start = patch.queueAutoStart;
+    if (patch.queueAutoClose !== undefined) row.queue_auto_close = patch.queueAutoClose;
+    if (patch.estimatedWaitMinutes !== undefined) {
+      const mins = Math.round(Number(patch.estimatedWaitMinutes));
+      if (!Number.isFinite(mins) || mins < 1 || mins > 120) {
+        return { ok: false, error: "Estimated wait must be between 1 and 120 minutes." };
+      }
+      row.estimated_wait_minutes = mins;
+    }
+    if (Object.keys(row).length === 0) return { ok: true };
+
+    const { error } = await supabase
+      .from("branches")
+      .update(row)
+      .eq("id", branchId)
+      .eq("merchant_id", ctx.id);
+    if (error) return { ok: false, error: error.message };
+
+    // Keep merchant-level hours in sync with the main branch so older
+    // merchant-scoped readers (and onboarding defaults) stay coherent.
+    if (branch.is_default) {
+      const merchantPatch: Partial<MerchantRow> = {};
+      if (row.queue_open_time !== undefined) merchantPatch.queue_open_time = row.queue_open_time;
+      if (row.queue_close_time !== undefined) merchantPatch.queue_close_time = row.queue_close_time;
+      if (row.queue_hours_timezone !== undefined) {
+        merchantPatch.queue_hours_timezone = row.queue_hours_timezone;
+      }
+      if (row.queue_open_days !== undefined) merchantPatch.queue_open_days = row.queue_open_days;
+      if (row.queue_auto_start !== undefined) merchantPatch.queue_auto_start = row.queue_auto_start;
+      if (row.queue_auto_close !== undefined) merchantPatch.queue_auto_close = row.queue_auto_close;
+      if (Object.keys(merchantPatch).length > 0) {
+        await supabase.from("merchants").update(merchantPatch).eq("id", ctx.id);
+      }
+    }
+
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update queue settings.",
+    };
+  }
+}
+
+/** Persist the onboarding wait estimate onto the main branch (DB source of truth). */
+export async function updateMainBranchEstimatedWait(
+  minutes: number,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated." };
+
+    const ctx = await currentMerchant(supabase, user.id);
+    if (!ctx) return { ok: false, error: "Merchant account not found." };
+
+    const mins = Math.round(Number(minutes));
+    if (!Number.isFinite(mins) || mins < 1 || mins > 120) {
+      return { ok: false, error: "Estimated wait must be between 1 and 120 minutes." };
+    }
+
+    const { error } = await supabase
+      .from("branches")
+      .update({ estimated_wait_minutes: mins })
+      .eq("merchant_id", ctx.id)
+      .eq("is_default", true);
+    return error ? { ok: false, error: error.message } : { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Could not update estimated wait.",
+    };
   }
 }
 
@@ -4302,6 +5188,11 @@ export async function completeTeamInvite(input: {
       return { ok: false, error: "Password must be at least 8 characters." };
     }
 
+    const captcha = await verifyTurnstileToken(input.captchaToken, {
+      source: "team-invite",
+    });
+    if (!captcha.ok) return { ok: false, error: captcha.error };
+
     const phone = toCanonicalPhone(phoneRaw);
     const admin = createAdminClient();
 
@@ -4348,13 +5239,11 @@ export async function completeTeamInvite(input: {
       .eq("id", member.id);
     if (memberError) return { ok: false, error: memberError.message };
 
-    // Sign them into the dashboard. The invite page is public (anyone holding
-    // the link can post to this action), so the token rides along to GoTrue.
+    // Sign them into the dashboard. Siteverify already spent the Turnstile token.
     const supabase = await createClient();
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: member.email,
       password: input.password,
-      options: { captchaToken: input.captchaToken },
     });
     if (signInError) {
       return {
@@ -4473,8 +5362,9 @@ export async function updateMemberRole(
       if (!sameSorted(prevProducts, products)) {
         const PRODUCT_LABELS: Record<MerchantProduct, string> = {
           loyalty: "Loyalty Stamps",
-          queue: "Queue Management",
+          queue: "Smart Queue",
           reservation: "Reservations",
+          menu: "AI Menu",
         };
         const labelProducts = (list: MerchantProduct[]) =>
           list.length === 0

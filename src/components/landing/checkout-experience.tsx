@@ -7,7 +7,6 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, Check, CreditCard, Eye, EyeOff, Lock, Store } from "lucide-react";
-import { load } from "@cashfreepayments/cashfree-js";
 import { isValidEmail, isValidPassword, isValidPhone } from "@/lib/auth/format";
 import { INDIA_CITIES, stateForCity } from "@/lib/geo/india-cities";
 import { readCheckoutDraft, writeCheckoutAccount, writeCheckoutDraft } from "@/lib/merchant/checkout";
@@ -24,9 +23,10 @@ import { TurnstileField } from "@/components/turnstile/turnstile-field";
 import { useTurnstile } from "@/lib/turnstile/use-turnstile";
 import { type PricingPlan } from "@/lib/merchant/pricing";
 import { FeatureText } from "@/components/landing/feature-text";
-
-const CASHFREE_MODE =
-  process.env.NEXT_PUBLIC_CASHFREE_ENV === "production" ? "production" : "sandbox";
+import {
+  payWithRazorpay,
+  RazorpayCheckoutCancelledError,
+} from "@/lib/payments/razorpay-checkout";
 
 type Step = "account" | "payment" | "loading";
 
@@ -162,49 +162,21 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
     setStep("loading");
 
     try {
-      const orderRes = await fetch("/api/checkout/cashfree/order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          planId: plan.id,
-          customerName: ownerName,
-          customerEmail: email.trim(),
-          customerPhone: phone,
-        }),
+      await payWithRazorpay({
+        planId: plan.id,
+        customerName: ownerName,
+        customerEmail: email.trim(),
+        customerPhone: phone,
       });
-      const orderData = await orderRes.json().catch(() => null);
-      if (!orderRes.ok || !orderData?.paymentSessionId) {
-        throw new Error(orderData?.error ?? "Could not start the payment.");
-      }
-
-      const cashfree = await load({ mode: CASHFREE_MODE });
-      const result = await cashfree.checkout({
-        paymentSessionId: orderData.paymentSessionId,
-        redirectTarget: "_modal",
-      });
-
-      if (result?.error) {
-        setError("Payment was cancelled or failed. Please try again.");
-        setStep("payment");
-        return;
-      }
 
       setLoadingLabel("Confirming payment");
-      const verifyRes = await fetch("/api/checkout/cashfree/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: orderData.orderId }),
-      });
-      const verifyData = await verifyRes.json().catch(() => null);
-      if (!verifyRes.ok || !verifyData?.paid) {
-        setError("We couldn't confirm your payment. If you were charged, please contact support.");
-        setStep("payment");
-        return;
-      }
-
       await finishOnboarding();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not complete the payment.");
+      if (err instanceof RazorpayCheckoutCancelledError) {
+        setError("Payment was cancelled. You can try again when ready.");
+      } else {
+        setError(err instanceof Error ? err.message : "Could not complete the payment.");
+      }
       setStep("payment");
     }
   }, [plan.id, ownerName, email, phone, finishOnboarding]);
@@ -540,7 +512,7 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                   </div>
                 </div>
 
-                <p className="checkout-pay-demo">You&apos;ll complete payment securely via Cashfree.</p>
+                <p className="checkout-pay-demo">You&apos;ll complete payment securely via Razorpay.</p>
 
                 {error && (
                   <p className="auth-error" role="alert">

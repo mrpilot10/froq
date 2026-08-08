@@ -45,7 +45,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         ],
         bullets: [
           "Loyalty Stamps — a digital stamp card that brings people back.",
-          "Queue Management — a live waitlist that calls guests on WhatsApp when their table is ready.",
+          "Smart Queue — a live waitlist that calls guests on WhatsApp when their table is ready.",
         ],
       },
       {
@@ -128,7 +128,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
   },
   {
     id: "queue",
-    label: "Queue Management",
+    label: "Smart Queue",
     blurb: "Sessions, calling guests and WhatsApp alerts.",
     articles: [
       {
@@ -181,7 +181,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: "free-trial",
         question: "How does the free trial work?",
         body: [
-          "Queue Management comes with a 7-day free trial. No card is required to start it, and it converts to nothing — if you don't pick a plan, the product simply locks at the end of the week.",
+          "Smart Queue comes with a 7-day free trial. No card is required to start it, and it converts to nothing — if you don't pick a plan, the product simply locks at the end of the week.",
           "Your sessions, guests and history are kept, so choosing a plan later picks up exactly where you left off. The trial is available once per business.",
         ],
       },
@@ -197,7 +197,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: "change-plan",
         question: "How do I upgrade or downgrade?",
         body: [
-          "Open Manage plan from your product settings and choose a tier. Changes are scheduled for your next renewal date, so you keep everything you're paying for until the current period ends and you're never double-charged.",
+          "Open Manage plan from your product settings and choose a tier. Upgrades are charged and applied immediately so higher limits unlock right away. Downgrades are scheduled for your next renewal, so you keep what you've already paid for until that date.",
           "Only the account owner can change plans.",
         ],
       },
@@ -205,7 +205,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: "cancel",
         question: "What happens if I cancel?",
         body: [
-          "Cancelling stops future renewals. You keep full access until the end of the period you've already paid for, and after that the product moves to the free tier rather than disappearing.",
+          "Cancelling stops future renewals. You keep full access until the end of the period you've already paid for. After that the product locks — subscribe again to reopen it.",
           "Your data is not deleted when you cancel. You can resubscribe and carry on.",
         ],
       },
@@ -263,7 +263,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
 export const TICKET_CATEGORIES = [
   "Billing & refunds",
   "Loyalty Stamps",
-  "Queue Management",
+  "Smart Queue",
   "WhatsApp notifications",
   "Account & login",
   "Something else",

@@ -28,6 +28,23 @@ export const TURNSTILE_REJECTED_MESSAGE =
 export const TURNSTILE_UNAVAILABLE_MESSAGE =
   "The security check couldn’t load. Check your connection and try again.";
 
+/** Cloudflare 110200 — this hostname isn’t on the Turnstile widget allowlist. */
+export const TURNSTILE_DOMAIN_MESSAGE =
+  "The security check isn’t allowed on this domain yet. Add www.froq.io (and froq.io) in Cloudflare Turnstile → Hostname Management, then refresh.";
+
+/**
+ * Map Cloudflare client error codes to a merchant-facing message.
+ * @see https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
+ */
+export function turnstileClientErrorMessage(code?: string | number | null): string {
+  const normalized = String(code ?? "").trim();
+  if (normalized === "110200") return TURNSTILE_DOMAIN_MESSAGE;
+  if (normalized === "110100" || normalized === "110110") {
+    return "The security check is misconfigured. Check NEXT_PUBLIC_TURNSTILE_SITE_KEY in Vercel.";
+  }
+  return TURNSTILE_UNAVAILABLE_MESSAGE;
+}
+
 /**
  * True when GoTrue refused a request over its CAPTCHA check ("captcha
  * protection: request disallowed"). Lets auth actions show a retry prompt

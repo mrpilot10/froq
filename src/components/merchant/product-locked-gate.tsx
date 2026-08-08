@@ -46,12 +46,22 @@ const PITCH: Record<MerchantProduct, Pitch> = {
       "No-show and party-size insights",
     ],
   },
+  menu: {
+    headline: "A menu your guests can talk to",
+    body: "Guests scan the QR, ask what's good and order — the AI menu answers in their language and keeps the kitchen in the loop.",
+    points: [
+      "AI generation for every dish",
+      "Guest chats that answer menu questions",
+      "Analytics on what people ask and add",
+    ],
+  },
 };
 
 const PLAN_HREF: Record<MerchantProduct, string> = {
   loyalty: "/merchant/loyalty/plan",
   queue: "/merchant/queue/plan",
   reservation: "/merchant/reservations/plan",
+  menu: "/merchant/menu/plan",
 };
 
 interface ProductLockedGateProps {

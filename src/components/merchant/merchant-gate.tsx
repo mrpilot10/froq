@@ -155,6 +155,7 @@ export function MerchantGate({ children }: { children: ReactNode }) {
       inAppNotifications={bundle.inAppNotifications}
       entitlements={bundle.entitlements}
       branches={bundle.branches}
+      productBranches={bundle.productBranches}
       members={bundle.members}
       role={bundle.role}
       activeBranchId={bundle.activeBranchId}

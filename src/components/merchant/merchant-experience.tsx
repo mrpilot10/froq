@@ -16,7 +16,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Menu } from "lucide-react";
 import { toast } from "sonner";
-import type { Branch, MemberRole, MerchantCustomer, MerchantEditSection, MerchantInAppNotification, MerchantMember, MerchantProduct, MerchantProfile, MerchantTab, PendingApproval, DashboardFilteredStats } from "@/lib/merchant/types";
+import type { Branch, BranchContact, MemberRole, MerchantCustomer, MerchantEditSection, MerchantInAppNotification, MerchantMember, MerchantProduct, MerchantProfile, MerchantTab, PendingApproval, DashboardFilteredStats } from "@/lib/merchant/types";
 import {
   ALL_TABS,
   ANALYTICS_WORKSPACE_TABS,
@@ -45,7 +45,9 @@ import {
   removeMember,
   requestOfferStampOtp,
   setCustomerBanned,
+  setProductBranchAssignment,
   updateBranch,
+  updateBranchQueueSettings,
   updateCustomerMerchantNotes,
   updateMemberRole,
   updateMerchantProfile,
@@ -53,6 +55,14 @@ import {
 import { DeleteAccountDrawer } from "@/components/shared/delete-account-drawer";
 import { useRealtime } from "@/lib/supabase/use-realtime";
 import { enablePushForMerchant, registerServiceWorker } from "@/lib/push/client";
+import { joinUrlFor } from "@/components/merchant/use-merchant-qr";
+import {
+  countQueueTicketsUsedInWindow,
+  ensureQueueDataEpoch,
+  queueUsageWindowStartMs,
+} from "@/lib/merchant/queue-session-storage";
+import { countReservationsUsedForPlanMeter } from "@/app/merchant/reservation-actions";
+import { countMenuUsedForPlanMeter } from "@/app/merchant/menu-actions";
 import { MerchantNav } from "./merchant-nav";
 import { MerchantSidebar } from "./merchant-sidebar";
 import { MerchantMobileMenu } from "./merchant-mobile-menu";
@@ -72,9 +82,23 @@ import {
   productNeedsOnboarding,
   type Entitlements,
 } from "@/lib/merchant/entitlements";
-import { accessibleProducts, memberCanAccessProduct } from "@/lib/merchant/product-access";
-import { canViewAnalytics, canViewBusinessSettings } from "@/lib/merchant/roles";
-import { maxBranchesFor } from "@/lib/merchant/plan-limits";
+import {
+  activeBranchIdsForProduct,
+  type ProductBranchMap,
+} from "@/lib/merchant/branch-assignments";
+import { memberCanAccessProduct } from "@/lib/merchant/product-access";
+import {
+  preferredMerchantProduct,
+  readRememberedMerchantProduct,
+  rememberMerchantProduct,
+} from "@/lib/merchant/last-product";
+import {
+  canAccessBusinessSettingsPage,
+  canViewAnalytics,
+  canViewBusinessSettings,
+} from "@/lib/merchant/roles";
+import { planUpgradeSummary } from "@/lib/merchant/plan-summary";
+import { isPaidPlanId } from "@/lib/merchant/billing";
 import { MerchantGateSplash } from "./skeletons";
 import { ProductLockedGate } from "./product-locked-gate";
 
@@ -95,6 +119,11 @@ function DrawerChunkFallback({ className }: { className?: string }) {
 
 const MerchantQrDrawer = dynamic(
   () => import("./qr-drawer").then((m) => m.MerchantQrDrawer),
+  { ssr: false, loading: () => <DrawerChunkFallback /> },
+);
+
+const HubQrDrawer = dynamic(
+  () => import("./hub-qr-drawer").then((m) => m.HubQrDrawer),
   { ssr: false, loading: () => <DrawerChunkFallback /> },
 );
 
@@ -135,6 +164,7 @@ interface MerchantWorkspaceProps {
   inAppNotifications?: MerchantInAppNotification[];
   entitlements: Entitlements;
   branches: Branch[];
+  productBranches?: ProductBranchMap;
   members: MerchantMember[];
   role: MemberRole;
   activeBranchId: string | null;
@@ -157,6 +187,7 @@ export function MerchantExperience({
   inAppNotifications: initialNotifications = [],
   entitlements,
   branches,
+  productBranches = {},
   members,
   role,
   activeBranchId,
@@ -185,16 +216,36 @@ export function MerchantExperience({
   // Shared pages (customers / business settings) keep whichever product the
   // merchant last viewed, so the rail + sidebar context doesn't jump around.
   const productFromPath = productForPathname(pathname);
-  const [activeProduct, setActiveProduct] = useState<MerchantProduct>(
-    productFromPath ?? "loyalty",
-  );
+  const [activeProduct, setActiveProduct] = useState<MerchantProduct>(() => {
+    if (
+      productFromPath &&
+      memberCanAccessProduct(role, memberProductIds, productFromPath)
+    ) {
+      return productFromPath;
+    }
+    return preferredMerchantProduct({
+      role,
+      memberProductIds,
+      lastProduct: readRememberedMerchantProduct(),
+      entitlements,
+    });
+  });
   useEffect(() => {
     if (!productFromPath || productFromPath === activeProduct) return;
-    // Don't adopt a product the teammate isn't allowed to open — the access
-    // gate below will send them home and show the warning.
+    // Don't adopt a product the teammate isn't allowed to open — the silent
+    // bounce below sends them to an allowed product home.
     if (!memberCanAccessProduct(role, memberProductIds, productFromPath)) return;
     setActiveProduct(productFromPath);
   }, [productFromPath, activeProduct, role, memberProductIds]);
+
+  // Header switcher only lists branches activated for the current product.
+  // When no assignment rows exist yet (pre-migration), fall back to all branches
+  // so the dashboard stays usable.
+  const productSwitcherBranches = useMemo(() => {
+    if (Object.keys(productBranches).length === 0) return branches;
+    const ids = new Set(activeBranchIdsForProduct(productBranches, activeProduct));
+    return branches.filter((branch) => ids.has(branch.id));
+  }, [branches, productBranches, activeProduct]);
 
   // Warm the App Router cache so tab switches feel instant.
   useEffect(() => {
@@ -204,20 +255,32 @@ export function MerchantExperience({
     }
   }, [router]);
 
-  const allowedProducts = useMemo(
-    () => accessibleProducts(role, memberProductIds, PRODUCTS.map((p) => p.id)),
-    [role, memberProductIds],
-  );
-
   const [accessDeniedOpen, setAccessDeniedOpen] = useState(false);
 
   const goToAllowedProductHome = useCallback(() => {
-    const fallback = allowedProducts[0] ?? "loyalty";
-    setActiveProduct(fallback);
+    const fallback = preferredMerchantProduct({
+      role,
+      memberProductIds,
+      lastProduct: readRememberedMerchantProduct() ?? activeProduct,
+      entitlements,
+    });
     const tab = PRODUCT_DEFAULT_TAB[fallback];
+    const href = TAB_HREF[tab];
+    setActiveProduct(fallback);
+    rememberMerchantProduct(fallback);
+    if (pathname.replace(/\/+$/, "") === href.replace(/\/+$/, "")) {
+      setPendingTab(null);
+      return;
+    }
     setPendingTab(tab);
-    router.replace(TAB_HREF[tab]);
-  }, [allowedProducts, router]);
+    router.replace(href);
+  }, [role, memberProductIds, entitlements, activeProduct, pathname, router]);
+
+  // Remember the last product the user could open (owners + staff).
+  useEffect(() => {
+    if (!memberCanAccessProduct(role, memberProductIds, activeProduct)) return;
+    rememberMerchantProduct(activeProduct);
+  }, [activeProduct, role, memberProductIds]);
 
   const dismissAccessDenied = useCallback(() => {
     setAccessDeniedOpen(false);
@@ -240,28 +303,35 @@ export function MerchantExperience({
     goToAllowedProductHome();
   }, [role, activeTab, goToAllowedProductHome]);
 
-  // Global business settings is managers + owners only.
+  // Business settings page is managers + owners; store identity is owner-only inside.
   useEffect(() => {
     if (!BUSINESS_SETTINGS_TABS.includes(activeTab)) return;
-    if (canViewBusinessSettings(role)) return;
+    if (canAccessBusinessSettingsPage(role)) return;
     setAccessDeniedOpen(true);
     goToAllowedProductHome();
   }, [role, activeTab, goToAllowedProductHome]);
 
-  // Teammates with restricted product access can't stay on a product they weren't granted.
+  // Wrong product for this teammate — bounce home silently (no error sheet).
+  // Common when /merchant still soft-navigates, or a stale deep link opens.
+  const productBounceRef = useRef(false);
   useEffect(() => {
     const pathBlocked =
       !!productFromPath &&
       !memberCanAccessProduct(role, memberProductIds, productFromPath);
     const stateBlocked = !memberCanAccessProduct(role, memberProductIds, activeProduct);
-    if (!pathBlocked && !stateBlocked) return;
-    setAccessDeniedOpen(true);
+    if (!pathBlocked && !stateBlocked) {
+      productBounceRef.current = false;
+      return;
+    }
+    if (productBounceRef.current) return;
+    productBounceRef.current = true;
     goToAllowedProductHome();
   }, [role, memberProductIds, activeProduct, productFromPath, goToAllowedProductHome]);
 
   const [profile, setProfile] = useState<MerchantProfile>(initialProfile);
   const [qrOpen, setQrOpen] = useState(false);
   const [qrProduct, setQrProduct] = useState<MerchantProduct>("loyalty");
+  const [hubQrOpen, setHubQrOpen] = useState(false);
   const [redeemOpen, setRedeemOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [inAppNotifications, setInAppNotifications] =
@@ -269,10 +339,17 @@ export function MerchantExperience({
   const [menuOpen, setMenuOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editSection, setEditSection] = useState<MerchantEditSection>(null);
+  /** Set only when the merchant picks a branch inside the settings sheet. */
+  const [editBranchId, setEditBranchId] = useState<string | null>(null);
   const [purchaseProductTarget, setPurchaseProductTarget] = useState<MerchantProduct | null>(null);
+  /** Specific pack for ProductPurchaseDrawer (next upgrade tier from upsells). */
+  const [purchasePlanId, setPurchasePlanId] = useState<string | null>(null);
   const [comingSoonProduct, setComingSoonProduct] = useState<ComingSoonProduct | null>(null);
   const [manageView, setManageView] = useState<"branches" | "team" | null>(null);
   const [railExpanded, setRailExpanded] = useState(true);
+  const [queueTicketsUsed, setQueueTicketsUsed] = useState<number | null>(null);
+  const [reservationsUsed, setReservationsUsed] = useState<number | null>(null);
+  const [menuChatsUsed, setMenuChatsUsed] = useState<number | null>(null);
 
   useEffect(() => {
     try {
@@ -285,6 +362,110 @@ export function MerchantExperience({
     }
   }, []);
 
+  // Sidebar queue meter — aggregate served+left across ALL branches (same as History quota).
+  // Note: loadQueueHistoryView(url, null) reads the literal `:all` key, not every branch.
+  useEffect(() => {
+    if (activeProduct !== "queue") {
+      setQueueTicketsUsed(null);
+      return;
+    }
+
+    const branchIds = branches.map((b) => b.id);
+
+    const refreshTickets = () => {
+      try {
+        ensureQueueDataEpoch();
+        const queueUrl = joinUrlFor(profile, "queue");
+        const onTrial = isTrialActive(entitlements.queue);
+        const startMs = queueUsageWindowStartMs({
+          onTrial,
+          trialStartedAt: entitlements.queue?.trialStartedAt,
+        });
+        setQueueTicketsUsed(
+          countQueueTicketsUsedInWindow(queueUrl, branchIds, startMs),
+        );
+      } catch {
+        setQueueTicketsUsed(0);
+      }
+    };
+
+    refreshTickets();
+    const onHistory = () => refreshTickets();
+    const onStorage = (event: StorageEvent) => {
+      if (!event.key) return;
+      if (
+        event.key.startsWith("froq.queue.history:") ||
+        event.key.startsWith("froq.queue.session:")
+      ) {
+        refreshTickets();
+      }
+    };
+    window.addEventListener("froq:queue-history", onHistory);
+    window.addEventListener("focus", onHistory);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("froq:queue-history", onHistory);
+      window.removeEventListener("focus", onHistory);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [activeProduct, profile, entitlements.queue, branches]);
+
+  // Sidebar reservation meter — bookings in the trial window / calendar month.
+  useEffect(() => {
+    if (activeProduct !== "reservation") {
+      setReservationsUsed(null);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = () => {
+      void countReservationsUsedForPlanMeter().then((result) => {
+        if (cancelled) return;
+        setReservationsUsed(result.ok ? result.count : 0);
+      });
+    };
+
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refresh);
+    };
+  }, [activeProduct, entitlements.reservation]);
+
+  // Sidebar AI Menu meter — monthly AI Replies only (no AI Generations here).
+  useEffect(() => {
+    if (activeProduct !== "menu") {
+      setMenuChatsUsed(null);
+      return;
+    }
+
+    let cancelled = false;
+    const refresh = () => {
+      void countMenuUsedForPlanMeter().then((result) => {
+        if (cancelled) return;
+        setMenuChatsUsed(result.ok ? result.conversations : 0);
+      });
+    };
+
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refresh);
+    };
+  }, [activeProduct, entitlements.menu]);
+
+  const planMetricUsed =
+    activeProduct === "loyalty"
+      ? dashboardStats.totalCustomers
+      : activeProduct === "queue"
+        ? queueTicketsUsed
+        : activeProduct === "reservation"
+          ? reservationsUsed
+          : activeProduct === "menu"
+            ? menuChatsUsed
+            : null;
   const toggleRailExpanded = useCallback(() => {
     setRailExpanded((prev) => {
       const next = !prev;
@@ -300,6 +481,7 @@ export function MerchantExperience({
   // Latches: mount heavy drawers after first open so cold load skips their
   // chunks, while later close/reopen keeps exit animations + internal state.
   const [qrOpened, setQrOpened] = useState(false);
+  const [hubQrOpened, setHubQrOpened] = useState(false);
   const [redeemOpened, setRedeemOpened] = useState(false);
   const [purchaseOpened, setPurchaseOpened] = useState(false);
   const [manageOpened, setManageOpened] = useState(false);
@@ -308,6 +490,11 @@ export function MerchantExperience({
   useEffect(() => {
     if (qrOpen) setQrOpened(true);
   }, [qrOpen]);
+  // Mount the chunk on first open and keep it mounted, so reopening still animates.
+  const openHubQr = useCallback(() => {
+    setHubQrOpened(true);
+    setHubQrOpen(true);
+  }, []);
   useEffect(() => {
     if (redeemOpen) setRedeemOpened(true);
   }, [redeemOpen]);
@@ -320,25 +507,47 @@ export function MerchantExperience({
 
   const openQr = useCallback(
     (product?: MerchantProduct) => {
-      if (!activeBranchId) {
-        toast.error("Select a branch to show its QR code.");
-        return;
-      }
-      const resolved =
-        product ?? productForPathname(pathname) ?? activeProduct;
-      setQrProduct(resolved);
-      setQrOpen(true);
+      void (async () => {
+        const soleBranchId =
+          productSwitcherBranches.length === 1
+            ? (productSwitcherBranches[0]?.id ?? null)
+            : null;
+        const branchId = activeBranchId ?? soleBranchId;
+        if (!branchId) {
+          toast.error("Select a branch to show its QR code.");
+          return;
+        }
+        // Header can show the sole branch while activeBranchId is still null —
+        // latch the id before opening so the QR drawer has a concrete branch.
+        if (!activeBranchId && soleBranchId) {
+          await onSelectBranch(soleBranchId);
+        }
+        const resolved =
+          product ?? productForPathname(pathname) ?? activeProduct;
+        setQrProduct(resolved);
+        setQrOpen(true);
+      })();
     },
-    [pathname, activeProduct, activeBranchId],
+    [pathname, activeProduct, activeBranchId, productSwitcherBranches, onSelectBranch],
   );
 
   const openRedeem = useCallback(() => {
-    if (!activeBranchId) {
-      toast.error("Select a branch to redeem a reward.");
-      return;
-    }
-    setRedeemOpen(true);
-  }, [activeBranchId]);
+    void (async () => {
+      const soleBranchId =
+        productSwitcherBranches.length === 1
+          ? (productSwitcherBranches[0]?.id ?? null)
+          : null;
+      const branchId = activeBranchId ?? soleBranchId;
+      if (!branchId) {
+        toast.error("Select a branch to redeem a reward.");
+        return;
+      }
+      if (!activeBranchId && soleBranchId) {
+        await onSelectBranch(soleBranchId);
+      }
+      setRedeemOpen(true);
+    })();
+  }, [activeBranchId, productSwitcherBranches, onSelectBranch]);
 
   // Navigate to a tab by pushing its route (URL is the source of truth).
   const goToTab = useCallback(
@@ -355,7 +564,7 @@ export function MerchantExperience({
         setAccessDeniedOpen(true);
         return;
       }
-      if (BUSINESS_SETTINGS_TABS.includes(tab) && !canViewBusinessSettings(role)) {
+      if (BUSINESS_SETTINGS_TABS.includes(tab) && !canAccessBusinessSettingsPage(role)) {
         setAccessDeniedOpen(true);
         return;
       }
@@ -403,11 +612,41 @@ export function MerchantExperience({
   const handlePurchased = useCallback(
     async (product: MerchantProduct) => {
       setPurchaseProductTarget(null);
+      setPurchasePlanId(null);
       await onRefresh();
       setActiveProduct(product);
       router.push(TAB_HREF[PRODUCT_DEFAULT_TAB[product]]);
     },
     [onRefresh, router],
+  );
+
+  const openPurchase = useCallback(
+    (product: MerchantProduct, planId?: string | null) => {
+      if (role !== "owner") {
+        toast.error("Only the owner can add or manage products.");
+        return;
+      }
+      // Existing paid subscribers change packs on Manage plan (schedule at renewal).
+      if (isPaidPlanId(entitlements[product]?.planId)) {
+        const path =
+          product === "queue"
+            ? "/merchant/queue/plan"
+            : product === "reservation"
+              ? "/merchant/reservations/plan"
+              : product === "menu"
+                ? "/merchant/menu/plan"
+                : "/merchant/loyalty/plan";
+        router.push(path);
+        return;
+      }
+      const summary = planUpgradeSummary({
+        product,
+        planId: entitlements[product]?.planId,
+      });
+      setPurchasePlanId(planId ?? summary.nextPlan?.id ?? null);
+      setPurchaseProductTarget(product);
+    },
+    [role, entitlements, router],
   );
 
   // Open the tab from a push-notification deep link (?tab=approvals&product=queue).
@@ -604,9 +843,42 @@ export function MerchantExperience({
   );
 
   const handleSaveProfile = useCallback(async () => {
-    const ok = await run(() => updateMerchantProfile(profile), "Changes saved");
+    if (editSection === "business" && !canViewBusinessSettings(role)) {
+      toast.error("Only the owner can edit store details.");
+      return;
+    }
+    // Full-profile saves still include store identity fields; omit them for
+    // non-owners so notifications/alerts aren't blocked by the owner-only gate.
+    let patch: Partial<MerchantProfile> = profile;
+    if (role !== "owner" && editSection !== "business") {
+      const { businessName: _, brandColor: __, logoDataUrl: ___, ...rest } = profile;
+      patch = rest;
+    }
+    const ok = await run(() => updateMerchantProfile(patch), "Changes saved");
     if (ok) setEditSection(null);
-  }, [run, profile]);
+  }, [run, profile, role, editSection]);
+
+  const openEditSection = useCallback(
+    (section: MerchantEditSection) => {
+      if (section === "business" && !canViewBusinessSettings(role)) {
+        toast.error("Only the owner can edit store details.");
+        return;
+      }
+      setEditSection(section);
+    },
+    [role],
+  );
+
+  const handleSaveBranchContact = useCallback(
+    (branchId: string, patch: Partial<BranchContact>) =>
+      run(() => updateBranch(branchId, patch), "Changes saved"),
+    [run],
+  );
+
+  const closeEditSection = useCallback(() => {
+    setEditSection(null);
+    setEditBranchId(null);
+  }, []);
 
   const handleSaveQueueBanner = useCallback(
     async (queueBanner: string, queueBannerLink: string) => {
@@ -619,7 +891,85 @@ export function MerchantExperience({
     [run],
   );
 
-    const handleSaveQueueSettings = useCallback(
+  const handleSaveQueueHours = useCallback(
+    async (hours: {
+      openTime: string;
+      closeTime: string;
+      openDays: number[];
+      autoStart: boolean;
+      autoClose: boolean;
+    }) => {
+      // Always the switcher selection (then main) — never contact editBranchId.
+      const target =
+        branches.find((b) => b.id === activeBranchId) ??
+        branches.find((b) => b.isDefault) ??
+        branches[0] ??
+        null;
+      const patch = {
+        queueOpenTime: hours.openTime,
+        queueCloseTime: hours.closeTime,
+        queueHoursTimezone: "Asia/Kolkata" as const,
+        queueOpenDays: hours.openDays,
+        queueAutoStart: hours.autoStart,
+        queueAutoClose: hours.autoClose,
+      };
+      // Main branch still mirrors onto merchants for legacy readers.
+      if (!target || target.isDefault) {
+        setProfile((prev) => ({ ...prev, ...patch }));
+      }
+      if (!target) {
+        await run(() => updateMerchantProfile(patch), "Auto sessions saved");
+        return;
+      }
+      await run(
+        () => updateBranchQueueSettings(target.id, patch),
+        "Auto sessions saved",
+      );
+    },
+    [run, branches, activeBranchId],
+  );
+
+  const handleSaveEstimatedWait = useCallback(
+    async (minutes: number) => {
+      const target =
+        branches.find((b) => b.id === activeBranchId) ??
+        branches.find((b) => b.isDefault) ??
+        branches[0] ??
+        null;
+      if (!target) return;
+      await run(() =>
+        updateBranchQueueSettings(target.id, {
+          estimatedWaitMinutes: minutes,
+        }),
+      );
+    },
+    [run, branches, activeBranchId],
+  );
+
+  const handleSaveReservationSettings = useCallback(
+    async (patch: Partial<MerchantProfile>) => {
+      setProfile((prev) => ({ ...prev, ...patch }));
+      await run(() => updateMerchantProfile(patch), "Reservation settings saved");
+    },
+    [run],
+  );
+
+  const handleSaveMenuSettings = useCallback(
+    async (patch: Partial<MerchantProfile>) => {
+      // Snapshot the exact keys being written rather than inferring how to undo
+      // them: negating worked while these were all toggles, and would turn a
+      // failed 9% GST save into nonsense now that rates ride the same path.
+      const previous = Object.fromEntries(
+        Object.keys(patch).map((key) => [key, profile[key as keyof MerchantProfile]]),
+      ) as Partial<MerchantProfile>;
+      setProfile((prev) => ({ ...prev, ...patch }));
+      const ok = await run(() => updateMerchantProfile(patch), "Menu settings saved");
+      if (!ok) setProfile((prev) => ({ ...prev, ...previous }));
+    },
+    [run, profile],
+  );
+
+  const handleSaveQueueSettings = useCallback(
     async (patch: Partial<MerchantProfile>) => {
       const previous = Object.fromEntries(
         Object.keys(patch).map((key) => [key, profile[key as keyof MerchantProfile]]),
@@ -629,35 +979,6 @@ export function MerchantExperience({
       if (!ok) setProfile((prev) => ({ ...prev, ...previous }));
     },
     [run, profile],
-  );
-
-const handleSaveQueueHours = useCallback(
-    async (hours: {
-      openTime: string;
-      closeTime: string;
-      openDays: number[];
-      autoSessions: boolean;
-    }) => {
-      const patch = {
-        queueOpenTime: hours.openTime,
-        queueCloseTime: hours.closeTime,
-        queueHoursTimezone: "Asia/Kolkata" as const,
-        queueOpenDays: hours.openDays,
-        queueAutoStart: hours.autoSessions,
-        queueAutoClose: hours.autoSessions,
-      };
-      setProfile((prev) => ({ ...prev, ...patch }));
-      await run(() => updateMerchantProfile(patch), "Store timings saved");
-    },
-    [run],
-  );
-
-  const handleSaveReservationSettings = useCallback(
-    async (patch: Partial<MerchantProfile>) => {
-      setProfile((prev) => ({ ...prev, ...patch }));
-      await run(() => updateMerchantProfile(patch), "Reservation settings saved");
-    },
-    [run],
   );
 
   const handleSetReservationPaused = useCallback(
@@ -675,22 +996,93 @@ const handleSaveQueueHours = useCallback(
   );
 
   const onCreateBranch = useCallback(
-    async (input: { name: string; address?: string }): Promise<string | null> => {
-      const res = await createBranch(input);
+    async (input: {
+      name: string;
+      contact?: Partial<BranchContact>;
+      copyContactFromMainBranch?: boolean;
+      hours?: { openTime: string; closeTime: string; openDays: number[] };
+      assignToProduct?: MerchantProduct;
+    }): Promise<string | null> => {
+      const res = await createBranch({
+        ...input,
+        assignToProduct: input.assignToProduct ?? activeProduct,
+      });
       if (!res.ok) {
         toast.error(res.error ?? "Could not add branch");
         return null;
       }
-      toast.success("Branch added");
+      if (res.warning) toast.message(res.warning);
+      else toast.success(res.assigned === false ? "Branch added" : "Branch added");
       await onRefresh();
       return res.branchId ?? null;
+    },
+    [onRefresh, activeProduct],
+  );
+
+  const onSetProductBranchAssignment = useCallback(
+    async (input: {
+      product: MerchantProduct;
+      branchId: string;
+      active: boolean;
+    }) => {
+      const res = await setProductBranchAssignment(input);
+      if (!res.ok) {
+        toast.error(res.error ?? "Could not update branch");
+        return false;
+      }
+      toast.success(input.active ? "Branch activated" : "Branch removed from product");
+      await onRefresh();
+      return true;
     },
     [onRefresh],
   );
   const onUpdateBranch = useCallback(
-    (id: string, patch: { name?: string; address?: string }) =>
+    (id: string, patch: Partial<BranchContact> & { name?: string }) =>
       run(() => updateBranch(id, patch), "Branch updated"),
     [run],
+  );
+
+  /** Branches drawer — contact details and store timings together. */
+  const onSaveBranchDetails = useCallback(
+    async (
+      id: string,
+      patch: Partial<BranchContact> & { name?: string },
+      hours: { openTime: string; closeTime: string; openDays: number[] },
+    ) => {
+      const target =
+        branches.find((b) => b.id === id) ??
+        branches.find((b) => b.isDefault) ??
+        null;
+      const hoursPatch = {
+        queueOpenTime: hours.openTime,
+        queueCloseTime: hours.closeTime,
+        queueHoursTimezone: "Asia/Kolkata" as const,
+        queueOpenDays: hours.openDays,
+        queueAutoStart: target?.queueAutoStart ?? false,
+        queueAutoClose: target?.queueAutoClose ?? false,
+      };
+      return run(async () => {
+        const contact = await updateBranch(id, patch);
+        if (!contact.ok) return contact;
+        const hoursRes = await updateBranchQueueSettings(id, hoursPatch);
+        if (!hoursRes.ok) return hoursRes;
+        if (target?.isDefault) {
+          setProfile((prev) => ({
+            ...prev,
+            ...hoursPatch,
+            reservationOpenTime: hours.openTime,
+            reservationCloseTime: hours.closeTime,
+          }));
+          const seating = await updateMerchantProfile({
+            reservationOpenTime: hours.openTime,
+            reservationCloseTime: hours.closeTime,
+          });
+          if (!seating.ok) return seating;
+        }
+        return { ok: true };
+      }, "Branch updated");
+    },
+    [run, branches],
   );
   const onDeleteBranch = useCallback(
     (id: string) => run(() => deleteBranch(id), "Branch removed"),
@@ -741,7 +1133,37 @@ const handleSaveQueueHours = useCallback(
   // Loyalty badge = live pending workload; otherwise unread in-app items.
   const notifCount =
     activeProduct === "loyalty" ? Math.max(approvals.length, unreadNotifCount) : unreadNotifCount;
-  const activeBranch = branches.find((b) => b.id === activeBranchId) ?? null;
+  const activeBranch =
+    productSwitcherBranches.find((b) => b.id === activeBranchId) ?? null;
+
+  // Keep the switcher’s displayed branch honest for QR / redeem:
+  // - Sticky id from another product → pick a valid one for this product.
+  // - `null` with a single branch still shows that name in the trigger
+  //   (`displayBranch = activeBranch ?? soleBranch`) but openQr requires an id
+  //   — auto-select so Menu QR works without re-clicking the branch.
+  // - `null` with multiple branches stays “All branches” on purpose.
+  useEffect(() => {
+    if (productSwitcherBranches.length === 0) return;
+    if (activeBranchId != null && productSwitcherBranches.some((b) => b.id === activeBranchId)) {
+      return;
+    }
+    if (activeBranchId == null && productSwitcherBranches.length > 1) return;
+    const next =
+      productSwitcherBranches.find((b) => b.isDefault)?.id ??
+      productSwitcherBranches[0]?.id ??
+      null;
+    if (next == null || next === activeBranchId) return;
+    void onSelectBranch(next);
+  }, [activeProduct, activeBranchId, productSwitcherBranches, onSelectBranch]);
+
+  // Contact settings always target a concrete branch. Follow the switcher, but
+  // fall back to the main branch when it's on "All branches".
+  const editBranch =
+    branches.find((b) => b.id === editBranchId) ??
+    activeBranch ??
+    branches.find((b) => b.isDefault) ??
+    branches[0] ??
+    null;
 
   const me = currentUserId
     ? members.find((m) => m.userId === currentUserId)
@@ -801,9 +1223,11 @@ const handleSaveQueueHours = useCallback(
       approvals,
       entitlements,
       branches,
+      productBranches,
       members,
       role,
       activeBranchId,
+      editBranch,
       canViewAllBranches,
       goToTab,
       onShowQr: openQr,
@@ -812,14 +1236,11 @@ const handleSaveQueueHours = useCallback(
       onManageBranches: () => setManageView("branches"),
       onManageTeam: () => setManageView("team"),
       onPurchaseProduct: (product: MerchantProduct) => {
-        if (role !== "owner") {
-          toast.error("Only the owner can add or manage products.");
-          return;
-        }
-        setPurchaseProductTarget(product);
+        openPurchase(product);
       },
       onRefresh,
       onCreateBranch,
+      onSetProductBranchAssignment,
       onUpdateBranch,
       onDeleteBranch,
       onInviteMember,
@@ -833,11 +1254,13 @@ const handleSaveQueueHours = useCallback(
       onSaveCustomerNotes: handleSaveCustomerNotes,
       onRequestOfferStampOtp: handleRequestOfferStampOtp,
       onConfirmOfferStamp: handleConfirmOfferStamp,
-      onEditSection: setEditSection,
+      onEditSection: openEditSection,
       onSaveQueueBanner: handleSaveQueueBanner,
-      onSaveQueueSettings: handleSaveQueueSettings,
       onSaveQueueHours: handleSaveQueueHours,
+      onSaveEstimatedWait: handleSaveEstimatedWait,
       onSaveReservationSettings: handleSaveReservationSettings,
+      onSaveMenuSettings: handleSaveMenuSettings,
+      onSaveQueueSettings: handleSaveQueueSettings,
       onSetReservationPaused: handleSetReservationPaused,
       onDeleteAccount: () => setDeleteOpen(true),
       onLogout,
@@ -852,12 +1275,15 @@ const handleSaveQueueHours = useCallback(
       members,
       role,
       activeBranchId,
+      editBranch,
       canViewAllBranches,
       onSelectBranch,
       goToTab,
       openQr,
       openRedeem,
+      openPurchase,
       onCreateBranch,
+      onSetProductBranchAssignment,
       onUpdateBranch,
       onDeleteBranch,
       onInviteMember,
@@ -871,9 +1297,12 @@ const handleSaveQueueHours = useCallback(
       handleSaveCustomerNotes,
       handleRequestOfferStampOtp,
       handleConfirmOfferStamp,
+      openEditSection,
       handleSaveQueueBanner,
       handleSaveQueueHours,
+      handleSaveEstimatedWait,
       handleSaveReservationSettings,
+      handleSaveMenuSettings,
       handleSetReservationPaused,
       onRefresh,
       onLogout,
@@ -890,12 +1319,20 @@ const handleSaveQueueHours = useCallback(
       : null;
 
   // Per-product onboarding gate: a purchased product whose setup isn't finished
-  // takes over the screen (full-screen wizard) until completed.
-  if (productFromPath && productNeedsOnboarding(entitlements, productFromPath)) {
+  // takes over the screen (full-screen wizard) until completed. Plan pages stay
+  // reachable so Upgrade CTAs from the branches step work mid-setup.
+  if (
+    productFromPath &&
+    productNeedsOnboarding(entitlements, productFromPath) &&
+    !pathname.endsWith("/plan")
+  ) {
     return (
       <OnboardingWizard
         mode="product"
         product={productFromPath}
+        profile={profile}
+        branches={branches}
+        entitlements={entitlements}
         onComplete={onRefresh}
       />
     );
@@ -913,6 +1350,7 @@ const handleSaveQueueHours = useCallback(
         onProductChange={goToProduct}
         onComingSoonProduct={setComingSoonProduct}
         onTabChange={goToTab}
+        onShowHubQr={openHubQr}
         pendingCount={approvals.length}
         onLogout={onLogout}
       />
@@ -922,15 +1360,15 @@ const handleSaveQueueHours = useCallback(
         activeTab={activeTab}
         entitlements={entitlements}
         canPurchase={role === "owner"}
+        planUsage={{
+          branchesUsed: productSwitcherBranches.length || branches.length,
+          metricUsed: planMetricUsed,
+        }}
         userName={sidebarUserName}
         userRole={role}
         onTabChange={goToTab}
         onGetStarted={(product) => {
-          if (role !== "owner") {
-            toast.error("Only the owner can add or manage products.");
-            return;
-          }
-          setPurchaseProductTarget(product);
+          openPurchase(product);
         }}
         onOpenAccount={() => setEditSection("account")}
         pendingCount={approvals.length}
@@ -949,12 +1387,29 @@ const handleSaveQueueHours = useCallback(
               {pathname.endsWith("/plan") ? "Manage plan" : TAB_LABELS[activeTab]}
             </h1>
             <BranchSwitcher
-              branches={branches}
+              branches={productSwitcherBranches}
               activeBranch={activeBranch}
               canManage={role === "owner"}
-              allowAllBranches={canViewAllBranches}
+              allowAllBranches={canViewAllBranches && productSwitcherBranches.length > 1}
               onSelect={onSelectBranch}
               onAddBranch={() => setManageView("branches")}
+              emptyCta={
+                role === "owner"
+                  ? {
+                      label: "Assign a branch",
+                      onClick: () =>
+                        goToTab(
+                          activeProduct === "loyalty"
+                            ? "loyalty-settings"
+                            : activeProduct === "queue"
+                              ? "queue-settings"
+                              : activeProduct === "reservation"
+                                ? "reservations-settings"
+                                : "menu-settings",
+                        ),
+                    }
+                  : undefined
+              }
             />
           </div>
           <div className="merchant-header-actions">
@@ -1023,9 +1478,13 @@ const handleSaveQueueHours = useCallback(
         productIds={me?.productIds ?? memberProductIds}
         branchIds={me?.branchIds ?? []}
         branches={branches}
+        editBranch={editBranch}
         onChange={setProfile}
-        onClose={() => setEditSection(null)}
+        onClose={closeEditSection}
         onSave={handleSaveProfile}
+        onSaveBranch={handleSaveBranchContact}
+        onSaveBranchDetails={onSaveBranchDetails}
+        onSelectEditBranch={setEditBranchId}
         onAccountNameUpdated={(firstName, lastName) => {
           setAccountFirstName(firstName);
           setAccountLastName(lastName);
@@ -1044,7 +1503,7 @@ const handleSaveQueueHours = useCallback(
           isPrimaryOwnerAccount
             ? undefined
             : () => {
-                setEditSection(null);
+                closeEditSection();
                 setDeleteOpen(true);
               }
         }
@@ -1057,18 +1516,19 @@ const handleSaveQueueHours = useCallback(
         role={role}
         entitlements={entitlements}
         canPurchase={role === "owner"}
+        planUsage={{
+          branchesUsed: productSwitcherBranches.length || branches.length,
+          metricUsed: planMetricUsed,
+        }}
         userName={sidebarUserName}
         onTabChange={goToTab}
         onProductChange={goToProduct}
         onComingSoonProduct={setComingSoonProduct}
         onUpgrade={(product) => {
-          if (role !== "owner") {
-            toast.error("Only the owner can upgrade plans.");
-            return;
-          }
-          setPurchaseProductTarget(product);
+          openPurchase(product);
         }}
         onOpenAccount={() => setEditSection("account")}
+        onShowHubQr={openHubQr}
         onLogout={onLogout}
         onClose={() => setMenuOpen(false)}
       />
@@ -1082,6 +1542,17 @@ const handleSaveQueueHours = useCallback(
           branchSlug={activeBranch && !activeBranch.isDefault ? activeBranch.slug : null}
           branchName={activeBranch?.name ?? null}
           onClose={() => setQrOpen(false)}
+        />
+      )}
+
+      {hubQrOpened && (
+        <HubQrDrawer
+          open={hubQrOpen}
+          profile={profile}
+          entitlements={entitlements}
+          branchSlug={activeBranch && !activeBranch.isDefault ? activeBranch.slug : null}
+          branchName={activeBranch && !activeBranch.isDefault ? activeBranch.name : null}
+          onClose={() => setHubQrOpen(false)}
         />
       )}
 
@@ -1103,7 +1574,11 @@ const handleSaveQueueHours = useCallback(
       {purchaseOpened && (
         <ProductPurchaseDrawer
           product={purchaseProductTarget}
-          onClose={() => setPurchaseProductTarget(null)}
+          planId={purchasePlanId}
+          onClose={() => {
+            setPurchaseProductTarget(null);
+            setPurchasePlanId(null);
+          }}
           onPurchased={handlePurchased}
         />
       )}
@@ -1112,16 +1587,12 @@ const handleSaveQueueHours = useCallback(
         <BranchesTeamDrawer
           view={manageView}
           branches={branches}
+          productBranches={productBranches}
+          businessName={profile.businessName}
           members={members}
           role={role}
-          maxBranches={maxBranchesFor({
-            loyaltyPlanId: entitlements.loyalty?.planId,
-            queuePlanId: entitlements.queue?.planId,
-            queueEnabled: isProductEnabled(entitlements, "queue"),
-            queueTrialActive: isTrialActive(entitlements.queue),
-          })}
           onCreateBranch={onCreateBranch}
-          onUpdateBranch={onUpdateBranch}
+          onSaveBranchDetails={onSaveBranchDetails}
           onDeleteBranch={onDeleteBranch}
           onInviteMember={onInviteMember}
           onUpdateMemberRole={onUpdateMemberRole}

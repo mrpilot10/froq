@@ -2,17 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  CalendarCheck,
   CalendarClock,
   CalendarPlus,
-  Check,
   ChevronDown,
-  Clock3,
+  History,
   Play,
   QrCode,
   Search,
   Square,
-  UserX,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -21,18 +18,22 @@ import {
   fetchReservationFormConfig,
   fetchReservations,
 } from "@/app/merchant/reservation-actions";
+import { listBranchDiningTables } from "@/app/merchant/table-actions";
 import { useReservationActions } from "@/lib/merchant/use-reservation-actions";
 import {
+  formatDateLabel,
   RESERVATION_DATE_FILTERS,
   RESERVATION_STATUS_META,
   RESERVATION_STATUSES,
   reservationSettingsFromProfile,
   type Reservation,
+  type ReservationActionId,
   type ReservationDateFilter,
   type ReservationStats,
   type ReservationStatus,
 } from "@/lib/merchant/reservations";
 import { useMerchantWorkspace } from "../merchant-workspace-context";
+import { AssignTableSheet } from "../queue/seat-at-table-sheet";
 import { NewReservationSheet } from "./new-reservation-sheet";
 import { ReservationDrawer } from "./reservation-drawer";
 import { ReservationRow } from "./reservation-row";
@@ -48,8 +49,14 @@ const EMPTY_STATS: ReservationStats = {
 };
 
 export function ReservationsHomeScreen() {
-  const { profile, activeBranchId, onShowQr, onSetReservationPaused } =
-    useMerchantWorkspace();
+  const {
+    profile,
+    activeBranchId,
+    branches,
+    onShowQr,
+    onSetReservationPaused,
+    goToTab,
+  } = useMerchantWorkspace();
 
   const [dateFilter, setDateFilter] = useState<ReservationDateFilter>("today");
   const [statusFilter, setStatusFilter] = useState<ReservationStatus | "all">("all");
@@ -61,6 +68,8 @@ export function ReservationsHomeScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pausing, setPausing] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  const [confirmPick, setConfirmPick] = useState<Reservation | null>(null);
+  const [hasTables, setHasTables] = useState(false);
 
   const load = useCallback(async () => {
     const result = await fetchReservations({
@@ -108,10 +117,40 @@ export function ReservationsHomeScreen() {
     });
   }, [reservations, statusFilter, query]);
 
+  // Today and Tomorrow are one day by definition, so their rows carry no date
+  // at all. The multi-day filters get day headings instead of repeating the
+  // date on every row.
+  const grouped = dateFilter === "week" || dateFilter === "all";
+  const days = useMemo(() => {
+    const byDate = new Map<string, Reservation[]>();
+    for (const reservation of visible) {
+      const bucket = byDate.get(reservation.date);
+      if (bucket) bucket.push(reservation);
+      else byDate.set(reservation.date, [reservation]);
+    }
+    return [...byDate.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, rows]) => ({
+        date,
+        rows: [...rows].sort((a, b) => a.time.localeCompare(b.time)),
+      }));
+  }, [visible]);
+
   const selected = reservations.find((item) => item.id === selectedId) ?? null;
 
-  // Booking hours live on the profile, so the countdown needs no extra fetch.
-  const windowSettings = useMemo(() => reservationSettingsFromProfile(profile), [profile]);
+  // Seating window follows the active branch's store timings.
+  const windowSettings = useMemo(() => {
+    const branch =
+      branches.find((b) => b.id === activeBranchId) ??
+      branches.find((b) => b.isDefault) ??
+      branches[0] ??
+      null;
+    return reservationSettingsFromProfile({
+      ...profile,
+      queueOpenTime: branch?.queueOpenTime ?? profile.queueOpenTime,
+      queueCloseTime: branch?.queueCloseTime ?? profile.queueCloseTime,
+    });
+  }, [profile, branches, activeBranchId]);
   const paused = profile.reservationPaused;
 
   const togglePaused = useCallback(async () => {
@@ -135,22 +174,88 @@ export function ReservationsHomeScreen() {
     load,
   );
 
-  if (!loaded) return <ReservationsHomeSkeleton />;
+  useEffect(() => {
+    if (!activeBranchId) {
+      setHasTables(false);
+      return;
+    }
+    let cancelled = false;
+    void listBranchDiningTables({ branchId: activeBranchId }).then((result) => {
+      if (cancelled) return;
+      setHasTables(result.ok && result.tables.length > 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBranchId]);
 
-  // Short labels: all five sit in one row, so each has a single column to itself.
-  const statCards = [
-    { Icon: CalendarClock, value: stats.today, label: "Today" },
-    { Icon: Clock3, value: stats.pending, label: "Pending", accent: stats.pending > 0 },
-    { Icon: CalendarCheck, value: stats.confirmed, label: "Confirmed" },
-    { Icon: Check, value: stats.completed, label: "Completed" },
-    { Icon: UserX, value: stats.noShows, label: "No show" },
-  ];
+  const requestAction = useCallback(
+    (
+      reservation: Reservation,
+      action: ReservationActionId,
+      input?: { reason?: string; tableId?: string | null },
+    ) => {
+      if (
+        action === "confirm" &&
+        hasTables &&
+        !reservation.diningTableId &&
+        input?.tableId === undefined
+      ) {
+        setConfirmPick(reservation);
+        return Promise.resolve(false);
+      }
+      return runAction(reservation, action, input);
+    },
+    [hasTables, runAction],
+  );
+
+  if (!loaded) return <ReservationsHomeSkeleton />;
 
   const searching = query.trim().length > 0 || statusFilter !== "all";
 
+  const pulse = [
+    {
+      id: "today",
+      label: "Today",
+      value: stats.today,
+      active: dateFilter === "today" && statusFilter === "all",
+    },
+    {
+      id: "pending",
+      label: "To review",
+      value: stats.pending,
+      active: statusFilter === "pending",
+      accent: stats.pending > 0,
+    },
+    {
+      id: "confirmed",
+      label: "Booked",
+      value: stats.confirmed,
+      active: statusFilter === "confirmed",
+    },
+    {
+      id: "completed",
+      label: "Done",
+      value: stats.completed,
+      active: statusFilter === "completed",
+    },
+  ];
+
+  const selectPulse = (id: string) => {
+    if (id === "today") {
+      setDateFilter("today");
+      setStatusFilter("all");
+      return;
+    }
+    if (id === "pending" || id === "confirmed" || id === "completed") {
+      setDateFilter("today");
+      setStatusFilter(id);
+    }
+  };
+
   return (
     <>
-      <div className="tab-screen merchant-dashboard">
+      <div className="tab-screen merchant-dashboard resv-home">
         <div className="tab-head queue-live-head merchant-dashboard-head">
           <div className="queue-live-copy">
             <h2 className="tab-title">Reservations</h2>
@@ -159,7 +264,9 @@ export function ReservationsHomeScreen() {
                 ? "Bookings are stopped — guests can't request a table right now"
                 : stats.pending > 0
                   ? `${stats.pending} request${stats.pending === 1 ? "" : "s"} waiting for your review`
-                  : "Review requests, confirm tables and keep guests updated on WhatsApp"}
+                  : stats.today > 0
+                    ? `${stats.today} booking${stats.today === 1 ? "" : "s"} on the book today`
+                    : "Confirm requests and manage today's tables"}
             </p>
           </div>
           <div className="queue-session-actions">
@@ -179,27 +286,18 @@ export function ReservationsHomeScreen() {
           </div>
         </div>
 
-        <ReservationWindowCard settings={windowSettings} paused={paused} />
-
-        <div className="resv-stat-row">
-          {statCards.map(({ Icon, value, label, accent }) => (
-            <div key={label} className="merchant-stat-card">
-              <div
-                className={`merchant-stat-icon${accent ? " merchant-stat-icon--accent" : ""}`}
-              >
-                <Icon size={16} strokeWidth={2.2} />
-              </div>
-              <div className="merchant-stat-value">{value}</div>
-              <div className="merchant-stat-label">{label}</div>
-            </div>
-          ))}
-        </div>
+        <ReservationWindowCard
+          settings={windowSettings}
+          paused={paused}
+          pulse={pulse}
+          onPulseSelect={selectPulse}
+        />
 
         <section className="merchant-section">
           <div className="merchant-section-head">
             <h3 className="merchant-section-label">Quick actions</h3>
           </div>
-          <div className="merchant-quick-actions">
+          <div className="merchant-quick-actions merchant-quick-actions--all">
             <button
               type="button"
               className="queue-action"
@@ -219,6 +317,16 @@ export function ReservationsHomeScreen() {
                 <CalendarPlus size={18} strokeWidth={2.2} />
               </span>
               Add booking
+            </button>
+            <button
+              type="button"
+              className="queue-action"
+              onClick={() => goToTab("reservations-history")}
+            >
+              <span className="queue-action-icon">
+                <History size={18} strokeWidth={2.2} />
+              </span>
+              History
             </button>
           </div>
         </section>
@@ -313,6 +421,35 @@ export function ReservationsHomeScreen() {
                   : "Share your reservation QR so guests can request a table, or add a booking you took over the phone."}
               </p>
             </div>
+          ) : grouped ? (
+            <div className="resv-day-groups">
+              {days.map(({ date, rows }) => (
+                <div key={date} className="resv-day">
+                  <div className="resv-day-head">
+                    <span className="resv-day-label">
+                      {formatDateLabel(date)}
+                    </span>
+                    <span className="resv-day-count">
+                      {rows.length} booking{rows.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="resv-list">
+                    {rows.map((reservation) => (
+                      <ReservationRow
+                        key={reservation.id}
+                        reservation={reservation}
+                        busy={busyId === reservation.id}
+                        onView={() => setSelectedId(reservation.id)}
+                        onAction={(action) =>
+                          void requestAction(reservation, action)
+                        }
+                        onSuggest={() => setSelectedId(reservation.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : (
             <div className="resv-list">
               {visible.map((reservation) => (
@@ -321,7 +458,7 @@ export function ReservationsHomeScreen() {
                   reservation={reservation}
                   busy={busyId === reservation.id}
                   onView={() => setSelectedId(reservation.id)}
-                  onAction={(action) => void runAction(reservation, action)}
+                  onAction={(action) => void requestAction(reservation, action)}
                   onSuggest={() => setSelectedId(reservation.id)}
                 />
               ))}
@@ -336,12 +473,39 @@ export function ReservationsHomeScreen() {
         busy={busyId === selected?.id}
         onClose={() => setSelectedId(null)}
         onAction={(action, input) =>
-          selected ? runAction(selected, action, input) : false
+          selected ? requestAction(selected, action, input) : false
         }
         onSuggest={(input) => (selected ? suggest(selected, input) : false)}
         onSaveNotes={(merchantNotes) =>
           selected ? saveNotes(selected, merchantNotes) : false
         }
+        onTableAssigned={({ diningTableId, tableNumber }) => {
+          if (!selected) return;
+          applyUpdated({
+            ...selected,
+            diningTableId,
+            tableNumber,
+          });
+        }}
+      />
+
+      <AssignTableSheet
+        open={Boolean(confirmPick)}
+        branchId={confirmPick?.branchId ?? activeBranchId}
+        partySize={confirmPick?.partySize ?? 1}
+        guestName={confirmPick?.customerName ?? "guest"}
+        purpose="confirm"
+        date={confirmPick?.date}
+        time={confirmPick?.time}
+        ignoreReservationId={confirmPick?.id}
+        busy={busyId === confirmPick?.id}
+        onClose={() => setConfirmPick(null)}
+        onConfirm={(tableId) => {
+          if (!confirmPick) return;
+          const target = confirmPick;
+          setConfirmPick(null);
+          void requestAction(target, "confirm", { tableId });
+        }}
       />
 
       <NewReservationSheet

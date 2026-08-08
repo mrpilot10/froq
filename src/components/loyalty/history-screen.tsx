@@ -1,4 +1,4 @@
-import { Check, Clock, Gift } from "lucide-react";
+import { Check, Clock, Gift, X } from "lucide-react";
 import type { HistoryEntry, RewardCardGroup } from "@/lib/loyalty/types";
 import { TabPageShell } from "./tab-page-shell";
 
@@ -12,6 +12,10 @@ function HistoryStatusIcon({ status }: { status: HistoryEntry["status"] }) {
     return <Clock size={18} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />;
   }
 
+  if (status === "rejected") {
+    return <X size={18} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />;
+  }
+
   if (status === "redeemed") {
     return <Gift size={18} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />;
   }
@@ -21,6 +25,7 @@ function HistoryStatusIcon({ status }: { status: HistoryEntry["status"] }) {
 
 function statusLabel(status: HistoryEntry["status"]) {
   if (status === "pending") return "Pending approval";
+  if (status === "rejected") return "Declined";
   if (status === "redeemed") return "Claimed";
   return "Approved";
 }
@@ -71,7 +76,20 @@ function RewardCardItem({ card }: { card: RewardCardGroup }) {
   );
 }
 
+/** Consecutive entries share a date heading instead of repeating it per row. */
+function groupByDate(entries: HistoryEntry[]) {
+  const groups: Array<{ date: string; entries: HistoryEntry[] }> = [];
+  for (const entry of entries) {
+    const last = groups[groups.length - 1];
+    if (last && last.date === entry.date) last.entries.push(entry);
+    else groups.push({ date: entry.date, entries: [entry] });
+  }
+  return groups;
+}
+
 export function HistoryScreen({ entries, rewardCards }: HistoryScreenProps) {
+  const groups = groupByDate(entries);
+
   return (
     <TabPageShell title="Rewards" subtitle="Your loyalty cards and stamp activity">
       <div className="reward-cards-list">
@@ -85,27 +103,31 @@ export function HistoryScreen({ entries, rewardCards }: HistoryScreenProps) {
         {entries.length === 0 ? (
           <p className="history-empty">No activity yet. Collect your first stamp to get started.</p>
         ) : (
-          <ul className="history-list">
-            {entries.map((entry) => (
-              <li
-                key={entry.id}
-                className={`history-item history-item--${entry.status}${
-                  entry.highlight ? " is-highlighted" : ""
-                }`}
-              >
-                <div className={`history-icon history-icon--${entry.status}`}>
-                  <HistoryStatusIcon status={entry.status} />
-                </div>
-                <div className="history-copy">
-                  <div className="history-label">{entry.label}</div>
-                  <div className="history-date">{entry.date}</div>
-                </div>
-                <span className={`history-badge history-badge--${entry.status}`}>
-                  {statusLabel(entry.status)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          groups.map((group) => (
+            <section key={group.date} className="history-group">
+              <h3 className="history-group-date">{group.date}</h3>
+              <ul className="history-list">
+                {group.entries.map((entry) => (
+                  <li
+                    key={entry.id}
+                    className={`history-item history-item--${entry.status}${
+                      entry.highlight ? " is-highlighted" : ""
+                    }`}
+                  >
+                    <div className={`history-icon history-icon--${entry.status}`}>
+                      <HistoryStatusIcon status={entry.status} />
+                    </div>
+                    <div className="history-copy">
+                      <div className="history-label">{entry.label}</div>
+                    </div>
+                    <span className={`history-badge history-badge--${entry.status}`}>
+                      {statusLabel(entry.status)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))
         )}
       </div>
     </TabPageShell>

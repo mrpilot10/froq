@@ -25,6 +25,7 @@ import {
 } from "@/lib/merchant/pricing";
 import type { MerchantProduct } from "@/lib/merchant/types";
 import { FeatureText } from "@/components/landing/feature-text";
+import { WhatsAppIcon } from "@/components/loyalty/icons";
 
 const FEATURE_ICONS: LucideIcon[] = [
   Building2,
@@ -43,6 +44,10 @@ const FEATURE_ICONS: LucideIcon[] = [
 
 function featureIcon(index: number): LucideIcon {
   return FEATURE_ICONS[index % FEATURE_ICONS.length];
+}
+
+function isWhatsAppFeature(feature: string): boolean {
+  return /whatsapp/i.test(feature);
 }
 
 export interface PricingTableProps {
@@ -115,7 +120,7 @@ export function PricingTable({
           onClick={() => setBilling("yearly")}
         >
           Yearly
-          <span className="landing-billing-save">Save 17%</span>
+          <span className="landing-billing-save">2 months free</span>
         </button>
         <span
           className={`landing-billing-thumb${billing === "yearly" ? " is-yearly" : ""}`}
@@ -195,7 +200,9 @@ function PricingCard({
         {isYearly && plan.listPriceLabel ? (
           <div className="landing-plan-price-row">
             <span className="landing-plan-list">{plan.listPriceLabel}</span>
-            <span className="landing-plan-free-badge">2 Months Free</span>
+            {plan.freeMonthsLabel ? (
+              <span className="landing-plan-free-badge">{plan.freeMonthsLabel}</span>
+            ) : null}
           </div>
         ) : null}
 
@@ -223,7 +230,11 @@ function PricingCard({
           return (
             <li key={feature}>
               <span className="landing-plan-feature-icon" aria-hidden>
-                <Icon size={14} strokeWidth={2.4} />
+                {isWhatsAppFeature(feature) ? (
+                  <WhatsAppIcon size={14} color="currentColor" />
+                ) : (
+                  <Icon size={14} strokeWidth={2.4} />
+                )}
               </span>
               <FeatureText text={feature} />
             </li>

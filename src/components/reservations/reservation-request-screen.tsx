@@ -3,12 +3,16 @@
 import { useCallback, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { CalendarClock, Minus, Plus, Users } from "lucide-react";
+import { CalendarClock, Minus, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { isValidPhone } from "@/lib/auth/format";
-import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { FroqFooter } from "@/components/shared/froq-footer";
-import { ReservationSlotPicker } from "@/components/merchant/reservations/reservation-slot-picker";
+import { FollowUs } from "@/components/loyalty/social-row";
+import { BusinessContactRow } from "@/components/loyalty/business-contact-row";
+import {
+  ReservationDateField,
+  ReservationTimeField,
+} from "@/components/merchant/reservations/reservation-slot-picker";
 import { reservationPath } from "@/lib/reservations/link";
 import { requestReservation, type ReservationPageMerchant } from "@/app/r/actions";
 import { TurnstileField } from "@/components/turnstile/turnstile-field";
@@ -33,8 +37,8 @@ function BrandHeader({ merchant }: ReservationRequestScreenProps) {
           <Image
             src={merchant.logoUrl}
             alt={merchant.businessName}
-            width={56}
-            height={56}
+            width={88}
+            height={88}
             unoptimized
           />
         ) : (
@@ -46,8 +50,14 @@ function BrandHeader({ merchant }: ReservationRequestScreenProps) {
       <h1 className="merchant-auth-brand">{merchant.businessName}</h1>
       <p className="merchant-auth-tag">
         {merchant.description.trim() ||
-          (merchant.paused ? "Table reservations" : "Request a table in a few taps")}
+          (merchant.paused ? "Table reservations" : "Request a table")}
       </p>
+      <BusinessContactRow
+        phone={merchant.phone}
+        address={merchant.address}
+        googleMapsUrl={merchant.googleMapsUrl}
+        website={merchant.socialLinks.website}
+      />
     </header>
   );
 }
@@ -57,7 +67,6 @@ function BrandHeader({ merchant }: ReservationRequestScreenProps) {
  * reservation page, which owns every status and action from then on.
  */
 export function ReservationRequestScreen({ merchant }: ReservationRequestScreenProps) {
-  useBrandTheme(merchant.brandColor);
   const router = useRouter();
 
   const [name, setName] = useState("");
@@ -99,6 +108,7 @@ export function ReservationRequestScreen({ merchant }: ReservationRequestScreenP
         time,
         notes: notes.trim() || undefined,
         captchaToken: captcha.token ?? undefined,
+        branchSlug: merchant.branchSlug,
       });
       captcha.reset();
       if (!result.ok || !result.token) {
@@ -112,7 +122,7 @@ export function ReservationRequestScreen({ merchant }: ReservationRequestScreenP
     } finally {
       setSubmitting(false);
     }
-  }, [name, phone, time, date, partySize, notes, merchant.slug, router, captcha]);
+  }, [name, phone, time, date, partySize, notes, merchant.slug, merchant.branchSlug, router, captcha]);
 
   // Bookings stopped by the restaurant: keep the branding, drop the form so
   // nobody fills it in only to be turned away on submit.
@@ -134,6 +144,10 @@ export function ReservationRequestScreen({ merchant }: ReservationRequestScreenP
             </div>
           </div>
 
+          <FollowUs
+            links={merchant.socialLinks}
+            className="follow-us follow-us--footer"
+          />
           <FroqFooter />
         </div>
       </div>
@@ -145,15 +159,15 @@ export function ReservationRequestScreen({ merchant }: ReservationRequestScreenP
       <div className="loyalty-screen auth-screen">
         <BrandHeader merchant={merchant} />
 
-        <div className="auth-card">
+        {/* Same card chrome as loyalty join: badge + title + fields, not a
+            stripped booking widget with its own visual dialect. */}
+        <div className="auth-card resv-form">
           <div className="auth-head">
             <div className="auth-badge" aria-hidden="true">
               <CalendarClock size={24} strokeWidth={2} color="#fff" />
             </div>
             <h2 className="auth-title">Request a table</h2>
-            <p className="auth-sub">
-              Send your details and {merchant.businessName} will confirm on WhatsApp.
-            </p>
+            <p className="auth-sub">Pick a date and time for your table.</p>
           </div>
 
           <label className="auth-field">
@@ -189,23 +203,26 @@ export function ReservationRequestScreen({ merchant }: ReservationRequestScreenP
             </div>
           </label>
 
-          <div className="auth-field">
-            <div className="queue-party-row qjoin-party">
-              <span className="auth-label">Party size</span>
-              <div className="queue-stepper">
+          <div className="resv-duo">
+            <div className="auth-field">
+              <span className="resv-label-row">
+                <span className="auth-label">Guests</span>
+                <span className="resv-cap">Max {merchant.maxPartySize}</span>
+              </span>
+              <div className="resv-stepper">
                 <button
                   type="button"
-                  className="queue-stepper-btn"
+                  className="resv-stepper-btn"
                   aria-label="Fewer guests"
                   onClick={() => setPartySize((n) => Math.max(1, n - 1))}
                   disabled={partySize <= 1}
                 >
                   <Minus size={16} strokeWidth={2.4} />
                 </button>
-                <span className="queue-stepper-value">{partySize}</span>
+                <span className="resv-stepper-value">{partySize}</span>
                 <button
                   type="button"
-                  className="queue-stepper-btn"
+                  className="resv-stepper-btn"
                   aria-label="More guests"
                   onClick={() =>
                     setPartySize((n) => Math.min(merchant.maxPartySize, n + 1))
@@ -216,23 +233,23 @@ export function ReservationRequestScreen({ merchant }: ReservationRequestScreenP
                 </button>
               </div>
             </div>
-            <span className="merchant-field-hint">
-              <Users size={13} strokeWidth={2.3} aria-hidden="true" /> For parties over{" "}
-              {merchant.maxPartySize}, please call the restaurant.
-            </span>
+
+            <ReservationDateField
+              date={date}
+              minDate={merchant.minDate}
+              maxDate={merchant.maxDate}
+              onDateChange={(next) => {
+                setDate(next);
+                setError("");
+              }}
+            />
           </div>
 
-          <ReservationSlotPicker
+          <ReservationTimeField
             slots={merchant.slots}
             date={date}
             time={time}
-            minDate={merchant.minDate}
-            maxDate={merchant.maxDate}
             hidePastToday
-            onDateChange={(next) => {
-              setDate(next);
-              setError("");
-            }}
             onTimeChange={(next) => {
               setTime(next);
               setError("");
@@ -241,11 +258,11 @@ export function ReservationRequestScreen({ merchant }: ReservationRequestScreenP
 
           {merchant.allowNotes ? (
             <label className="auth-field">
-              <span className="auth-label">Notes (optional)</span>
+              <span className="auth-label">Notes</span>
               <textarea
                 className="auth-input merchant-textarea"
                 rows={2}
-                placeholder="Birthday, high chair, seating preference…"
+                placeholder="Optional — birthday, high chair…"
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
               />
@@ -266,10 +283,14 @@ export function ReservationRequestScreen({ merchant }: ReservationRequestScreenP
             disabled={submitting || !captcha.ready}
             onClick={() => void submit()}
           >
-            {submitting ? "Sending…" : "Request reservation"}
+            {submitting ? "Sending…" : "Request table"}
           </button>
         </div>
 
+        <FollowUs
+          links={merchant.socialLinks}
+          className="follow-us follow-us--footer"
+        />
         <FroqFooter />
       </div>
     </div>

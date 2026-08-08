@@ -36,6 +36,9 @@ export interface Reservation {
   /** HH:MM store-local. */
   time: string;
   status: ReservationStatus;
+  /** Assigned dining table number when set. */
+  tableNumber: number | null;
+  diningTableId: string | null;
   notes: string;
   merchantNotes: string;
   declineReason: string;
@@ -154,9 +157,13 @@ export interface ReservationSettings {
   closeTime: string;
   allowSameDay: boolean;
   allowNotes: boolean;
-  /** 0 = never auto decline (future automation). */
+  /** 0 = never auto decline pending requests. */
   autoDeclineHours: number;
   whatsappEnabled: boolean;
+  /** Minutes after reservation time before held queue slot → no-show. */
+  graceMinutes: number;
+  /** Assign best free table automatically on confirm. */
+  autoAssignTables: boolean;
 }
 
 export const DEFAULT_RESERVATION_SETTINGS: ReservationSettings = {
@@ -169,11 +176,14 @@ export const DEFAULT_RESERVATION_SETTINGS: ReservationSettings = {
   allowNotes: true,
   autoDeclineHours: 0,
   whatsappEnabled: true,
+  graceMinutes: 15,
+  autoAssignTables: true,
 };
 
 export const RESERVATION_INTERVAL_OPTIONS = [15, 30, 45, 60];
 export const RESERVATION_PARTY_SIZE_OPTIONS = [4, 6, 8, 10, 12, 16, 20];
 export const RESERVATION_AUTO_DECLINE_OPTIONS = [0, 2, 4, 6, 12, 24];
+export const RESERVATION_GRACE_OPTIONS = [0, 5, 10, 15, 20, 30, 45, 60];
 
 export function reservationSettingsFromProfile(profile: {
   reservationDescription?: string;
@@ -181,22 +191,30 @@ export function reservationSettingsFromProfile(profile: {
   reservationIntervalMinutes?: number;
   reservationOpenTime?: string;
   reservationCloseTime?: string;
+  /** Branch store timings — preferred seating window when present. */
+  queueOpenTime?: string;
+  queueCloseTime?: string;
   reservationAllowSameDay?: boolean;
   reservationAllowNotes?: boolean;
   reservationAutoDeclineHours?: number;
   reservationWhatsappEnabled?: boolean;
+  reservationGraceMinutes?: number;
+  reservationAutoAssignTables?: boolean;
 }): ReservationSettings {
   const d = DEFAULT_RESERVATION_SETTINGS;
   return {
     description: profile.reservationDescription ?? d.description,
     maxPartySize: profile.reservationMaxPartySize ?? d.maxPartySize,
     intervalMinutes: profile.reservationIntervalMinutes ?? d.intervalMinutes,
-    openTime: profile.reservationOpenTime ?? d.openTime,
-    closeTime: profile.reservationCloseTime ?? d.closeTime,
+    // Seating window comes from Business settings → Branch store timings.
+    openTime: profile.queueOpenTime ?? profile.reservationOpenTime ?? d.openTime,
+    closeTime: profile.queueCloseTime ?? profile.reservationCloseTime ?? d.closeTime,
     allowSameDay: profile.reservationAllowSameDay ?? d.allowSameDay,
     allowNotes: profile.reservationAllowNotes ?? d.allowNotes,
     autoDeclineHours: profile.reservationAutoDeclineHours ?? d.autoDeclineHours,
     whatsappEnabled: profile.reservationWhatsappEnabled ?? d.whatsappEnabled,
+    graceMinutes: profile.reservationGraceMinutes ?? d.graceMinutes,
+    autoAssignTables: profile.reservationAutoAssignTables ?? d.autoAssignTables,
   };
 }
 
@@ -216,7 +234,7 @@ export function validateReservationSettings(settings: ReservationSettings): stri
 }
 
 export function formatSettingsSummary(settings: ReservationSettings): string {
-  return `${formatTimeLabel(settings.openTime)}–${formatTimeLabel(settings.closeTime)} · every ${settings.intervalMinutes} min`;
+  return `Every ${settings.intervalMinutes} min · up to ${settings.maxPartySize} guests`;
 }
 
 /**
@@ -323,6 +341,15 @@ export function formatTimeLabel(time: string): string {
   const suffix = hour >= 12 ? "pm" : "am";
   const display = hour % 12 === 0 ? 12 : hour % 12;
   return `${display}:${minute} ${suffix}`;
+}
+
+/**
+ * The same clock reading split for display, so a list row can stack "7:30" over
+ * "pm" and keep the hour big enough to scan down a column.
+ */
+export function splitTimeLabel(time: string): { value: string; suffix: string } {
+  const [value, suffix] = formatTimeLabel(time).split(" ");
+  return { value, suffix };
 }
 
 /** "Today", "Tomorrow" or "Sat, 8 Aug". */
@@ -453,7 +480,8 @@ export type ReservationEventName =
   | "completed"
   | "no_show"
   | "suggested"
-  | "suggestion_accepted";
+  | "suggestion_accepted"
+  | "rescheduled";
 
 /** One attributed action on a booking, as shown in the merchant drawer. */
 export interface ReservationEvent {
@@ -477,6 +505,8 @@ const EVENT_TO_TIMELINE_STEP: Record<ReservationEventName, string> = {
   no_show: "no_show",
   suggested: "suggested",
   suggestion_accepted: "suggestion-answer",
+  // Guest/merchant slot changes stay on the booking — no separate timeline step.
+  rescheduled: "confirmed",
 };
 
 export interface TimelineActor {

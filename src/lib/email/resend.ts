@@ -1,7 +1,9 @@
 import "server-only";
 
 import { Resend } from "resend";
+import { noteResendQuotaHeaders } from "@/lib/admin/resend-quota";
 import { getPublicAppOrigin, toPublicEmailUrl } from "@/lib/app-url";
+import { persistEmailSend } from "@/lib/email/email-log";
 
 const BRAND = "#004353";
 const ACCENT = "#00f47b";
@@ -22,6 +24,47 @@ function getResend() {
 function fromAddress() {
   return process.env.RESEND_FROM_EMAIL?.trim() || "Froq <hello@froq.io>";
 }
+
+
+async function sendTrackedEmail(input: {
+  kind: string;
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  replyTo?: string;
+}): Promise<{ ok: boolean; error?: string; id?: string }> {
+  const resend = getResend();
+  if (!resend) {
+    return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
+  }
+  const { data, error, headers } = await resend.emails.send({
+    from: fromAddress(),
+    to: input.to,
+    subject: input.subject,
+    html: input.html,
+    text: input.text,
+    ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+  });
+  noteResendQuotaHeaders(headers);
+  if (error) {
+    persistEmailSend({
+      kind: input.kind,
+      status: "failed",
+      to: input.to,
+      errorMessage: error.message,
+    });
+    return { ok: false, error: error.message };
+  }
+  persistEmailSend({
+    kind: input.kind,
+    status: "sent",
+    to: input.to,
+    resendId: data?.id ?? null,
+  });
+  return { ok: true, id: data?.id };
+}
+
 
 function escapeHtml(value: string) {
   return value
@@ -136,10 +179,6 @@ export async function sendPasswordResetEmail(input: {
   resetUrl: string;
   name?: string;
 }): Promise<{ ok: boolean; error?: string }> {
-  const resend = getResend();
-  if (!resend) {
-    return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
-  }
 
   const resetUrl = toPublicEmailUrl(input.resetUrl);
   const greeting = input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
@@ -155,8 +194,8 @@ export async function sendPasswordResetEmail(input: {
     ctaUrl: resetUrl,
   });
 
-  const { error } = await resend.emails.send({
-    from: fromAddress(),
+  return sendTrackedEmail({
+    kind: "password_reset",
     to: input.to,
     subject: "Reset your Froq password",
     html,
@@ -174,12 +213,6 @@ export async function sendPasswordResetEmail(input: {
       "The Froq Team",
     ].join("\n"),
   });
-
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-
-  return { ok: true };
 }
 
 export async function sendTeamInviteEmail(input: {
@@ -189,11 +222,6 @@ export async function sendTeamInviteEmail(input: {
   branchLabel: string;
   name?: string;
 }): Promise<{ ok: boolean; error?: string }> {
-  const resend = getResend();
-  if (!resend) {
-    return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
-  }
-
   const greeting = input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
   const business = escapeHtml(input.businessName);
   const branch = escapeHtml(input.branchLabel);
@@ -213,8 +241,8 @@ export async function sendTeamInviteEmail(input: {
     ctaUrl: inviteUrl,
   });
 
-  const { error } = await resend.emails.send({
-    from: fromAddress(),
+  return sendTrackedEmail({
+    kind: "team_invite",
     to: input.to,
     subject,
     html,
@@ -232,12 +260,6 @@ export async function sendTeamInviteEmail(input: {
       "The Froq Team",
     ].join("\n"),
   });
-
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-
-  return { ok: true };
 }
 
 export async function sendTeamAccessChangedEmail(input: {
@@ -247,10 +269,6 @@ export async function sendTeamAccessChangedEmail(input: {
   dashboardUrl: string;
   name?: string;
 }): Promise<{ ok: boolean; error?: string }> {
-  const resend = getResend();
-  if (!resend) {
-    return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
-  }
   if (input.changes.length === 0) return { ok: true };
 
   const greeting = input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
@@ -293,8 +311,8 @@ export async function sendTeamAccessChangedEmail(input: {
     .map((change) => `- ${change.label}: ${change.from} → ${change.to}`)
     .join("\n");
 
-  const { error } = await resend.emails.send({
-    from: fromAddress(),
+  return sendTrackedEmail({
+    kind: "team_access_changed",
     to: input.to,
     subject,
     html,
@@ -313,12 +331,6 @@ export async function sendTeamAccessChangedEmail(input: {
       "The Froq Team",
     ].join("\n"),
   });
-
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-
-  return { ok: true };
 }
 
 function supportInbox() {
@@ -342,8 +354,7 @@ export async function sendSupportTicketEmails(input: {
   message: string;
   businessName?: string | null;
 }): Promise<{ ok: boolean; error?: string }> {
-  const resend = getResend();
-  if (!resend) {
+  if (!getResend()) {
     return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
   }
 
@@ -354,8 +365,8 @@ export async function sendSupportTicketEmails(input: {
     ["Business", input.businessName?.trim() || "—"],
   ];
 
-  const { error: inboxError } = await resend.emails.send({
-    from: fromAddress(),
+  const inbox = await sendTrackedEmail({
+    kind: "support_inbox",
     to: supportInbox(),
     replyTo: input.email,
     subject: `[${input.reference}] ${input.subject}`,
@@ -380,13 +391,13 @@ export async function sendSupportTicketEmails(input: {
     ].join("\n"),
   });
 
-  if (inboxError) {
-    return { ok: false, error: inboxError.message };
+  if (!inbox.ok) {
+    return { ok: false, error: inbox.error };
   }
 
   const greeting = input.name.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
-  await resend.emails.send({
-    from: fromAddress(),
+  await sendTrackedEmail({
+    kind: "support_receipt",
     to: input.email,
     replyTo: supportInbox(),
     subject: `We've got your request (${input.reference})`,
@@ -433,10 +444,6 @@ export async function sendEmailVerificationCode(input: {
   code: string;
   name?: string;
 }): Promise<{ ok: boolean; error?: string }> {
-  const resend = getResend();
-  if (!resend) {
-    return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
-  }
 
   const greeting = input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
   const code = escapeHtml(input.code);
@@ -455,8 +462,8 @@ export async function sendEmailVerificationCode(input: {
     </p>`,
   });
 
-  const { error } = await resend.emails.send({
-    from: fromAddress(),
+  return sendTrackedEmail({
+    kind: "email_verification",
     to: input.to,
     subject: "Your Froq verification code",
     html,
@@ -472,12 +479,6 @@ export async function sendEmailVerificationCode(input: {
       "The Froq Team",
     ].join("\n"),
   });
-
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-
-  return { ok: true };
 }
 
 export async function sendPendingApprovalsEscalationEmail(input: {
@@ -487,10 +488,6 @@ export async function sendPendingApprovalsEscalationEmail(input: {
   pendingCount: number;
   reviewUrl: string;
 }): Promise<{ ok: boolean; error?: string }> {
-  const resend = getResend();
-  if (!resend) {
-    return { ok: false, error: "Email delivery is not configured (missing RESEND_API_KEY)." };
-  }
 
   const greeting = input.name?.trim() ? `Hi ${input.name.trim()},` : "Hi there,";
   const business = escapeHtml(input.businessName);
@@ -512,8 +509,8 @@ export async function sendPendingApprovalsEscalationEmail(input: {
     ctaUrl: reviewUrl,
   });
 
-  const { error } = await resend.emails.send({
-    from: fromAddress(),
+  return sendTrackedEmail({
+    kind: "pending_approvals",
     to: input.to,
     subject: `Pending Stamp Approvals — ${input.businessName}`,
     html,
@@ -531,10 +528,298 @@ export async function sendPendingApprovalsEscalationEmail(input: {
       "The Froq Team",
     ].join("\n"),
   });
+}
 
-  if (error) {
-    return { ok: false, error: error.message };
-  }
+async function sendBrandedMerchantEmail(input: {
+  to: string;
+  subject: string;
+  title: string;
+  greeting: string;
+  bodyHtml: string;
+  ctaLabel: string;
+  ctaUrl: string;
+  textLines: string[];
+  kind?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const ctaUrl = toPublicEmailUrl(input.ctaUrl);
+  const html = brandedEmailHtml({
+    title: input.title,
+    greeting: input.greeting,
+    bodyHtml: input.bodyHtml,
+    ctaLabel: input.ctaLabel,
+    ctaUrl,
+  });
 
-  return { ok: true };
+  return sendTrackedEmail({
+    kind: input.kind ?? "merchant_notice",
+    to: input.to,
+    subject: input.subject,
+    html,
+    text: [
+      input.greeting,
+      "",
+      ...input.textLines,
+      "",
+      `${input.ctaLabel}: ${ctaUrl}`,
+      "",
+      `Need help? ${HELP_URL}`,
+      "",
+      "Cheers,",
+      "The Froq Team",
+    ].join("\n"),
+  });
+}
+
+function greetingFor(name?: string | null) {
+  return name?.trim() ? `Hi ${name.trim()},` : "Hi there,";
+}
+
+export async function sendTrialEndingEmail(input: {
+  to: string;
+  name?: string | null;
+  businessName: string;
+  productLabel: string;
+  daysLeft: 1 | 2;
+  trialEndsOn: string;
+  manageUrl: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const greeting = greetingFor(input.name);
+  const days = input.daysLeft === 1 ? "1 day" : `${input.daysLeft} days`;
+  const subject = `Your ${input.productLabel} trial ends in ${days}`;
+  return sendBrandedMerchantEmail({
+    to: input.to,
+    subject,
+    title: subject,
+    greeting,
+    kind: "trial_ending",
+    bodyHtml: `<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      Your free trial of <strong style="color:${BRAND};">${escapeHtml(input.productLabel)}</strong>
+      for <strong style="color:${BRAND};">${escapeHtml(input.businessName)}</strong>
+      ends on <strong style="color:${BRAND};">${escapeHtml(input.trialEndsOn)}</strong>
+      (${escapeHtml(days)} left).
+      Choose a plan to keep serving guests without interruption.
+    </p>`,
+    ctaLabel: "Choose a plan",
+    ctaUrl: input.manageUrl,
+    textLines: [
+      `Your free trial of ${input.productLabel} for ${input.businessName} ends on ${input.trialEndsOn} (${days} left).`,
+      "Choose a plan to keep serving guests without interruption.",
+    ],
+  });
+}
+
+export async function sendPlanUpgradedEmail(input: {
+  to: string;
+  name?: string | null;
+  businessName: string;
+  productLabel: string;
+  fromPlan: string;
+  toPlan: string;
+  effectiveOn: string;
+  priceLabel?: string | null;
+  manageUrl: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const greeting = greetingFor(input.name);
+  const subject = `${input.productLabel} upgraded to ${input.toPlan}`;
+  const priceLine = input.priceLabel
+    ? ` New price: <strong style="color:${BRAND};">${escapeHtml(input.priceLabel)}</strong>.`
+    : "";
+  return sendBrandedMerchantEmail({
+    to: input.to,
+    subject,
+    title: subject,
+    greeting,
+    bodyHtml: `<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      <strong style="color:${BRAND};">${escapeHtml(input.businessName)}</strong>'s
+      <strong style="color:${BRAND};">${escapeHtml(input.productLabel)}</strong>
+      plan was upgraded from ${escapeHtml(input.fromPlan)} to
+      <strong style="color:${BRAND};">${escapeHtml(input.toPlan)}</strong>
+      on ${escapeHtml(input.effectiveOn)}.${priceLine}
+    </p>`,
+    ctaLabel: "View plan",
+    ctaUrl: input.manageUrl,
+    textLines: [
+      `${input.businessName}'s ${input.productLabel} plan was upgraded from ${input.fromPlan} to ${input.toPlan} on ${input.effectiveOn}.`,
+      ...(input.priceLabel ? [`New price: ${input.priceLabel}.`] : []),
+    ],
+  });
+}
+
+export async function sendPlanDowngradeScheduledEmail(input: {
+  to: string;
+  name?: string | null;
+  businessName: string;
+  productLabel: string;
+  fromPlan: string;
+  toPlan: string;
+  effectiveOn: string;
+  manageUrl: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const greeting = greetingFor(input.name);
+  const subject = `${input.productLabel} downgrade scheduled`;
+  return sendBrandedMerchantEmail({
+    to: input.to,
+    subject,
+    title: subject,
+    greeting,
+    bodyHtml: `<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      Your <strong style="color:${BRAND};">${escapeHtml(input.productLabel)}</strong>
+      plan for <strong style="color:${BRAND};">${escapeHtml(input.businessName)}</strong>
+      will change from ${escapeHtml(input.fromPlan)} to
+      <strong style="color:${BRAND};">${escapeHtml(input.toPlan)}</strong>
+      on <strong style="color:${BRAND};">${escapeHtml(input.effectiveOn)}</strong>.
+      You keep your current plan until that date.
+    </p>`,
+    ctaLabel: "Manage plan",
+    ctaUrl: input.manageUrl,
+    textLines: [
+      `Your ${input.productLabel} plan for ${input.businessName} will change from ${input.fromPlan} to ${input.toPlan} on ${input.effectiveOn}.`,
+      "You keep your current plan until that date.",
+    ],
+  });
+}
+
+export async function sendPlanDowngradedEmail(input: {
+  to: string;
+  name?: string | null;
+  businessName: string;
+  productLabel: string;
+  fromPlan: string;
+  toPlan: string;
+  effectiveOn: string;
+  manageUrl: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const greeting = greetingFor(input.name);
+  const subject = `${input.productLabel} downgraded to ${input.toPlan}`;
+  return sendBrandedMerchantEmail({
+    to: input.to,
+    subject,
+    title: subject,
+    greeting,
+    bodyHtml: `<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      Your <strong style="color:${BRAND};">${escapeHtml(input.productLabel)}</strong>
+      plan for <strong style="color:${BRAND};">${escapeHtml(input.businessName)}</strong>
+      changed from ${escapeHtml(input.fromPlan)} to
+      <strong style="color:${BRAND};">${escapeHtml(input.toPlan)}</strong>
+      on ${escapeHtml(input.effectiveOn)}.
+    </p>`,
+    ctaLabel: "View plan",
+    ctaUrl: input.manageUrl,
+    textLines: [
+      `Your ${input.productLabel} plan for ${input.businessName} changed from ${input.fromPlan} to ${input.toPlan} on ${input.effectiveOn}.`,
+    ],
+  });
+}
+
+export async function sendPlanCancelScheduledEmail(input: {
+  to: string;
+  name?: string | null;
+  businessName: string;
+  productLabel: string;
+  planName: string;
+  effectiveOn: string;
+  manageUrl: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const greeting = greetingFor(input.name);
+  const subject = `${input.productLabel} cancellation scheduled`;
+  return sendBrandedMerchantEmail({
+    to: input.to,
+    subject,
+    title: subject,
+    greeting,
+    bodyHtml: `<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      Your <strong style="color:${BRAND};">${escapeHtml(input.planName)}</strong>
+      <strong style="color:${BRAND};">${escapeHtml(input.productLabel)}</strong>
+      plan for <strong style="color:${BRAND};">${escapeHtml(input.businessName)}</strong>
+      will end on <strong style="color:${BRAND};">${escapeHtml(input.effectiveOn)}</strong>.
+      You'll keep access until then. After that date the product locks until you subscribe again.
+    </p>`,
+    ctaLabel: "Manage plan",
+    ctaUrl: input.manageUrl,
+    textLines: [
+      `Your ${input.planName} ${input.productLabel} plan for ${input.businessName} will end on ${input.effectiveOn}.`,
+      "You'll keep access until then. After that date the product locks until you subscribe again.",
+    ],
+  });
+}
+
+export async function sendPlanCanceledEmail(input: {
+  to: string;
+  name?: string | null;
+  businessName: string;
+  productLabel: string;
+  planName: string;
+  effectiveOn: string;
+  manageUrl: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const greeting = greetingFor(input.name);
+  const subject = `${input.productLabel} subscription cancelled`;
+  return sendBrandedMerchantEmail({
+    to: input.to,
+    subject,
+    title: subject,
+    greeting,
+    bodyHtml: `<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      Your <strong style="color:${BRAND};">${escapeHtml(input.planName)}</strong>
+      <strong style="color:${BRAND};">${escapeHtml(input.productLabel)}</strong>
+      plan for <strong style="color:${BRAND};">${escapeHtml(input.businessName)}</strong>
+      ended on ${escapeHtml(input.effectiveOn)}. The product is locked until you subscribe again.
+    </p>`,
+    ctaLabel: "Resubscribe",
+    ctaUrl: input.manageUrl,
+    textLines: [
+      `Your ${input.planName} ${input.productLabel} plan for ${input.businessName} ended on ${input.effectiveOn}.`,
+      "The product is locked until you subscribe again.",
+    ],
+  });
+}
+
+export async function sendUsageThresholdEmail(input: {
+  to: string;
+  name?: string | null;
+  businessName: string;
+  productLabel: string;
+  metricLabel: string;
+  used: number;
+  limit: number;
+  percent: 50 | 70 | 100;
+  manageUrl: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const greeting = greetingFor(input.name);
+  const usedLabel = input.used.toLocaleString("en-IN");
+  const limitLabel = input.limit.toLocaleString("en-IN");
+  const subject =
+    input.percent >= 100
+      ? `${input.productLabel}: ${input.metricLabel} limit reached`
+      : `${input.productLabel}: ${input.percent}% of ${input.metricLabel} used`;
+  const headline =
+    input.percent >= 100
+      ? `You've used all ${limitLabel} ${escapeHtml(input.metricLabel)} on your plan.`
+      : `You've used <strong style="color:${BRAND};">${usedLabel} of ${limitLabel}</strong> ${escapeHtml(input.metricLabel)} (${input.percent}% of your plan).`;
+  const nextStep =
+    input.percent >= 100
+      ? "Consider upgrading to keep adding more without interruption."
+      : "Consider upgrading before you hit the limit.";
+
+  return sendBrandedMerchantEmail({
+    to: input.to,
+    subject,
+    title: subject,
+    greeting,
+    bodyHtml: `<p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#3d5c52;">
+      For <strong style="color:${BRAND};">${escapeHtml(input.businessName)}</strong>'s
+      <strong style="color:${BRAND};">${escapeHtml(input.productLabel)}</strong>:
+      ${headline}
+      ${escapeHtml(nextStep)}
+    </p>`,
+    ctaLabel: "Upgrade plan",
+    ctaUrl: input.manageUrl,
+    textLines: [
+      `For ${input.businessName}'s ${input.productLabel}:`,
+      input.percent >= 100
+        ? `You've used all ${limitLabel} ${input.metricLabel} on your plan.`
+        : `You've used ${usedLabel} of ${limitLabel} ${input.metricLabel} (${input.percent}% of your plan).`,
+      nextStep,
+    ],
+  });
 }

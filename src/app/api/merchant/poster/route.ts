@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getPublicAppOrigin } from "@/lib/app-url";
 import { resolveMerchantId } from "@/lib/merchant/server-context";
-import { generatePoster } from "@/lib/merchant/poster";
+import { generatePoster, posterAvailableFor } from "@/lib/merchant/poster";
+import type { MerchantProduct } from "@/lib/merchant/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -15,12 +16,46 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-function loyaltyUrlFor(slug: string) {
-  return `${getPublicAppOrigin()}/join/${slug}`;
+function parseProduct(raw: string | null): MerchantProduct {
+  if (
+    raw === "queue" ||
+    raw === "reservation" ||
+    raw === "loyalty" ||
+    raw === "menu"
+  ) {
+    return raw;
+  }
+  return "loyalty";
 }
 
-export async function GET() {
+function joinUrlFor(slug: string, product: MerchantProduct, branchSlug?: string | null) {
+  const origin = getPublicAppOrigin();
+  const path =
+    product === "queue"
+      ? `/queue/${slug}`
+      : product === "reservation"
+        ? `/r/${slug}`
+        : product === "menu"
+          ? `/menu/${slug}`
+          : `/join/${slug}`;
+  const query = branchSlug ? `?b=${encodeURIComponent(branchSlug)}` : "";
+  return `${origin}${path}${query}`;
+}
+
+export async function GET(request: NextRequest) {
   try {
+    const product = parseProduct(request.nextUrl.searchParams.get("product"));
+    const branchSlug =
+      request.nextUrl.searchParams.get("branch")?.trim() ||
+      request.nextUrl.searchParams.get("b")?.trim() ||
+      null;
+    if (!posterAvailableFor(product)) {
+      return NextResponse.json(
+        { error: "Poster is not available for this product." },
+        { status: 400 },
+      );
+    }
+
     const supabase = await createClient();
     const {
       data: { user },
@@ -45,20 +80,28 @@ export async function GET() {
     }
 
     const slug = merchant.slug || slugify(merchant.business_name ?? "") || "shop";
-    const loyaltyUrl = loyaltyUrlFor(slug);
-    const poster = await generatePoster(loyaltyUrl);
+    const joinUrl = joinUrlFor(slug, product, branchSlug);
+    const poster = await generatePoster(joinUrl, product);
 
     // Copy into a clean ArrayBuffer-backed view so the PNG is streamed byte-for
     // byte; handing a Node Buffer straight to the Web Response can truncate it
     // and produce a "broken image".
     const body = new Uint8Array(poster);
+    const stem =
+      product === "queue"
+        ? "queue-qr-poster"
+        : product === "reservation"
+          ? "reservation-qr-poster"
+          : product === "menu"
+            ? "menu-qr-poster"
+            : "qr-poster";
 
     return new NextResponse(body, {
       status: 200,
       headers: {
         "Content-Type": "image/png",
         "Content-Length": String(body.byteLength),
-        "Content-Disposition": `attachment; filename="${slug}-qr-poster.png"`,
+        "Content-Disposition": `attachment; filename="${slug}-${stem}.png"`,
         "Cache-Control": "no-store",
       },
     });

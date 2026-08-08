@@ -7,7 +7,7 @@ import {
   useImperativeHandle,
   useState,
 } from "react";
-import { Eye, EyeOff, KeyRound, Phone, type LucideIcon } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Phone } from "lucide-react";
 import { toast } from "sonner";
 import {
   changeMerchantPassword,
@@ -18,7 +18,7 @@ import {
 import { formatPhoneDisplay, isValidPassword, isValidPhone } from "@/lib/auth/format";
 import { OTP_LENGTH, RESEND_SECONDS } from "@/lib/auth/otp/client";
 import { useResendCooldown } from "@/lib/auth/otp/use-resend-cooldown";
-import { PRODUCTS } from "@/lib/merchant/nav";
+import { PRODUCTS, type ProductIcon } from "@/lib/merchant/nav";
 import { ROLE_LABELS } from "@/lib/merchant/roles";
 import type { MemberRole, MerchantProduct } from "@/lib/merchant/types";
 import { createClient } from "@/lib/supabase/client";
@@ -57,7 +57,7 @@ function AccessChipGroup({
   emptyLabel,
 }: {
   label: string;
-  chips: Array<{ id: string; name: string; Icon?: LucideIcon }>;
+  chips: Array<{ id: string; name: string; Icon?: ProductIcon }>;
   emptyLabel: string;
 }) {
   return (

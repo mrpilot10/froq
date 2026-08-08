@@ -5,6 +5,7 @@ import {
   TURNSTILE_SITE_KEY,
   TURNSTILE_UNAVAILABLE_MESSAGE,
   isTurnstileConfigured,
+  turnstileClientErrorMessage,
 } from "@/lib/turnstile/config";
 
 const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
@@ -144,8 +145,10 @@ export function TurnstileField({
           callback: (token) => handlers.current.onToken(token),
           "expired-callback": () => handlers.current.onExpire(),
           "timeout-callback": () => handlers.current.onExpire(),
-          "error-callback": () => {
-            handlers.current.onError(TURNSTILE_UNAVAILABLE_MESSAGE);
+          "error-callback": (code) => {
+            handlers.current.onError(turnstileClientErrorMessage(code));
+            // Returning true tells Turnstile we handled it (avoids duplicate console spam).
+            return true;
           },
         });
       })

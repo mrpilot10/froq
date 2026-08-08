@@ -37,37 +37,44 @@ function ListRowsSkeleton({ rows = 3 }: { rows?: number }) {
 
 export function QueueHomeSkeleton() {
   return (
-    <div className="tab-screen queue-home merchant-dashboard" aria-busy="true">
+    <div className="tab-screen queue-home merchant-dashboard resv-home" aria-busy="true">
       <HeadSkeleton actionWidth={108} />
+
+      <div className="panel-card resv-hero">
+        <div className="resv-hero-top">
+          <div className="sk sk-line" style={{ width: 120, height: 12 }} />
+          <div className="sk sk-line" style={{ width: 96, height: 28, marginTop: 10 }} />
+          <div className="sk sk-line" style={{ width: 180, height: 12, marginTop: 10 }} />
+        </div>
+        <div className="resv-hero-pulse">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="resv-hero-metric" style={{ cursor: "default" }}>
+              <div className="sk sk-line" style={{ width: 22, height: 16 }} />
+              <div className="sk sk-line" style={{ width: 48, marginTop: 6 }} />
+            </div>
+          ))}
+        </div>
+      </div>
 
       <section className="merchant-section">
         <div className="merchant-section-head">
-          <div className="sk sk-line" style={{ width: 78 }} />
-          <div className="sk sk-line" style={{ width: 62 }} />
+          <div className="sk sk-line" style={{ width: 96 }} />
         </div>
-        <div className="merchant-ltv-card queue-wait-card">
-          <div className="merchant-ltv-head">
-            <div className="sk sk-on-dark sk-line" style={{ width: 92 }} />
-          </div>
-          <div
-            className="sk sk-on-dark"
-            style={{ width: 104, height: 38, borderRadius: 10, margin: "14px 0 12px" }}
-          />
-          <div className="sk sk-on-dark sk-line" style={{ width: 200 }} />
-          <div className="merchant-ltv-metrics queue-wait-tiles" style={{ marginTop: 20 }}>
-            {Array.from({ length: 3 }).map((_, index) => (
-              <div key={index} className="merchant-ltv-tile queue-wait-tile">
-                <div className="sk sk-on-dark sk-line" style={{ width: 34 }} />
-                <div className="sk sk-on-dark sk-line" style={{ width: 56, marginTop: 8 }} />
-              </div>
-            ))}
-          </div>
+        <div className="merchant-quick-actions merchant-quick-actions--all">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div
+              key={index}
+              className="sk"
+              style={{ width: "100%", height: 76, borderRadius: 18 }}
+            />
+          ))}
         </div>
       </section>
 
       <section className="merchant-section">
         <div className="merchant-section-head">
-          <div className="sk sk-line" style={{ width: 96 }} />
+          <div className="sk sk-line" style={{ width: 78 }} />
+          <div className="sk sk-line" style={{ width: 62 }} />
         </div>
         <ListRowsSkeleton />
       </section>
@@ -98,17 +105,8 @@ export function QueueHistorySkeleton() {
             <div className="qhist-card-head">
               <div className="qhist-card-copy" style={{ flex: 1 }}>
                 <div className="sk sk-line" style={{ width: 96, height: 15 }} />
-                <div className="sk sk-line" style={{ width: 168, marginTop: 9 }} />
+                <div className="sk sk-line" style={{ width: 148, marginTop: 8 }} />
               </div>
-              <div className="sk" style={{ width: 72, height: 26, borderRadius: 999 }} />
-            </div>
-            <div className="qhist-stats">
-              {Array.from({ length: 4 }).map((_, tile) => (
-                <div key={tile} className="qhist-stat">
-                  <div className="sk sk-line" style={{ width: 26, height: 17 }} />
-                  <div className="sk sk-line" style={{ width: 44, marginTop: 7 }} />
-                </div>
-              ))}
             </div>
           </div>
         ))}

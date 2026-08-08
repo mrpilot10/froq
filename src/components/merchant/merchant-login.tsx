@@ -36,11 +36,13 @@ interface MerchantLoginProps {
  */
 const PRODUCT_COPY: Record<MerchantProduct, { tag: string; signUpHref: string }> = {
   loyalty: { tag: "Loyalty Stamps dashboard", signUpHref: "/loyalty-stamps#pricing" },
-  queue: { tag: "Queue Management dashboard", signUpHref: "/checkout?plan=queue-growth" },
+  queue: { tag: "Smart Queue dashboard", signUpHref: "/checkout?plan=queue-growth" },
   reservation: {
     tag: "Reservations dashboard",
     signUpHref: "/checkout?plan=reservation-growth",
   },
+  // AI Menu isn't sold yet, so sign-up points at the marketing pricing page.
+  menu: { tag: "AI Menu dashboard", signUpHref: "/#pricing" },
 };
 
 /**

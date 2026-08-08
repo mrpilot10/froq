@@ -1,16 +1,58 @@
 import type { RewardCooldownUnit } from "@/lib/loyalty/rules";
 
-export type MerchantProduct = "loyalty" | "queue" | "reservation";
+export type MerchantProduct = "loyalty" | "queue" | "reservation" | "menu";
 
 export type MemberRole = "owner" | "manager" | "staff";
 
-export interface Branch {
+/**
+ * Contact details, links, and Google listing are per-branch — a chain publishes
+ * a different phone, map pin, and review page for each location.
+ */
+export interface BranchContact {
+  address: string;
+  phone: string;
+  email: string;
+  websiteUrl: string;
+  instagramUrl: string;
+  facebookUrl: string;
+  xUrl: string;
+  /** Google reviews / listing link shown to customers. */
+  googleBusinessUrl: string;
+  /** Google Places resource id (ChIJ…). */
+  googlePlaceId: string;
+  /** Maps URL from Google Places (googleMapsUri). */
+  googleMapsUrl: string;
+}
+
+export interface Branch extends BranchContact {
   id: string;
   name: string;
   slug: string;
-  address: string;
   isDefault: boolean;
+  /** Local open time HH:MM for this branch's queue auto sessions. */
+  queueOpenTime: string;
+  queueCloseTime: string;
+  queueHoursTimezone: string;
+  /** 0=Sun … 6=Sat. */
+  queueOpenDays: number[];
+  queueAutoStart: boolean;
+  queueAutoClose: boolean;
+  /** Initial minutes-per-party wait estimate for this branch. */
+  estimatedWaitMinutes: number;
 }
+
+export const EMPTY_BRANCH_CONTACT: BranchContact = {
+  address: "",
+  phone: "",
+  email: "",
+  websiteUrl: "",
+  instagramUrl: "",
+  facebookUrl: "",
+  xUrl: "",
+  googleBusinessUrl: "",
+  googlePlaceId: "",
+  googleMapsUrl: "",
+};
 
 export interface MerchantMember {
   id: string;
@@ -49,23 +91,42 @@ export type QueueTab =
 /** Reservations product-scoped tabs. */
 export type ReservationTab =
   | "reservations-home"
+  | "reservations-customers"
   | "reservations-history"
   | "reservations-settings";
+
+/** AI Menu product-scoped tabs. */
+export type MenuTab =
+  | "menu-home"
+  | "menu-items"
+  | "menu-customers"
+  | "menu-settings";
 
 /** Workspace tabs shared across every product. */
 export type WorkspaceTab = "customers" | "analytics" | "profile";
 
 /** Every routable tab in the merchant app. */
-export type MerchantTab = LoyaltyTab | QueueTab | ReservationTab | WorkspaceTab;
+export type MerchantTab =
+  | LoyaltyTab
+  | QueueTab
+  | ReservationTab
+  | MenuTab
+  | WorkspaceTab;
 
 export type MerchantEditSection =
   | "business"
-  | "links"
-  | "google"
+  | "branch"
   | "loyalty"
   | "notifications"
   | "account"
   | null;
+
+/** Edit sections that write to the active branch rather than the merchant. */
+export const BRANCH_EDIT_SECTIONS = ["branch"] as const;
+
+export function isBranchEditSection(section: MerchantEditSection): boolean {
+  return (BRANCH_EDIT_SECTIONS as readonly string[]).includes(section ?? "");
+}
 
 export interface MerchantProfile {
   id?: string;
@@ -133,17 +194,30 @@ export interface MerchantProfile {
   reservationCloseTime: string;
   reservationAllowSameDay: boolean;
   reservationAllowNotes: boolean;
-  /** 0 = never auto decline (future automation). */
+  /** 0 = never auto decline pending requests. */
   reservationAutoDeclineHours: number;
   reservationWhatsappEnabled: boolean;
+  /** Minutes after reservation time before held slot → no-show. */
+  reservationGraceMinutes: number;
+  /** Auto-assign best free table when confirming a booking. */
+  reservationAutoAssignTables: boolean;
   /** Bookings stopped by the merchant — the public form is closed. */
   reservationPaused: boolean;
+  /** Guests can order from the table via AI Menu. Default on. */
+  menuTableOrdering: boolean;
+  /** Guests can send Need something? requests to staff. Default on. */
+  menuServerNotify: boolean;
+  /** Show the Loyalty stamps card on the guest digital menu. Default on. */
+  menuShowLoyaltyStamps: boolean;
   /**
-   * Queue ↔ AI Menu integration. When true, join/seated WhatsApp uses
-   * menu CTA templates (queue_first_notify_menu / seated_menu).
-   * Default on for new merchants.
+   * Queue ↔ AI Menu: waitlist CTA + menu WhatsApp templates
+   * (queue_first_notify_menu / seated_menu). Default on for new merchants.
    */
   queueAiMenuEnabled: boolean;
+  /** Percent added to an AI Menu cart. 0 drops the row from the bill. */
+  menuCgstPercent: number;
+  menuSgstPercent: number;
+  menuServiceChargePercent: number;
 }
 
 export interface MerchantStats {
@@ -220,6 +294,7 @@ export interface DashboardFilteredStats {
   topCustomers: AnalyticsTopCustomer[];
   funnel: AnalyticsFunnelStage[];
   insights: AnalyticsInsight[];
+  /** false only when the merchant has no customers and no stamps to chart. */
   hasActivity: boolean;
 }
 

@@ -8,7 +8,7 @@ import {
   fetchReservationHistory,
 } from "@/app/merchant/reservation-actions";
 import { useReservationActions } from "@/lib/merchant/use-reservation-actions";
-import type { Reservation } from "@/lib/merchant/reservations";
+import { formatDateLabel, type Reservation } from "@/lib/merchant/reservations";
 import type { ReservationHistorySummary } from "@/lib/reservations/stats";
 import { useMerchantWorkspace } from "../merchant-workspace-context";
 import { ReservationDrawer } from "./reservation-drawer";
@@ -91,6 +91,26 @@ export function ReservationHistoryScreen() {
       return digits ? String(reservation.number).includes(digits) : false;
     });
   }, [reservations, query]);
+
+  /**
+   * One section per service day, newest day first and chronological within it,
+   * so the list reads like the day it describes instead of repeating the date
+   * on every single row.
+   */
+  const days = useMemo(() => {
+    const byDate = new Map<string, Reservation[]>();
+    for (const reservation of visible) {
+      const bucket = byDate.get(reservation.date);
+      if (bucket) bucket.push(reservation);
+      else byDate.set(reservation.date, [reservation]);
+    }
+    return [...byDate.entries()]
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([date, rows]) => ({
+        date,
+        rows: [...rows].sort((a, b) => a.time.localeCompare(b.time)),
+      }));
+  }, [visible]);
 
   const selected = reservations.find((item) => item.id === selectedId) ?? null;
 
@@ -183,15 +203,31 @@ export function ReservationHistoryScreen() {
             </p>
           </div>
         ) : (
-          <div className="resv-list">
-            {/* Read-only rows: history is for reviewing, and the drawer still
-                carries every action if a past booking needs tidying up. */}
-            {visible.map((reservation) => (
-              <ReservationRow
-                key={reservation.id}
-                reservation={reservation}
-                onView={() => setSelectedId(reservation.id)}
-              />
+          <div className="resv-history-days">
+            {days.map(({ date, rows }) => (
+              <section key={date} className="merchant-section">
+                <div className="merchant-section-head">
+                  <h3 className="merchant-section-label">
+                    {formatDateLabel(date)}
+                  </h3>
+                  <span className="merchant-section-meta">
+                    {rows.length} booking{rows.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+
+                <div className="resv-list">
+                  {/* Read-only rows: history is for reviewing, and the drawer
+                      still carries every action if one needs tidying up. */}
+                  {rows.map((reservation) => (
+                    <ReservationRow
+                      key={reservation.id}
+                      reservation={reservation}
+                      variant="history"
+                      onView={() => setSelectedId(reservation.id)}
+                    />
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         )}

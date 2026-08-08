@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import {
+  BookOpen,
   ContactRound,
   History,
   LayoutGrid,
@@ -56,14 +57,23 @@ const QUEUE_NAV: MobileNavItem[] = [
 
 const RESERVATION_NAV: MobileNavItem[] = [
   { id: "reservations-home", label: "Home", Icon: LayoutGrid },
+  { id: "reservations-customers", label: "Customers", Icon: ContactRound },
   { id: "reservations-history", label: "History", Icon: History },
   { id: "reservations-settings", label: "Settings", Icon: SlidersHorizontal },
+];
+
+const MENU_NAV: MobileNavItem[] = [
+  { id: "menu-home", label: "Home", Icon: LayoutGrid },
+  { id: "menu-items", label: "Menu", Icon: BookOpen },
+  { id: "menu-customers", label: "Customers", Icon: ContactRound },
+  { id: "menu-settings", label: "Settings", Icon: SlidersHorizontal },
 ];
 
 const PRODUCT_MOBILE_NAV: Record<MerchantProduct, MobileNavItem[]> = {
   loyalty: LOYALTY_NAV,
   queue: QUEUE_NAV,
   reservation: RESERVATION_NAV,
+  menu: MENU_NAV,
 };
 
 export function MerchantNav({

@@ -77,7 +77,7 @@ export default async function RaiseTicketPage() {
             Not a merchant yet? Browse the{" "}
             <Link href="/help">documentation</Link> or read about{" "}
             <Link href="/loyalty-stamps">Loyalty Stamps</Link> and{" "}
-            <Link href="/queue-management">Queue Management</Link>.
+            <Link href="/queue-management">Smart Queue</Link>.
           </p>
         </section>
       )}

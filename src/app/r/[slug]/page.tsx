@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { getPublicReservation, resolveReservationPage } from "@/app/r/actions";
 import { ReservationRequestScreen } from "@/components/reservations/reservation-request-screen";
 import { ReservationStatusScreen } from "@/components/reservations/reservation-status-screen";
+import { BrandThemeStyle } from "@/components/shared/brand-theme-style";
 import { FroqFooter } from "@/components/shared/froq-footer";
 import { isReservationPublicToken } from "@/lib/reservations/link";
 
@@ -35,10 +36,13 @@ function NotFoundCard({ message }: { message: string }) {
  */
 export default async function ReservationPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ b?: string }>;
 }) {
   const { slug } = await params;
+  const { b: branchSlug } = await searchParams;
 
   if (isReservationPublicToken(slug)) {
     const result = await getPublicReservation(slug);
@@ -47,13 +51,23 @@ export default async function ReservationPage({
         <NotFoundCard message="This reservation link is invalid or has been removed." />
       );
     }
-    return <ReservationStatusScreen reservation={result.reservation} />;
+    return (
+      <>
+        <BrandThemeStyle color={result.reservation.merchant.brandColor} />
+        <ReservationStatusScreen reservation={result.reservation} />
+      </>
+    );
   }
 
-  const resolved = await resolveReservationPage(slug);
+  const resolved = await resolveReservationPage(slug, branchSlug ?? null);
   if (!resolved.ok) {
     return <NotFoundCard message="This reservation link is invalid or has been removed." />;
   }
 
-  return <ReservationRequestScreen merchant={resolved.merchant} />;
+  return (
+    <>
+      <BrandThemeStyle color={resolved.merchant.brandColor} />
+      <ReservationRequestScreen merchant={resolved.merchant} />
+    </>
+  );
 }

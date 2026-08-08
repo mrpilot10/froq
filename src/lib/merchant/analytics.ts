@@ -575,6 +575,9 @@ export function computeLoyaltyAnalytics(input: {
     topCustomers,
     funnel,
     insights,
-    hasActivity: totalCustomers > 0 && totalStampsAllTime > 0,
+    // Signups alone are worth charting: "7 joined → 0 stamped" is the funnel a
+    // merchant with no stamps yet most needs to see. Only a merchant with
+    // nothing at all falls through to the empty state.
+    hasActivity: totalCustomers > 0 || totalStampsAllTime > 0,
   };
 }

@@ -170,7 +170,7 @@ export function CurrentPlanDrawer({
         {cancelAtPeriodEnd ? (
           <div className="current-plan-notice">
             Cancellation scheduled. No future renewals. Access continues until {renewLabel}, then
-            moves to Free.
+            this product locks until you subscribe again.
             {onResumePlan ? (
               <button
                 type="button"
@@ -208,7 +208,7 @@ export function CurrentPlanDrawer({
               onClick={() => setBilling("yearly")}
             >
               Yearly
-              <span className="landing-billing-save">Save 17%</span>
+              <span className="landing-billing-save">2 months free</span>
             </button>
             <span
               className={`landing-billing-thumb${billing === "yearly" ? " is-yearly" : ""}`}
@@ -226,7 +226,7 @@ export function CurrentPlanDrawer({
                 {busy
                   ? "Processing…"
                   : billingChangeKind === "upgrade"
-                    ? `Switch to yearly on ${renewLabel}`
+                    ? `Upgrade to yearly · ${targetPlan.priceLabel}/yr`
                     : `Switch to monthly on ${renewLabel}`}
               </button>
               <p className="current-plan-hint">{BILLING_POLICY.planChanges}</p>
@@ -265,7 +265,7 @@ export function CurrentPlanDrawer({
               <div className="current-plan-cancel-warn">
                 <AlertTriangle size={16} strokeWidth={2.2} aria-hidden />
                 Cancel {plan.name}? This stops future renewals. Access continues until {renewLabel},
-                then moves to Free.
+                then this product locks until you subscribe again.
               </div>
               <div className="current-plan-cancel-actions">
                 <button

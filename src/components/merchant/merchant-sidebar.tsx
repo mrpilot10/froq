@@ -1,17 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowUpRight, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { PRODUCT_NAV, PRODUCTS, TAB_HREF, type NavItem } from "@/lib/merchant/nav";
 import { ROLE_LABELS } from "@/lib/merchant/roles";
-import { planUpgradeSummary } from "@/lib/merchant/plan-summary";
 import type { MemberRole, MerchantProduct, MerchantTab } from "@/lib/merchant/types";
+import type { Entitlements } from "@/lib/merchant/entitlements";
 import {
-  isProductEnabled,
-  isTrialActive,
-  trialDaysLeft,
-  type Entitlements,
-} from "@/lib/merchant/entitlements";
+  MerchantSidePlanCard,
+  type MerchantSidePlanUsage,
+} from "./merchant-side-plan-card";
 
 function getInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -25,6 +23,7 @@ interface MerchantSidebarProps {
   activeTab: MerchantTab;
   entitlements: Entitlements;
   canPurchase?: boolean;
+  planUsage?: MerchantSidePlanUsage;
   userName?: string;
   userRole?: MemberRole;
   onTabChange: (tab: MerchantTab) => void;
@@ -38,6 +37,7 @@ export function MerchantSidebar({
   activeTab,
   entitlements,
   canPurchase = true,
+  planUsage,
   userName = "",
   userRole = "staff",
   onTabChange,
@@ -46,18 +46,6 @@ export function MerchantSidebar({
   pendingCount = 0,
 }: MerchantSidebarProps) {
   const product = PRODUCTS.find((p) => p.id === activeProduct) ?? PRODUCTS[0];
-  const entitlement = entitlements[activeProduct];
-  const enabled = isProductEnabled(entitlements, activeProduct);
-  const onTrial = isTrialActive(entitlement);
-  const summary = planUpgradeSummary({
-    product: activeProduct,
-    planId: entitlement?.planId,
-  });
-  const statusLabel = onTrial
-    ? `${trialDaysLeft(entitlement)}d trial left`
-    : enabled
-      ? "Active"
-      : "Not enabled";
   const ProductIcon = product.Icon;
   const displayName = userName.trim() || "Team member";
   const initials = getInitials(displayName);
@@ -110,49 +98,13 @@ export function MerchantSidebar({
       </nav>
 
       <div className="merchant-sidebar-footer">
-        <div className={`merchant-side-plan${enabled ? "" : " is-locked"}`}>
-          <div className="merchant-side-plan-top">
-            <span className="merchant-side-plan-name">
-              {product.name}
-              {summary.currentTier ? (
-                <span className="merchant-side-plan-tier">{summary.currentTier}</span>
-              ) : null}
-            </span>
-            <span className={`merchant-side-plan-status${enabled ? " is-active" : ""}`}>
-              {statusLabel}
-            </span>
-          </div>
-
-          {/* No plan in force means no current price — the CTA carries one. */}
-          {summary.currentPriceLabel ? (
-            <div className="merchant-side-plan-price">
-              {summary.currentPriceLabel}
-              <span>{summary.currentCycleLabel}</span>
-            </div>
-          ) : null}
-
-          {summary.nextPlan && summary.nextHighlights.length > 0 ? (
-            <p className="merchant-side-plan-gain">
-              {summary.currentTier ? `${summary.nextPlan.name}: ` : null}
-              {summary.nextHighlights.join(" · ")}
-            </p>
-          ) : null}
-
-          {canPurchase && summary.nextPlan ? (
-            <button
-              type="button"
-              className="merchant-side-plan-cta"
-              onClick={() => onGetStarted?.(activeProduct)}
-            >
-              <span>{summary.currentTier ? "Upgrade" : "Get started"}</span>
-              <span className="merchant-side-plan-cta-price">
-                {summary.nextPlan.priceLabel}
-                {summary.currentCycleLabel}
-              </span>
-              <ArrowUpRight size={14} strokeWidth={2.4} />
-            </button>
-          ) : null}
-        </div>
+        <MerchantSidePlanCard
+          product={activeProduct}
+          entitlements={entitlements}
+          canPurchase={canPurchase}
+          usage={planUsage}
+          onAction={onGetStarted}
+        />
 
         <button
           type="button"

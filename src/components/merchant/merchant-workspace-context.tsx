@@ -3,6 +3,7 @@
 import { createContext, useContext } from "react";
 import type {
   Branch,
+  BranchContact,
   DashboardFilteredStats,
   MemberRole,
   MerchantCustomer,
@@ -14,6 +15,7 @@ import type {
   PendingApproval,
 } from "@/lib/merchant/types";
 import type { Entitlements } from "@/lib/merchant/entitlements";
+import type { ProductBranchMap } from "@/lib/merchant/branch-assignments";
 
 /**
  * Shared data + handlers for every merchant dashboard route. The workspace
@@ -26,10 +28,15 @@ export interface MerchantWorkspaceValue {
   customers: MerchantCustomer[];
   approvals: PendingApproval[];
   entitlements: Entitlements;
+  /** Every global branch on the merchant account. */
   branches: Branch[];
+  /** Active branch ids keyed by product. */
+  productBranches: ProductBranchMap;
   members: MerchantMember[];
   role: MemberRole;
   activeBranchId: string | null;
+  /** Concrete branch that contact settings read and write (never null with branches). */
+  editBranch: Branch | null;
   canViewAllBranches: boolean;
   goToTab: (tab: MerchantTab) => void;
   onShowQr: (product?: MerchantProduct) => void;
@@ -39,8 +46,22 @@ export interface MerchantWorkspaceValue {
   onManageTeam: () => void;
   onPurchaseProduct: (product: MerchantProduct) => void;
   onRefresh: () => Promise<void>;
-  onCreateBranch: (input: { name: string; address?: string }) => Promise<string | null>;
-  onUpdateBranch: (id: string, patch: { name?: string; address?: string }) => Promise<boolean>;
+  onCreateBranch: (input: {
+    name: string;
+    contact?: Partial<BranchContact>;
+    copyContactFromMainBranch?: boolean;
+    hours?: { openTime: string; closeTime: string; openDays: number[] };
+    assignToProduct?: MerchantProduct;
+  }) => Promise<string | null>;
+  onSetProductBranchAssignment: (input: {
+    product: MerchantProduct;
+    branchId: string;
+    active: boolean;
+  }) => Promise<boolean>;
+  onUpdateBranch: (
+    id: string,
+    patch: Partial<BranchContact> & { name?: string },
+  ) => Promise<boolean>;
   onDeleteBranch: (id: string) => Promise<boolean>;
   onInviteMember: (input: {
     email: string;
@@ -79,10 +100,13 @@ export interface MerchantWorkspaceValue {
     openTime: string;
     closeTime: string;
     openDays: number[];
-    autoSessions: boolean;
+    autoStart: boolean;
+    autoClose: boolean;
   }) => Promise<void>;
-  onSaveQueueSettings: (patch: Partial<MerchantProfile>) => Promise<void>;
+  onSaveEstimatedWait: (minutes: number) => Promise<void>;
   onSaveReservationSettings: (patch: Partial<MerchantProfile>) => Promise<void>;
+  onSaveMenuSettings: (patch: Partial<MerchantProfile>) => Promise<void>;
+  onSaveQueueSettings: (patch: Partial<MerchantProfile>) => Promise<void>;
   /** Stop / resume public booking requests, like pausing the live queue. */
   onSetReservationPaused: (paused: boolean) => Promise<void>;
   onDeleteAccount: () => void;

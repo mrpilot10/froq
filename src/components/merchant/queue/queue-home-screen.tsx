@@ -10,13 +10,12 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import QRCode from "qrcode";
 import {
-  BarChart3,
   CalendarPlus,
   Check,
-  Copy,
-  Download,
+  ChevronRight,
+  History,
+  Lock,
   Megaphone,
   Minus,
   Pause,
@@ -31,15 +30,24 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { nationalMobileInputDigits } from "@/lib/auth/format";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import {
   CALL_ACCEPT_MINUTES,
   callAcceptDeadlineMs,
+  ensureInitialEstimatedWaitMinutes,
   getWaitEstimateMeta,
   recordActualWaitMinutes,
 } from "@/lib/merchant/queue-settings";
 import { formatWaitShort, waitSegments } from "@/lib/queue/format";
+import {
+  estimatedWaitMinutes as computeEta,
+  lineEntries,
+  nextCallableEntry,
+  reservationDisplayPhase,
+} from "@/lib/queue/ordering";
 import type { MerchantProfile } from "@/lib/merchant/types";
+import { isProductEnabled } from "@/lib/merchant/entitlements";
 import {
   addLiveQueueEntry,
   fetchLiveQueueBoard,
@@ -50,12 +58,19 @@ import {
 import {
   archiveQueueSession,
   ensureQueueDataEpoch,
+  removeQueueSessionRecord,
   type QueueSessionActor,
+  type QueueSessionRecord,
 } from "@/lib/merchant/queue-session-storage";
 import { startedByLabel } from "@/lib/merchant/queue-session-actor";
 import { joinUrlFor } from "../use-merchant-qr";
 import { useMerchantWorkspace } from "../merchant-workspace-context";
+import { ActorChip } from "../actor-chip";
 import { QueueHomeSkeleton } from "./queue-skeletons";
+import { QueueSessionHistorySheet } from "./queue-session-history-sheet";
+import { SeatAtTableSheet } from "./seat-at-table-sheet";
+import { QueueStatusHero } from "./queue-status-hero";
+import { listBranchDiningTables } from "@/app/merchant/table-actions";
 
 interface QueueHomeScreenProps {
   profile: MerchantProfile;
@@ -73,14 +88,17 @@ interface QueueEntry {
   acceptByMs?: number;
   seatedAtMs?: number;
   leftAtMs?: number;
-  status: "called" | "waiting" | "seated" | "left";
+  status: "held" | "called" | "waiting" | "seated" | "left";
   kind: "walkin" | "reservation";
   reservationTime?: string;
+  reservationId?: string;
+  tableNumber?: number;
+  diningTableId?: string;
   /** How many of the 3 call reminders have been delivered (0–3). */
   remindersSent?: number;
 }
 
-type SheetKind = "guest" | "reservation" | "qr" | "end" | null;
+type SheetKind = "guest" | "reservation" | "end" | null;
 type QueueListFilter = "waiting" | "seated" | "left";
 type QueueState = "not_started" | "live" | "paused" | "ended";
 
@@ -97,6 +115,7 @@ interface EndedSummary extends QueueSessionActor {
   left: number;
   avgWait: number;
   longestWait: number;
+  sessionId?: string;
 }
 
 interface PersistedQueue {
@@ -115,15 +134,6 @@ const EMPTY_QUEUE: PersistedQueue = {
   entries: [],
   lastSessionNumber: 0,
 };
-
-/** Lazily filled when the QR sheet opens — keyed by join URL. */
-const queueQrCache = new Map<string, string>();
-
-const QR_ENCODE_OPTS = {
-  margin: 1,
-  width: 440,
-  color: { dark: "#000000", light: "#ffffff" },
-} as const;
 
 function isQueueState(value: unknown): value is QueueState {
   return (
@@ -165,19 +175,25 @@ function parsePersistedQueue(raw: string): PersistedQueue | null {
   }
 }
 
-const STATE_META: Record<QueueState, { label: string; cls: string }> = {
-  not_started: { label: "Queue not started", cls: "idle" },
-  live: { label: "Queue live", cls: "live" },
-  paused: { label: "Queue paused", cls: "paused" },
-  ended: { label: "Queue closed", cls: "ended" },
-};
-
 function formatClock(ms: number) {
   return new Date(ms).toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
   });
+}
+
+/**
+ * Meta items describing when a session ran, e.g. `["2:10 pm – 3:46 pm", "1h 36m"]`.
+ * A session opened and closed inside the same minute collapses to a single
+ * time — "11:09 pm – 11:09 pm · 0m" is three ways of saying nothing happened.
+ */
+function sessionWindow(startedAtMs: number, endedAtMs: number): string[] {
+  const from = formatClock(startedAtMs);
+  const to = formatClock(endedAtMs);
+  if (from === to) return [from];
+  const minutes = Math.max(0, Math.round((endedAtMs - startedAtMs) / 60_000));
+  return [`${from} – ${to}`, formatWaitShort(minutes)];
 }
 
 function initials(name: string) {
@@ -281,6 +297,7 @@ type QueueEntryCardProps = {
   pendingSeating: boolean;
   pendingLeaving: boolean;
   actionsBusy: boolean;
+  onOpen: (entry: QueueEntry) => void;
   onCall: (entry: QueueEntry) => void;
   onSeated: (entry: QueueEntry) => void;
   onLeft: (entry: QueueEntry) => void;
@@ -292,13 +309,16 @@ const QueueEntryCard = memo(function QueueEntryCard({
   pendingSeating,
   pendingLeaving,
   actionsBusy,
+  onOpen,
   onCall,
   onSeated,
   onLeft,
 }: QueueEntryCardProps) {
   const isSeated = entry.status === "seated";
   const isLeft = entry.status === "left";
+  const isHeld = entry.status === "held";
   const calledCard = entry.status === "called";
+  const showActions = !isSeated && !isLeft;
   const timeLabel = (ms?: number) =>
     ms
       ? new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
@@ -310,71 +330,110 @@ const QueueEntryCard = memo(function QueueEntryCard({
     <div
       className={`panel-card queue-entry${calledCard ? " queue-entry--called" : ""}${
         isSeated ? " queue-entry--seated" : ""
-      }${isLeft ? " queue-entry--left" : ""}`}
+      }${isLeft ? " queue-entry--left" : ""}${isHeld ? " queue-entry--held" : ""}${
+        showActions ? " has-actions" : ""
+      }`}
     >
       <div className="queue-entry-main">
-        <span className="queue-token">#{token}</span>
-        <div className="merchant-avatar">{initials(entry.name)}</div>
-        <div className="queue-entry-copy">
-          <div className="merchant-list-title">
-            {entry.name}
-            {entry.kind === "reservation" && (
-              <span className="queue-entry-badge">Reservation</span>
+        <button
+          type="button"
+          className="queue-entry-open"
+          aria-label={`View ${entry.name}`}
+          onClick={() => onOpen(entry)}
+        >
+          <span className="queue-token">#{token}</span>
+          <div className="merchant-avatar">{initials(entry.name)}</div>
+          <div className="queue-entry-copy">
+            <div className="merchant-list-title">
+              {entry.name}
+              {reservationDisplayPhase(entry) === "upcoming" && (
+                <span className="queue-entry-badge queue-entry-badge--reserved">
+                  Reserved
+                </span>
+              )}
+              {reservationDisplayPhase(entry) === "waiting" && (
+                <span className="queue-entry-badge">Waiting · Reserved</span>
+              )}
+            </div>
+            {entry.phone ? (
+              <span className="merchant-list-sub queue-entry-phone">
+                <Phone size={13} strokeWidth={2.4} aria-hidden="true" />
+                <span>{entry.phone}</span>
+              </span>
+            ) : (
+              <div className="merchant-list-sub">No phone</div>
             )}
-          </div>
-          {entry.phone ? (
-            <a
-              className="merchant-list-sub queue-entry-phone"
-              href={`tel:${entry.phone.replace(/[^\d+]/g, "")}`}
-            >
-              <Phone size={13} strokeWidth={2.4} aria-hidden="true" />
-              <span>{entry.phone}</span>
-            </a>
-          ) : (
-            <div className="merchant-list-sub">No phone</div>
-          )}
-          <div className="queue-entry-meta">
-            {isSeated
-              ? `${partyLabel(entry.partySize)} · seated${
-                  entry.seatedAtMs ? ` · ${timeLabel(entry.seatedAtMs)}` : ""
-                }`
-              : isLeft
-                ? `${partyLabel(entry.partySize)} · left${
-                    entry.leftAtMs ? ` · ${timeLabel(entry.leftAtMs)}` : ""
+            <div className="queue-entry-meta">
+              {isSeated
+                ? `${partyLabel(entry.partySize)} · seated${
+                    entry.tableNumber != null ? ` · Table ${entry.tableNumber}` : ""
+                  }${
+                    entry.seatedAtMs ? ` · ${timeLabel(entry.seatedAtMs)}` : ""
                   }`
-                : calledCard
-                  ? `${partyLabel(entry.partySize)} · Called`
-                  : (
-                      <>
-                        {partyLabel(entry.partySize)} ·{" "}
-                        <WaitMinutesLabel joinedAtMs={entry.joinedAtMs} />
-                      </>
-                    )}
-            {entry.kind === "reservation" && entry.reservationTime && !isSeated && !isLeft
-              ? ` · ${entry.reservationTime}`
-              : ""}
+                : isLeft
+                  ? `${partyLabel(entry.partySize)} · left${
+                      entry.leftAtMs ? ` · ${timeLabel(entry.leftAtMs)}` : ""
+                    }`
+                  : calledCard
+                    ? `${partyLabel(entry.partySize)} · Called${
+                        entry.tableNumber != null
+                          ? ` · Table ${entry.tableNumber}`
+                          : ""
+                      }`
+                    : isHeld
+                      ? `${partyLabel(entry.partySize)} · arrives ${
+                          entry.reservationTime || timeLabel(entry.joinedAtMs)
+                        }`
+                      : (
+                          <>
+                            {partyLabel(entry.partySize)} ·{" "}
+                            <WaitMinutesLabel joinedAtMs={entry.joinedAtMs} />
+                            {entry.kind === "reservation" && entry.reservationTime
+                              ? ` · ${entry.reservationTime}`
+                              : ""}
+                          </>
+                        )}
+            </div>
           </div>
-        </div>
-
-        {calledCard ? (
-          <AcceptWindowCountdown
-            calledAtMs={entry.calledAtMs}
-            acceptByMs={entry.acceptByMs}
+          <ChevronRight
+            size={18}
+            strokeWidth={2.2}
+            className="merchant-list-arrow queue-entry-chevron"
+            aria-hidden="true"
           />
-        ) : null}
+        </button>
 
-        {!isSeated && !isLeft && !calledCard ? (
+        {/* Inline with the guest, like a booking row; drops to its own full
+            width line under 720px where two buttons can't sit beside a name. */}
+        {showActions ? (
           <div className="queue-entry-trailing">
             <div className="queue-entry-actions">
-              <button
-                type="button"
-                className="queue-act queue-act--call"
-                disabled={actionsBusy}
-                onClick={() => onCall(entry)}
-              >
-                <Megaphone size={14} strokeWidth={2.3} />
-                Call
-              </button>
+              {calledCard ? (
+                <button
+                  type="button"
+                  className="queue-act queue-act--served"
+                  disabled={actionsBusy}
+                  aria-busy={pendingSeating || undefined}
+                  onClick={() => onSeated(entry)}
+                >
+                  {pendingSeating ? (
+                    <span className="merchant-btn-spinner" aria-hidden="true" />
+                  ) : (
+                    <Check size={14} strokeWidth={2.3} />
+                  )}
+                  {pendingSeating ? "Seating…" : "Seated"}
+                </button>
+              ) : !isHeld ? (
+                <button
+                  type="button"
+                  className="queue-act queue-act--call"
+                  disabled={actionsBusy}
+                  onClick={() => onCall(entry)}
+                >
+                  <Megaphone size={14} strokeWidth={2.3} />
+                  Call
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="queue-act queue-act--left"
@@ -387,13 +446,15 @@ const QueueEntryCard = memo(function QueueEntryCard({
                 ) : (
                   <X size={14} strokeWidth={2.3} />
                 )}
-                {pendingLeaving ? "Leaving…" : "Left"}
+                {pendingLeaving ? "Leaving…" : isHeld ? "No show" : "Left"}
               </button>
             </div>
           </div>
         ) : null}
       </div>
 
+      {/* Called-only status strip: how many reminders went out, and how long
+          the guest still has to show up. */}
       {calledCard ? (
         <div className="queue-entry-foot">
           <div className="queue-reminders" aria-label="Reminders sent">
@@ -411,36 +472,10 @@ const QueueEntryCard = memo(function QueueEntryCard({
               ))}
             </span>
           </div>
-          <div className="queue-entry-actions">
-            <button
-              type="button"
-              className="queue-act queue-act--served"
-              disabled={actionsBusy}
-              aria-busy={pendingSeating || undefined}
-              onClick={() => onSeated(entry)}
-            >
-              {pendingSeating ? (
-                <span className="merchant-btn-spinner" aria-hidden="true" />
-              ) : (
-                <Check size={14} strokeWidth={2.3} />
-              )}
-              {pendingSeating ? "Seating…" : "Seated"}
-            </button>
-            <button
-              type="button"
-              className="queue-act queue-act--left"
-              disabled={actionsBusy}
-              aria-busy={pendingLeaving || undefined}
-              onClick={() => onLeft(entry)}
-            >
-              {pendingLeaving ? (
-                <span className="merchant-btn-spinner" aria-hidden="true" />
-              ) : (
-                <X size={14} strokeWidth={2.3} />
-              )}
-              {pendingLeaving ? "Leaving…" : "Left"}
-            </button>
-          </div>
+          <AcceptWindowCountdown
+            calledAtMs={entry.calledAtMs}
+            acceptByMs={entry.acceptByMs}
+          />
         </div>
       ) : null}
     </div>
@@ -449,6 +484,14 @@ const QueueEntryCard = memo(function QueueEntryCard({
 
 function partyLabel(size: number) {
   return `Party of ${size}`;
+}
+
+function guestStatusLabel(status: QueueEntry["status"]) {
+  if (status === "held") return "Held";
+  if (status === "waiting") return "Waiting";
+  if (status === "called") return "Called";
+  if (status === "seated") return "Seated";
+  return "Left";
 }
 
 function waitLabel(mins: number) {
@@ -470,19 +513,26 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
   const [endedSummary, setEndedSummary] = useState<EndedSummary | null>(null);
   const [lastSessionNumber, setLastSessionNumber] = useState(0);
   const [sheet, setSheet] = useState<SheetKind>(null);
+  const [recapOpen, setRecapOpen] = useState(false);
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const [listFilter, setListFilter] = useState<QueueListFilter>("waiting");
   const [searchQuery, setSearchQuery] = useState("");
   const acceptMinutes = CALL_ACCEPT_MINUTES;
   const [minsPerParty, setMinsPerParty] = useState(10);
   const [waitSource, setWaitSource] = useState<"initial" | "learned">("initial");
   const [waitSamples, setWaitSamples] = useState(0);
-  const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   /** In-flight Seated / Left action — spinner on the pressed button. */
   const [pendingResolve, setPendingResolve] = useState<{
     entryId: string;
     action: "seated" | "left";
   } | null>(null);
+  /** Entry waiting for a table pick before call or seat. */
+  const [tablePick, setTablePick] = useState<{
+    entry: QueueEntry;
+    purpose: "call" | "seat";
+  } | null>(null);
+  const [hasTables, setHasTables] = useState(false);
   const resolvedCallRef = useRef<Set<string>>(new Set());
   /** Only persist after hydrate for this exact sessionKey (avoids clobber races). */
   const hydratedKeyRef = useRef<string | null>(null);
@@ -496,6 +546,29 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
   const isLive = queueState === "live";
   const isPaused = queueState === "paused";
   const showDashboard = isLive || isPaused;
+  /** Nobody joined, so the recap has no numbers worth tabulating. */
+  const noGuests =
+    !!endedSummary && endedSummary.served === 0 && endedSummary.left === 0;
+
+  // The recap sheet speaks the History screen's record shape, so adapt the
+  // just-ended summary rather than teaching the sheet a second shape.
+  const endedRecord: QueueSessionRecord | null = endedSummary
+    ? {
+        id:
+          endedSummary.sessionId ??
+          `qs-${endedSummary.number}-${endedSummary.endedAtMs}`,
+        number: endedSummary.number,
+        startedAtMs: endedSummary.startedAtMs,
+        endedAtMs: endedSummary.endedAtMs,
+        served: endedSummary.served,
+        left: endedSummary.left,
+        avgWait: endedSummary.avgWait,
+        longestWait: endedSummary.longestWait,
+        startedByName: endedSummary.startedByName,
+        startedByRole: endedSummary.startedByRole,
+        ...(endedSummary.sessionId ? { dbSessionId: endedSummary.sessionId } : {}),
+      }
+    : null;
 
   // Add guest form
   const [guestName, setGuestName] = useState("");
@@ -509,7 +582,9 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
   const [resParty, setResParty] = useState(2);
   const [resTime, setResTime] = useState("");
 
-  const { activeBranchId } = useMerchantWorkspace();
+  const { activeBranchId, branches, entitlements, role, onShowQr, onPurchaseProduct } =
+    useMerchantWorkspace();
+  const reservationsEnabled = isProductEnabled(entitlements, "reservation");
   const queueUrl = useMemo(() => joinUrlFor(profile, "queue"), [profile]);
   // Each branch keeps its own live session (queues run independently).
   const sessionKey = useMemo(
@@ -567,11 +642,27 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
         setEndedSummary((prev) => (prev == null ? prev : null));
       }
     } else if (queueStateRef.current === "live" || queueStateRef.current === "paused") {
-      // Server has no open session — keep local ended/not_started if already there.
+      // Ended externally (auto-close, another device). Don't keep a stale "live"
+      // board — guests already can't join, and Start must be available again.
+      const endedAtMs = Date.now();
+      setQueueState("not_started");
+      setSession(null);
+      setEndedSummary(null);
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.status === "held" || e.status === "waiting" || e.status === "called"
+            ? { ...e, status: "left" as const, leftAtMs: endedAtMs }
+            : e,
+        ),
+      );
     }
   }, [activeBranchId]);
 
   const startQueue = () => {
+    if (branches.length > 1 && !activeBranchId) {
+      toast.error("Select a branch to start its queue.");
+      return;
+    }
     void startLiveQueueSession({ branchId: activeBranchId }).then((result) => {
       if (!result.ok || !result.session) {
         toast.error(result.error ?? "Couldn't start the queue");
@@ -644,7 +735,7 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
       };
       setEntries((prev) =>
         prev.map((e) =>
-          e.status === "waiting" || e.status === "called"
+          e.status === "held" || e.status === "waiting" || e.status === "called"
             ? { ...e, status: "left" as const, leftAtMs: endedAtMs }
             : e,
         ),
@@ -653,7 +744,10 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
       setEndedSummary(summary);
       setQueueState("ended");
       setSheet(null);
-      archiveQueueSession(queueUrl, activeBranchId, summary);
+      archiveQueueSession(queueUrl, activeBranchId, {
+        ...summary,
+        sessionId: result.summary?.sessionId,
+      });
       toast.success("Queue ended — session archived");
     });
   };
@@ -673,7 +767,18 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     hydratedKeyRef.current = sessionKey;
     setHydrated(true);
     void fetchLiveQueueBoard({ branchId: activeBranchId }).then((board) => {
-      if (!board.ok || !board.session) return;
+      if (!board.ok) return;
+      if (!board.session) {
+        // Drop a stale localStorage "live"/"paused" when the server has no session
+        // (e.g. auto-close ended it while this tab was closed).
+        if (queueStateRef.current === "live" || queueStateRef.current === "paused") {
+          setQueueState("not_started");
+          setSession(null);
+          setEntries([]);
+          setEndedSummary(null);
+        }
+        return;
+      }
       setQueueState(board.session.status);
       setSession({
         number: board.session.number,
@@ -723,47 +828,39 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     lastSessionNumber,
   ]);
 
-  // Encode QR only when the sheet is open; reuse cache for the same queueUrl.
   useEffect(() => {
-    if (sheet !== "qr") return;
-    const cached = queueQrCache.get(queueUrl);
-    if (cached) {
-      setQrUrl(cached);
-      return;
-    }
-    let active = true;
-    QRCode.toDataURL(queueUrl, QR_ENCODE_OPTS)
-      .then((url) => {
-        queueQrCache.set(queueUrl, url);
-        if (active) setQrUrl(url);
-      })
-      .catch(() => {
-        if (active) setQrUrl(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [sheet, queueUrl]);
-
-  useEffect(() => {
-    const meta = getWaitEstimateMeta();
+    const activeBranch =
+      branches.find((b) => b.id === activeBranchId) ?? null;
+    ensureInitialEstimatedWaitMinutes(
+      activeBranchId,
+      activeBranch?.estimatedWaitMinutes,
+    );
+    const meta = getWaitEstimateMeta(activeBranchId);
     setMinsPerParty(meta.minutes);
     setWaitSource(meta.source);
     setWaitSamples(meta.samples);
     const onSettings = (event: Event) => {
       const detail = (
         event as CustomEvent<{
+          branchId?: string | null;
           estimatedWaitMinutes?: number;
           waitSource?: "initial" | "learned";
           waitSamples?: number;
         }>
       ).detail;
+      if (
+        detail?.branchId != null &&
+        activeBranchId != null &&
+        detail.branchId !== activeBranchId
+      ) {
+        return;
+      }
       if (detail?.estimatedWaitMinutes != null) {
         setMinsPerParty(detail.estimatedWaitMinutes);
         if (detail.waitSource) setWaitSource(detail.waitSource);
         if (detail.waitSamples != null) setWaitSamples(detail.waitSamples);
       } else {
-        const next = getWaitEstimateMeta();
+        const next = getWaitEstimateMeta(activeBranchId);
         setMinsPerParty(next.minutes);
         setWaitSource(next.source);
         setWaitSamples(next.samples);
@@ -771,17 +868,13 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     };
     window.addEventListener("froq:queue-settings", onSettings);
     return () => window.removeEventListener("froq:queue-settings", onSettings);
-  }, []);
+  }, [activeBranchId, branches]);
 
   // After reminder 3, keep status "called" until the merchant marks
   // Seated / Left / Skipped — never auto-resolve from the accept window.
 
   const called = useMemo(
     () => entries.filter((e) => e.status === "called"),
-    [entries],
-  );
-  const waiting = useMemo(
-    () => entries.filter((e) => e.status === "waiting"),
     [entries],
   );
   const seated = useMemo(
@@ -792,7 +885,6 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     () => entries.filter((e) => e.status === "left"),
     [entries],
   );
-  const servedCount = seated.length;
 
   const openSheet = (kind: SheetKind) => {
     if (kind === "guest" && !isLive) {
@@ -835,7 +927,12 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
       toast.error("Enter the guest's phone number");
       return;
     }
-    const estimatedWaitMinutes = (waiting.length + 1) * minsPerParty;
+    const lineCount = lineEntries(entries).length;
+    const estimatedWaitMinutes = computeEta({
+      partiesAhead: lineCount,
+      minutesPerParty: minsPerParty,
+      includeSelf: true,
+    });
     void addLiveQueueEntry({
       name: trimmed,
       phone,
@@ -909,14 +1006,16 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     });
   };
 
-  const callEntry = useCallback(
-    (entry: QueueEntry) => {
+  const completeCall = useCallback(
+    (entry: QueueEntry, tableId: string | null) => {
       if (callingRef.current.has(entry.id)) return;
       callingRef.current.add(entry.id);
+      setTablePick(null);
       void updateLiveQueueEntryStatus({
         entryId: entry.id,
         status: "called",
         branchId: activeBranchId,
+        tableId,
       })
         .then((result) => {
           if (!result.ok || !result.entry) {
@@ -926,11 +1025,17 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
           setEntries((prev) =>
             prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
           );
+          const tableBit =
+            result.entry.tableNumber != null
+              ? ` · Table ${result.entry.tableNumber}`
+              : "";
           if (result.error) {
-            toast.warning(`${entry.name} called · WhatsApp failed: ${result.error}`);
+            toast.warning(
+              `${entry.name} called${tableBit} · WhatsApp failed: ${result.error}`,
+            );
           } else {
             toast.success(
-              `${entry.name} has been called · ${acceptMinutes} min to arrive`,
+              `${entry.name} has been called${tableBit} · ${acceptMinutes} min to arrive`,
             );
           }
           void syncLiveBoard();
@@ -942,28 +1047,46 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     [activeBranchId, acceptMinutes, syncLiveBoard],
   );
 
+  const callEntry = useCallback(
+    (entry: QueueEntry) => {
+      if (callingRef.current.has(entry.id)) return;
+      if (hasTables && activeBranchId) {
+        setTablePick({ entry, purpose: "call" });
+        return;
+      }
+      completeCall(entry, null);
+    },
+    [hasTables, activeBranchId, completeCall],
+  );
+
   const callNext = useCallback(() => {
-    const nextWaiting = entries.find((e) => e.status === "waiting");
-    if (!nextWaiting) {
+    if (callingRef.current.has("__next__")) return;
+    const preview = nextCallableEntry(entries);
+    if (!preview) {
       toast("No one is waiting in the queue");
       return;
     }
-    callEntry(nextWaiting);
-  }, [entries, callEntry]);
+    if (hasTables && activeBranchId) {
+      setTablePick({ entry: preview, purpose: "call" });
+      return;
+    }
+    completeCall(preview, null);
+  }, [entries, hasTables, activeBranchId, completeCall]);
 
-  const markServed = useCallback(
-    (entry: QueueEntry) => {
+  const completeSeating = useCallback(
+    (entry: QueueEntry, tableId: string | null) => {
       if (pendingResolveRef.current) return;
       const pending = { entryId: entry.id, action: "seated" as const };
       pendingResolveRef.current = pending;
       setPendingResolve(pending);
+      setTablePick(null);
       const seatedAtMs = Date.now();
       const actualWait = Math.max(
         0,
         Math.round((seatedAtMs - entry.joinedAtMs) / 60_000),
       );
-      const learned = recordActualWaitMinutes(actualWait);
-      const meta = getWaitEstimateMeta();
+      const learned = recordActualWaitMinutes(actualWait, activeBranchId);
+      const meta = getWaitEstimateMeta(activeBranchId);
       setMinsPerParty(learned);
       setWaitSource(meta.source);
       setWaitSamples(meta.samples);
@@ -971,6 +1094,7 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
         entryId: entry.id,
         status: "seated",
         branchId: activeBranchId,
+        tableId: tableId ?? entry.diningTableId ?? null,
       })
         .then((result) => {
           if (!result.ok || !result.entry) {
@@ -980,13 +1104,17 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
           setEntries((prev) =>
             prev.map((e) => (e.id === result.entry!.id ? result.entry! : e)),
           );
+          const tableBit =
+            result.entry.tableNumber != null
+              ? ` · Table ${result.entry.tableNumber}`
+              : "";
           if (result.error) {
             toast.warning(
-              `${entry.name} seated · WhatsApp failed: ${result.error}`,
+              `${entry.name} seated${tableBit} · WhatsApp failed: ${result.error}`,
             );
           } else {
             toast.success(
-              `${entry.name} marked as seated · wait was ${formatWaitShort(actualWait)}`,
+              `${entry.name} marked as seated${tableBit} · wait was ${formatWaitShort(actualWait)}`,
             );
           }
           void syncLiveBoard();
@@ -1000,6 +1128,39 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
     },
     [activeBranchId, syncLiveBoard],
   );
+
+  const markServed = useCallback(
+    (entry: QueueEntry) => {
+      if (pendingResolveRef.current) return;
+      // Already assigned at call time — seat without asking again.
+      if (entry.diningTableId) {
+        completeSeating(entry, entry.diningTableId);
+        return;
+      }
+      if (hasTables && activeBranchId) {
+        setTablePick({ entry, purpose: "seat" });
+        return;
+      }
+      completeSeating(entry, null);
+    },
+    [hasTables, activeBranchId, completeSeating],
+  );
+
+  // Discover whether this branch has a table inventory (gates the seat sheet).
+  useEffect(() => {
+    if (!activeBranchId) {
+      setHasTables(false);
+      return;
+    }
+    let cancelled = false;
+    void listBranchDiningTables({ branchId: activeBranchId }).then((result) => {
+      if (cancelled) return;
+      setHasTables(result.ok && result.tables.length > 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBranchId]);
 
   const markLeft = useCallback(
     (entry: QueueEntry) => {
@@ -1038,41 +1199,27 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
   );
 
   const avgPerTable = minsPerParty;
-  const currentWait = waiting.length * avgPerTable;
-
-  const copyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(queueUrl);
-      toast.success("Queue link copied");
-    } catch {
-      toast.error("Couldn't copy the link");
-    }
-  };
-
-  const downloadQr = () => {
-    if (!qrUrl) return;
-    const link = document.createElement("a");
-    link.href = qrUrl;
-    link.download = "queue-qr.png";
-    link.click();
-  };
+  const lineCount = useMemo(() => lineEntries(entries).length, [entries]);
+  const currentWait = computeEta({
+    partiesAhead: Math.max(0, lineCount - called.length),
+    minutesPerParty: avgPerTable,
+    includeSelf: false,
+  });
 
   const actionsBusy = Boolean(pendingResolve);
 
-  // Waiting filter shows called guests first, then the rest of the line.
-  const waitingList = useMemo(() => [...called, ...waiting], [called, waiting]);
-
-  const filters = useMemo(
-    (): Array<{ id: QueueListFilter; label: string; count: number }> => [
-      { id: "waiting", label: "Waiting", count: waitingList.length },
-      { id: "seated", label: "Seated", count: seated.length },
-      { id: "left", label: "Left", count: left.length },
-    ],
-    [waitingList.length, seated.length, left.length],
-  );
+  // Active line: held + waiting + called, ordered by effective service time.
+  // Token # on cards is index+1 in this list (= live place in line).
+  // Called guests stay in this one list rather than a tab of their own — they
+  // are still the front of the line, and their card already stands out.
+  const waitingList = useMemo(() => lineEntries(entries), [entries]);
 
   const filteredByTab =
-    listFilter === "waiting" ? waitingList : listFilter === "seated" ? seated : left;
+    listFilter === "waiting"
+      ? waitingList
+      : listFilter === "seated"
+        ? seated
+        : left;
 
   const activeList = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -1089,10 +1236,93 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
   const emptyCopy = searching
     ? "No guests match that search."
     : listFilter === "waiting"
-      ? "The line is empty."
+      ? "No one is in line right now."
       : listFilter === "seated"
         ? "No seated guests yet."
         : "No guests have left.";
+
+  const hero =
+    queueState === "live"
+      ? {
+          label: "Live queue",
+          value: "Live",
+          meta: session
+            ? `Session #${session.number} · ~${formatWaitShort(currentWait)} wait · ${lineCount} in line`
+            : `~${formatWaitShort(currentWait)} wait · ${lineCount} in line`,
+          badge: "Live",
+          badgeClass: "live" as const,
+          tone: "open" as const,
+        }
+      : queueState === "paused"
+        ? {
+            label: "Live queue",
+            value: "Paused",
+            meta: "New guests can't join — existing guests can still be called",
+            badge: "Paused",
+            badgeClass: "paused" as const,
+            tone: "paused" as const,
+          }
+        : queueState === "ended"
+          ? {
+              label: "Live queue",
+              value: "Closed",
+              meta: endedSummary
+                ? `Session #${endedSummary.number} · ${endedSummary.served} seated · ${endedSummary.left} left`
+                : "Start a new session whenever you're ready",
+              badge: "Closed",
+              badgeClass: "ended" as const,
+              tone: "closed" as const,
+            }
+          : {
+              label: "Live queue",
+              value: "Not started",
+              meta: "Open the line to accept walk-ins and seat guests",
+              badge: "Idle",
+              badgeClass: "idle" as const,
+              tone: "closed" as const,
+            };
+
+  const pulse = [
+    {
+      id: "waiting",
+      label: "In line",
+      value: waitingList.length,
+      active: listFilter === "waiting",
+      accent: waitingList.length > 0 && isLive,
+    },
+    {
+      id: "seated",
+      label: "Seated",
+      value: seated.length,
+      active: listFilter === "seated",
+    },
+    {
+      id: "left",
+      label: "Left",
+      value: left.length,
+      active: listFilter === "left",
+    },
+  ];
+
+  const boardFilters = useMemo(
+    () => [
+      { id: "waiting" as const, label: "In line", count: waitingList.length },
+      { id: "seated" as const, label: "Seated", count: seated.length },
+      { id: "left" as const, label: "Left", count: left.length },
+    ],
+    [waitingList.length, seated.length, left.length],
+  );
+
+  const selectedEntry =
+    entries.find((entry) => entry.id === selectedEntryId) ?? null;
+
+  const openGuest = useCallback((entry: QueueEntry) => {
+    setSelectedEntryId(entry.id);
+  }, []);
+
+  const closeGuest = useCallback(() => {
+    setSelectedEntryId(null);
+  }, []);
 
   // Session state lives in localStorage, so rendering before hydration would
   // flash "Queue hasn't started yet" over a queue that is actually running.
@@ -1100,26 +1330,22 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
 
   return (
     <>
-      <div className="tab-screen queue-home merchant-dashboard">
+      <div className="tab-screen queue-home merchant-dashboard resv-home">
         <div className="tab-head queue-live-head merchant-dashboard-head">
           <div className="queue-live-copy">
-            <div className="queue-live-titlerow">
-              <h2 className="tab-title">Live queue</h2>
-              <span
-                className={`queue-state-badge queue-state-badge--${STATE_META[queueState].cls}`}
-              >
-                <span className="queue-state-dot" aria-hidden="true" />
-                {STATE_META[queueState].label}
-              </span>
-            </div>
+            <h2 className="tab-title">Queue</h2>
             <p className="tab-sub">
               {session && showDashboard
                 ? `Session #${session.number} · Started ${formatClock(session.startedAtMs)}${
                     startedByLabel(session) ? ` by ${startedByLabel(session)}` : ""
                   }`
-                : queueState === "ended" && endedSummary
-                  ? `Session #${endedSummary.number} · Archived`
-                  : "Add walk-ins and call guests when their table is ready"}
+                : queueState === "ended"
+                  ? "Start a new session whenever you're ready for guests"
+                  : called.length > 0
+                    ? `${called.length} guest${called.length === 1 ? "" : "s"} called — waiting to seat`
+                    : waitingList.length > 0
+                      ? `${waitingList.length} in line · ~${formatWaitShort(currentWait)} wait`
+                      : "Add walk-ins and call guests when their table is ready"}
             </p>
           </div>
           <div className="queue-session-actions">
@@ -1186,222 +1412,171 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
           </div>
         </div>
 
-        {queueState === "not_started" && (
-          <section className="merchant-section queue-state-fade">
-            <div className="panel-card queue-empty-card">
-              <span className="queue-empty-icon">
-                <Play size={26} strokeWidth={2.4} />
-              </span>
-              <h3 className="queue-empty-title">Queue hasn&apos;t started yet</h3>
-              <p className="queue-empty-sub">
-                Start a new queue session to begin accepting guests.
-              </p>
-              <button
-                type="button"
-                className="cta-btn merchant-cta-accent queue-empty-cta"
-                onClick={startQueue}
-              >
-                <Play size={17} strokeWidth={2.5} />
-                Start queue
-              </button>
-            </div>
-          </section>
-        )}
+        <QueueStatusHero
+          {...hero}
+          pulse={pulse}
+          onPulseSelect={(id) => {
+            if (id === "waiting" || id === "seated" || id === "left") {
+              setListFilter(id);
+            }
+          }}
+        />
 
         {queueState === "ended" && endedSummary && (
           <section className="merchant-section queue-state-fade">
-            <div className="panel-card queue-summary-card">
-              <div className="queue-summary-head">
-                <span className="queue-summary-eyebrow">Today&apos;s queue completed</span>
-                <span className="queue-summary-session">Session #{endedSummary.number}</span>
-              </div>
-              {startedByLabel(endedSummary) ? (
-                <p className="queue-summary-actor">
-                  Started by {startedByLabel(endedSummary)}
-                </p>
-              ) : null}
-              <div className="queue-summary-times">
-                <div className="queue-summary-time">
-                  <span className="queue-summary-time-label">Started</span>
-                  <span className="queue-summary-time-value">
-                    {formatClock(endedSummary.startedAtMs)}
-                  </span>
-                </div>
-                <div className="queue-summary-time">
-                  <span className="queue-summary-time-label">Ended</span>
-                  <span className="queue-summary-time-value">
-                    {formatClock(endedSummary.endedAtMs)}
-                  </span>
-                </div>
-              </div>
-              <div className="queue-summary-divider" />
-              <div className="queue-summary-stats">
-                <div className="queue-summary-stat">
-                  <span className="queue-summary-stat-value">{endedSummary.served}</span>
-                  <span className="queue-summary-stat-label">Guests served</span>
-                </div>
-                <div className="queue-summary-stat">
-                  <span className="queue-summary-stat-value">{endedSummary.left}</span>
-                  <span className="queue-summary-stat-label">Guests left</span>
-                </div>
-                <div className="queue-summary-stat">
-                  <span className="queue-summary-stat-value">
-                    {waitSegments(endedSummary.avgWait).map((part) => (
-                      <Fragment key={part.unit}>
-                        {part.value}
-                        <span className="queue-summary-stat-unit">{part.unit}</span>
-                      </Fragment>
-                    ))}
-                  </span>
-                  <span className="queue-summary-stat-label">Average wait</span>
-                </div>
-                <div className="queue-summary-stat">
-                  <span className="queue-summary-stat-value">
-                    {waitSegments(endedSummary.longestWait).map((part) => (
-                      <Fragment key={part.unit}>
-                        {part.value}
-                        <span className="queue-summary-stat-unit">{part.unit}</span>
-                      </Fragment>
-                    ))}
-                  </span>
-                  <span className="queue-summary-stat-label">Longest wait</span>
-                </div>
-              </div>
-              <div className="queue-summary-divider" />
-              <button
-                type="button"
-                className="cta-btn merchant-cta-accent queue-summary-cta"
-                onClick={startQueue}
-              >
-                <Play size={17} strokeWidth={2.5} />
-                Start new queue
-              </button>
+            <div className="merchant-section-head">
+              <h3 className="merchant-section-label">Last session</h3>
             </div>
+            {/* Same card as History → Sessions. Matching its look without
+                matching its behaviour would be a trap, so this opens the same
+                sheet: guests, per-guest timelines and delete. */}
+            <button
+              type="button"
+              className="panel-card qhist-card qhist-card--clickable"
+              onClick={() => setRecapOpen(true)}
+            >
+              <div className="qhist-card-head">
+                <div className="qhist-card-copy">
+                  <div className="qhist-card-title">
+                    Session #{endedSummary.number}
+                    <ChevronRight
+                      size={16}
+                      strokeWidth={2.4}
+                      className="qhist-card-chevron"
+                    />
+                  </div>
+                  <div className="qhist-card-meta">
+                    <span className="qhist-card-sub">
+                      {sessionWindow(
+                        endedSummary.startedAtMs,
+                        endedSummary.endedAtMs,
+                      ).join(" · ")}
+                    </span>
+                    <ActorChip
+                      name={endedSummary.startedByName}
+                      role={endedSummary.startedByRole}
+                      prefix="Started by"
+                    />
+                  </div>
+                </div>
+                {noGuests ? (
+                  <span className="qhist-served-pill qhist-served-pill--none">
+                    No guests joined
+                  </span>
+                ) : (
+                  <span className="qhist-served-pill">
+                    {endedSummary.served} served
+                  </span>
+                )}
+              </div>
+
+              {/* A row of zeroes reads as broken; the pill already said it. */}
+              {noGuests ? null : (
+                <div className="qhist-stats">
+                  <div className="qhist-stat">
+                    <span className="qhist-stat-value">{endedSummary.served}</span>
+                    <span className="qhist-stat-label">Served</span>
+                  </div>
+                  <div className="qhist-stat">
+                    <span className="qhist-stat-value">{endedSummary.left}</span>
+                    <span className="qhist-stat-label">Left</span>
+                  </div>
+                  <div className="qhist-stat">
+                    <span className="qhist-stat-value">
+                      {waitSegments(endedSummary.avgWait).map((part) => (
+                        <Fragment key={part.unit}>
+                          {part.value}
+                          <span className="qhist-stat-unit">{part.unit}</span>
+                        </Fragment>
+                      ))}
+                    </span>
+                    <span className="qhist-stat-label">Avg wait</span>
+                  </div>
+                  <div className="qhist-stat">
+                    <span className="qhist-stat-value">
+                      {waitSegments(endedSummary.longestWait).map((part) => (
+                        <Fragment key={part.unit}>
+                          {part.value}
+                          <span className="qhist-stat-unit">{part.unit}</span>
+                        </Fragment>
+                      ))}
+                    </span>
+                    <span className="qhist-stat-label">Longest</span>
+                  </div>
+                </div>
+              )}
+            </button>
           </section>
-        )}
-
-        {showDashboard && (
-          <div className="queue-state-fade">
-            {isPaused && (
-              <div className="queue-paused-banner">
-                <span className="queue-paused-icon">
-                  <Pause size={18} strokeWidth={2.4} />
-                </span>
-                <div className="queue-paused-copy">
-                  <strong>Queue is paused</strong>
-                  <p>New guests can&apos;t join. Existing guests can still be called and seated.</p>
-                </div>
-              </div>
-            )}
-
-            <section className="merchant-section">
-              <div className="merchant-section-head">
-                <h3 className="merchant-section-label">Wait time</h3>
-                <span className="merchant-section-meta">{waiting.length} in line</span>
-              </div>
-              <div className="merchant-ltv-card queue-wait-card">
-                <div className="merchant-ltv-head">
-                  <span className="merchant-ltv-eyebrow">Current wait</span>
-                </div>
-                <div className="merchant-ltv-value queue-wait-value">
-                  {waitSegments(currentWait).map((part) => (
-                    <Fragment key={part.unit}>
-                      {part.value}
-                      <span className="queue-wait-unit">{part.unit}</span>
-                    </Fragment>
-                  ))}
-                </div>
-                <p className="queue-wait-sub">
-                  {waiting.length} {waiting.length === 1 ? "party" : "parties"} in line ·{" "}
-                  {formatWaitShort(avgPerTable)} per party
-                  {waitSource === "learned"
-                    ? ` · learned from ${waitSamples} seating${waitSamples === 1 ? "" : "s"}`
-                    : " · your estimate"}
-                </p>
-                <div className="merchant-ltv-metrics queue-wait-tiles">
-                  <div className="merchant-ltv-tile queue-wait-tile">
-                    <span className="merchant-ltv-tile-value">{waiting.length}</span>
-                    <span className="merchant-ltv-tile-label">In line</span>
-                  </div>
-                  <div className="merchant-ltv-tile queue-wait-tile">
-                    <span className="merchant-ltv-tile-value">{called.length}</span>
-                    <span className="merchant-ltv-tile-label">Called</span>
-                  </div>
-                  <div className="merchant-ltv-tile queue-wait-tile">
-                    <span className="merchant-ltv-tile-value">{servedCount}</span>
-                    <span className="merchant-ltv-tile-label">Seated</span>
-                  </div>
-                  <div className="merchant-ltv-tile queue-wait-tile">
-                    <span className="merchant-ltv-tile-value">{left.length}</span>
-                    <span className="merchant-ltv-tile-label">Left</span>
-                  </div>
-                </div>
-              </div>
-            </section>
-          </div>
         )}
 
         <section className="merchant-section">
           <div className="merchant-section-head">
             <h3 className="merchant-section-label">Quick actions</h3>
           </div>
-          <div className="queue-actions">
-            {queueState === "not_started" || queueState === "ended" ? (
-              <button type="button" className="queue-action" onClick={startQueue}>
-                <span className="queue-action-icon queue-action-icon--accent">
-                  <Play size={18} strokeWidth={2.2} />
-                </span>
-                {queueState === "ended" ? "Start new queue" : "Start queue"}
-              </button>
-            ) : (
+          <div className="merchant-quick-actions merchant-quick-actions--all">
+            <button
+              type="button"
+              className="queue-action"
+              onClick={() => onShowQr("queue")}
+              disabled={isPaused}
+            >
+              <span className="queue-action-icon queue-action-icon--accent">
+                <QrCode size={18} strokeWidth={2.2} />
+              </span>
+              Show QR
+            </button>
+
+            {showDashboard ? (
               <button
                 type="button"
                 className="queue-action"
                 onClick={() => openSheet("guest")}
                 disabled={!isLive}
               >
-                <span className="queue-action-icon queue-action-icon--accent">
+                <span className="queue-action-icon">
                   <UserPlus size={18} strokeWidth={2.2} />
                 </span>
                 Add guest
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={`queue-action${reservationsEnabled ? "" : " is-locked"}`}
+                aria-label={
+                  reservationsEnabled
+                    ? "Add reservation"
+                    : "Add reservation — unlock Reservations"
+                }
+                onClick={() => {
+                  if (!reservationsEnabled) {
+                    onPurchaseProduct("reservation");
+                    return;
+                  }
+                  openSheet("reservation");
+                }}
+              >
+                {!reservationsEnabled ? (
+                  <span className="queue-action-lock" aria-hidden>
+                    <Lock size={11} strokeWidth={2.4} />
+                  </span>
+                ) : null}
+                <span className="queue-action-icon">
+                  <CalendarPlus size={18} strokeWidth={2.2} />
+                </span>
+                Add reservation
               </button>
             )}
 
             <button
               type="button"
               className="queue-action"
-              onClick={() => openSheet("reservation")}
+              onClick={() => onViewHistory?.()}
             >
               <span className="queue-action-icon">
-                <CalendarPlus size={18} strokeWidth={2.2} />
+                <History size={18} strokeWidth={2.2} />
               </span>
-              Add reservation
+              History
             </button>
-
-            {queueState === "ended" ? (
-              <button
-                type="button"
-                className="queue-action"
-                onClick={() => onViewHistory?.()}
-              >
-                <span className="queue-action-icon">
-                  <BarChart3 size={18} strokeWidth={2.2} />
-                </span>
-                View history
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="queue-action"
-                onClick={() => openSheet("qr")}
-                disabled={isPaused}
-              >
-                <span className="queue-action-icon">
-                  <QrCode size={18} strokeWidth={2.2} />
-                </span>
-                Show QR
-              </button>
-            )}
           </div>
         </section>
 
@@ -1410,13 +1585,13 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
             <section className="merchant-section">
               <div className="merchant-section-head">
                 <h3 className="merchant-section-label">Now serving</h3>
-                <span className="merchant-section-meta">{waiting.length} waiting</span>
+                <span className="merchant-section-meta">{lineCount} in line</span>
               </div>
               <button
                 type="button"
                 className="queue-call-next"
                 onClick={callNext}
-                disabled={waiting.length === 0}
+                disabled={!nextCallableEntry(entries)}
               >
                 <Megaphone size={20} strokeWidth={2.3} />
                 Call next customer
@@ -1454,7 +1629,7 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
                 </label>
 
                 <div className="queue-tabs" role="tablist" aria-label="Queue filters">
-                  {filters.map(({ id, label, count }) => (
+                  {boardFilters.map(({ id, label, count }) => (
                     <button
                       key={id}
                       type="button"
@@ -1477,7 +1652,11 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
                       <QueueEntryCard
                         key={entry.id}
                         entry={entry}
-                        token={i + 1}
+                        token={
+                          listFilter === "waiting"
+                            ? waitingList.findIndex((e) => e.id === entry.id) + 1 || i + 1
+                            : i + 1
+                        }
                         pendingSeating={
                           pendingResolve?.entryId === entry.id &&
                           pendingResolve.action === "seated"
@@ -1487,6 +1666,7 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
                           pendingResolve.action === "left"
                         }
                         actionsBusy={actionsBusy}
+                        onOpen={openGuest}
                         onCall={callEntry}
                         onSeated={markServed}
                         onLeft={markLeft}
@@ -1532,9 +1712,10 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
               <input
                 className="auth-input"
                 type="tel"
+                inputMode="numeric"
                 placeholder="10-digit mobile"
                 value={guestPhone}
-                onChange={(e) => setGuestPhone(e.target.value)}
+                onChange={(e) => setGuestPhone(nationalMobileInputDigits(e.target.value))}
                 required
               />
             </label>
@@ -1620,7 +1801,8 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
                 type="tel"
                 placeholder="10-digit mobile"
                 value={resPhone}
-                onChange={(e) => setResPhone(e.target.value)}
+                onChange={(e) => setResPhone(nationalMobileInputDigits(e.target.value))}
+                inputMode="numeric"
               />
             </label>
 
@@ -1671,43 +1853,104 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
       </BottomSheet>
 
       <BottomSheet
-        open={sheet === "qr"}
-        onClose={closeSheet}
-        labelledBy="queue-qr-title"
+        open={Boolean(selectedEntry)}
+        onClose={closeGuest}
+        labelledBy="queue-guest-detail-title"
         className="merchant-theme"
       >
-        <div className="queue-sheet queue-sheet-qr">
-          <div className="queue-sheet-head">
-            <h3 id="queue-qr-title" className="queue-sheet-title">
-              Queue QR
-            </h3>
-            <p className="queue-sheet-sub">
-              Guests scan this to join {profile.businessName}&apos;s live queue
-            </p>
-          </div>
+        {selectedEntry ? (
+          <div className="queue-sheet queue-guest-detail">
+            <div className="queue-sheet-head qcust-head">
+              <div className="merchant-avatar">
+                {initials(selectedEntry.name)}
+              </div>
+              <div className="qcust-head-copy">
+                <h3 id="queue-guest-detail-title" className="qcust-head-name">
+                  {selectedEntry.name}
+                </h3>
+                <p className="qcust-head-meta">
+                  <span>{guestStatusLabel(selectedEntry.status)}</span>
+                  <span>{partyLabel(selectedEntry.partySize)}</span>
+                  {selectedEntry.tableNumber != null ? (
+                    <span>Table {selectedEntry.tableNumber}</span>
+                  ) : null}
+                </p>
+              </div>
+            </div>
 
-          <div className="merchant-qr-frame queue-qr">
-            {qrUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img className="merchant-qr-img" src={qrUrl} alt="Queue join QR code" width={200} height={200} />
-            ) : (
-              <div className="merchant-qr-skeleton" aria-hidden="true" />
-            )}
-          </div>
+            <div className="qcust-contact">
+              {selectedEntry.phone ? (
+                <a
+                  className="qcust-contact-row"
+                  href={`tel:${selectedEntry.phone.replace(/[^\d+]/g, "")}`}
+                >
+                  <span className="qcust-contact-icon" aria-hidden="true">
+                    <Phone size={16} strokeWidth={2.2} />
+                  </span>
+                  <span className="qcust-contact-copy">
+                    <span className="qcust-contact-label">Phone</span>
+                    <span className="qcust-contact-value">{selectedEntry.phone}</span>
+                  </span>
+                </a>
+              ) : (
+                <div className="qcust-contact-row is-empty">
+                  <span className="qcust-contact-icon" aria-hidden="true">
+                    <Phone size={16} strokeWidth={2.2} />
+                  </span>
+                  <span className="qcust-contact-copy">
+                    <span className="qcust-contact-label">Phone</span>
+                    <span className="qcust-contact-value">Not provided</span>
+                  </span>
+                </div>
+              )}
+            </div>
 
-          <div className="queue-sheet-url">{queueUrl}</div>
-
-          <div className="queue-sheet-actions">
-            <button type="button" className="queue-share-btn" onClick={copyLink}>
-              <Copy size={15} strokeWidth={2.2} />
-              Copy link
-            </button>
-            <button type="button" className="queue-share-btn" onClick={downloadQr} disabled={!qrUrl}>
-              <Download size={15} strokeWidth={2.2} />
-              Download QR
-            </button>
+            {selectedEntry.status !== "seated" &&
+            selectedEntry.status !== "left" ? (
+              <div className="queue-entry-actions queue-guest-detail-actions">
+                {selectedEntry.status === "called" ? (
+                  <button
+                    type="button"
+                    className="queue-act queue-act--served"
+                    disabled={actionsBusy}
+                    onClick={() => {
+                      markServed(selectedEntry);
+                      closeGuest();
+                    }}
+                  >
+                    <Check size={14} strokeWidth={2.3} />
+                    Seated
+                  </button>
+                ) : selectedEntry.status !== "held" ? (
+                  <button
+                    type="button"
+                    className="queue-act queue-act--call"
+                    disabled={actionsBusy}
+                    onClick={() => {
+                      callEntry(selectedEntry);
+                      closeGuest();
+                    }}
+                  >
+                    <Megaphone size={14} strokeWidth={2.3} />
+                    Call
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="queue-act queue-act--left"
+                  disabled={actionsBusy}
+                  onClick={() => {
+                    markLeft(selectedEntry);
+                    closeGuest();
+                  }}
+                >
+                  <X size={14} strokeWidth={2.3} />
+                  {selectedEntry.status === "held" ? "No show" : "Left"}
+                </button>
+              </div>
+            ) : null}
           </div>
-        </div>
+        ) : null}
       </BottomSheet>
 
       <BottomSheet
@@ -1756,6 +1999,43 @@ export function QueueHomeScreen({ profile, onViewHistory }: QueueHomeScreenProps
           </div>
         </div>
       </BottomSheet>
+
+      <QueueSessionHistorySheet
+        session={recapOpen ? endedRecord : null}
+        branchId={activeBranchId}
+        role={role}
+        onClose={() => setRecapOpen(false)}
+        onDeleted={(deleted) => {
+          removeQueueSessionRecord(queueUrl, activeBranchId, deleted);
+          setRecapOpen(false);
+          // The card is gone, but the queue is still closed — the header keeps
+          // offering Start, so the screen stays coherent with no recap.
+          setEndedSummary(null);
+        }}
+      />
+
+      <SeatAtTableSheet
+        open={Boolean(tablePick)}
+        branchId={activeBranchId}
+        partySize={tablePick?.entry.partySize ?? 1}
+        guestName={tablePick?.entry.name ?? "guest"}
+        purpose={tablePick?.purpose ?? "seat"}
+        ignoreQueueEntryId={tablePick?.entry.id}
+        busy={
+          tablePick?.purpose === "seat"
+            ? pendingResolve?.action === "seated"
+            : Boolean(tablePick && callingRef.current.has(tablePick.entry.id))
+        }
+        onClose={() => setTablePick(null)}
+        onConfirm={(tableId) => {
+          if (!tablePick) return;
+          if (tablePick.purpose === "call") {
+            completeCall(tablePick.entry, tableId);
+            return;
+          }
+          completeSeating(tablePick.entry, tableId);
+        }}
+      />
     </>
   );
 }

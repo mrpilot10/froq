@@ -83,7 +83,9 @@ export async function deliverQueueCallNow(input: {
     .eq("status", "called")
     .eq("called_at", input.calledAt)
     .is("called_notified_at", null)
-    .or(`call_notify_processing_at.is.null,call_notify_processing_at.lt.${staleBefore}`)
+    .or(
+      `call_notify_processing_at.is.null,call_notify_processing_at.lt."${staleBefore}"`,
+    )
     .select("id")
     .maybeSingle();
 
@@ -237,7 +239,7 @@ export async function catchUpUndeliveredQueueCalls(
 
     const { data: customer } = await admin
       .from("customers")
-      .select("name, phone, public_token, whatsapp_available, preferred_notification_channel")
+      .select("name, phone, email, public_token, whatsapp_available, preferred_notification_channel")
       .eq("id", job.customer_id)
       .maybeSingle();
 
@@ -263,6 +265,7 @@ export async function catchUpUndeliveredQueueCalls(
         // The job carries the name given when this guest joined; `customers.name`
         // can belong to an earlier visitor on the same number.
         name: job.customer_name?.trim() || customer.name,
+        email: (customer.email as string | null) ?? null,
         publicToken: customer.public_token,
         whatsappAvailable: customer.whatsapp_available === true,
         preferredNotificationChannel:

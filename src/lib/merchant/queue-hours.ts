@@ -1,4 +1,4 @@
-/** Store hours + auto session flag for Queue Management. */
+/** Store hours + independent auto-start / auto-close flags for Queue Management. */
 
 /** Fixed timezone for queue open/close (IST). */
 export const QUEUE_HOURS_TIMEZONE = "Asia/Kolkata";
@@ -19,15 +19,18 @@ export interface QueueStoreHours {
   closeTime: string;
   /** Days the store is open for queue (0=Sun … 6=Sat). */
   openDays: number[];
-  /** When on, auto-start at open and auto-close at close (recommended). */
-  autoSessions: boolean;
+  /** When on, create a live session once business hours begin (if none exists). */
+  autoStart: boolean;
+  /** When on, end the live session after closing time / on closed days. */
+  autoClose: boolean;
 }
 
 export const DEFAULT_QUEUE_STORE_HOURS: QueueStoreHours = {
   openTime: "10:00",
   closeTime: "22:00",
   openDays: [0, 1, 2, 3, 4, 5, 6],
-  autoSessions: true,
+  autoStart: true,
+  autoClose: true,
 };
 
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -48,6 +51,21 @@ export function formatTimeForInput(value: string | null | undefined): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
+/**
+ * True when open/close times and openDays are usable for automation.
+ * Invalid / empty config → fail open (caller must never auto-close).
+ */
+export function areQueueHoursUsable(
+  openTime: string,
+  closeTime: string,
+  openDays: number[],
+): boolean {
+  if (!normalizeTimeInput(openTime) || !normalizeTimeInput(closeTime)) return false;
+  if (openTime === closeTime) return false;
+  const days = openDays.map(Number).filter((d) => Number.isFinite(d) && d >= 0 && d <= 6);
+  return days.length > 0;
+}
+
 export function minutesFromMidnight(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
   return h * 60 + m;
@@ -62,7 +80,10 @@ export function formatHoursSummary(hours: QueueStoreHours): string {
         : QUEUE_WEEKDAYS.filter((d) => hours.openDays.includes(d.day))
             .map((d) => d.short)
             .join("·");
-  const auto = hours.autoSessions ? " · auto sessions" : "";
+  const autos: string[] = [];
+  if (hours.autoStart) autos.push("auto start");
+  if (hours.autoClose) autos.push("auto close");
+  const auto = autos.length ? ` · ${autos.join(" · ")}` : "";
   return `${days} · ${hours.openTime}–${hours.closeTime}${auto}`;
 }
 
@@ -127,14 +148,15 @@ export function isWithinOpenWindow(
   closeTime: string,
   openDays: number[],
 ): boolean {
-  if (!openDays.includes(clock.day)) {
+  const days = openDays.map(Number);
+  if (!days.includes(clock.day)) {
     // Overnight: still "open" after midnight on a day that isn't listed if
     // yesterday was an open day and close is after midnight.
     const openMin = minutesFromMidnight(openTime);
     const closeMin = minutesFromMidnight(closeTime);
     if (openMin < closeMin) return false;
     const yesterday = (clock.day + 6) % 7;
-    if (!openDays.includes(yesterday)) return false;
+    if (!days.includes(yesterday)) return false;
     return clock.minutes < closeMin;
   }
 
@@ -147,8 +169,47 @@ export function isWithinOpenWindow(
   return clock.minutes >= openMin || clock.minutes < closeMin;
 }
 
-/** Minutes since today's open time (0 at open). */
-export function minutesSinceOpen(clock: ZonedClock, openTime: string): number {
+/**
+ * Auto-close means "business has actually closed", not "outside open window".
+ * Pre-open manual starts (e.g. 9:30 when open is 10:00) must stay live; only
+ * post-close / closed-day leftovers should be ended.
+ */
+export function shouldAutoCloseSessions(
+  clock: ZonedClock,
+  openTime: string,
+  closeTime: string,
+  openDays: number[],
+): boolean {
+  if (!areQueueHoursUsable(openTime, closeTime, openDays)) return false;
+  if (isWithinOpenWindow(clock, openTime, closeTime, openDays)) return false;
+
+  const days = openDays.map(Number);
   const openMin = minutesFromMidnight(openTime);
-  return clock.minutes - openMin;
+  const closeMin = minutesFromMidnight(closeTime);
+
+  if (openMin < closeMin) {
+    // Same-day hours (e.g. 10:00–22:00).
+    if (!days.includes(clock.day)) return true; // closed calendar day
+    // Post-close only — not the pre-open gap before openMin.
+    return clock.minutes >= closeMin;
+  }
+
+  // Overnight hours (e.g. 18:00–02:00).
+  if (!days.includes(clock.day)) return true; // closed calendar day
+
+  // Daytime closed gap [closeMin, openMin): first half = after close → end;
+  // second half = before next open → leave manual early starts alone.
+  const mid = Math.floor((closeMin + openMin) / 2);
+  return clock.minutes < mid;
+}
+
+/** True when Auto Start may create a session (within open window only). */
+export function shouldAutoStartSessions(
+  clock: ZonedClock,
+  openTime: string,
+  closeTime: string,
+  openDays: number[],
+): boolean {
+  if (!areQueueHoursUsable(openTime, closeTime, openDays)) return false;
+  return isWithinOpenWindow(clock, openTime, closeTime, openDays);
 }

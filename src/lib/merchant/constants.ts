@@ -1,3 +1,4 @@
+import { DEFAULT_MENU_TAX_RATES } from "@/lib/menu/tax";
 import type {
   MerchantCustomer,
   MerchantProduct,
@@ -50,8 +51,16 @@ export const MERCHANT_PROFILE: MerchantProfile = {
   reservationAllowNotes: true,
   reservationAutoDeclineHours: 0,
   reservationWhatsappEnabled: true,
+  reservationGraceMinutes: 15,
+  reservationAutoAssignTables: true,
   reservationPaused: false,
+  menuTableOrdering: true,
+  menuServerNotify: true,
+  menuShowLoyaltyStamps: true,
   queueAiMenuEnabled: true,
+  menuCgstPercent: DEFAULT_MENU_TAX_RATES.cgstPercent,
+  menuSgstPercent: DEFAULT_MENU_TAX_RATES.sgstPercent,
+  menuServiceChargePercent: DEFAULT_MENU_TAX_RATES.serviceChargePercent,
 };
 
 export const MERCHANT_STATS: MerchantStats = {
@@ -176,16 +185,17 @@ export interface MerchantPlan {
 
 export const MERCHANT_PLANS: Record<MerchantProduct, MerchantPlan> = {
   loyalty: {
-    name: "Growth",
-    price: "₹1,499",
+    name: "Starter",
+    price: "₹299",
     cycle: "/mo",
     status: "Active",
     enabled: true,
-    renewsOn: "Jul 19, 2026",
+    renewsOn: "",
     features: [
-      "Unlimited loyalty members",
-      "Real-time approvals & QR scanner",
-      "Visit and reward insights",
+      "1 Branch",
+      "Up to 500 Customers",
+      "Unlimited Loyalty Cards",
+      "WhatsApp Notifications",
     ],
   },
   queue: {
@@ -203,15 +213,27 @@ export const MERCHANT_PLANS: Record<MerchantProduct, MerchantPlan> = {
   },
   reservation: {
     name: "Growth",
-    price: "₹999",
+    price: "₹699",
     cycle: "/mo",
     status: "Not enabled",
     enabled: false,
     renewsOn: "",
     features: [
       "3 Branches",
-      "Unlimited Booking Requests",
+      "2,000 Reservations / Month",
       "WhatsApp Confirmations & Reminders",
+    ],
+  },
+  menu: {
+    name: "Growth",
+    price: "₹1,299",
+    cycle: "/mo",
+    status: "Not enabled",
+    enabled: false,
+    renewsOn: "",
+    features: [
+      "3 Branches",
+      "20,000 AI Credits / month",
     ],
   },
 };

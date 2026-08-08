@@ -4,6 +4,7 @@ import { FROQ_LOGO_SRC } from "@/lib/brand";
 
 import { useRef, useState, type ChangeEvent } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   ArrowRight,
   CalendarCheck,
@@ -11,10 +12,12 @@ import {
   Gift,
   ImagePlus,
   Link2,
+  Lock,
   MapPin,
   Palette,
   PartyPopper,
   QrCode,
+  Receipt,
   ShieldCheck,
   Sparkles,
   Store,
@@ -25,7 +28,7 @@ import {
   Zap,
 } from "lucide-react";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
-import { fileToLogoDataUrl } from "@/lib/merchant/image";
+import { fileToLogoDataUrl, LOGO_UPLOAD_HINT } from "@/lib/merchant/image";
 import {
   COOLDOWN_VALUE_OPTIONS,
   STAMP_OPTIONS,
@@ -37,41 +40,159 @@ import {
   type OnboardingMode,
   type OnboardingStep,
 } from "@/lib/merchant/onboarding";
+import { maxActiveBranches } from "@/lib/merchant/branch-assignments";
+import type { Entitlements } from "@/lib/merchant/entitlements";
 import { setInitialEstimatedWaitMinutes } from "@/lib/merchant/queue-settings";
-import { formatHoursSummary } from "@/lib/merchant/queue-hours";
+import {
+  formatHoursSummary,
+  formatTimeForInput,
+  QUEUE_HOURS_TIMEZONE,
+} from "@/lib/merchant/queue-hours";
 import {
   completeProductOnboarding,
+  createBranch,
   createMerchant,
+  updateMainBranchEstimatedWait,
   updateMerchantProfile,
 } from "@/app/merchant/actions";
 import type { CheckoutAccount } from "@/lib/merchant/checkout";
-import type { MerchantProduct } from "@/lib/merchant/types";
+import type { Branch, MerchantProduct, MerchantProfile } from "@/lib/merchant/types";
 import { PRODUCTS } from "@/lib/merchant/nav";
-import { QueueHoursFields } from "@/components/merchant/queue/queue-hours-fields";
+import {
+  hoursFromProfile,
+  QueueHoursFields,
+} from "@/components/merchant/queue/queue-hours-fields";
+import { MenuTaxFields } from "@/components/merchant/menu/menu-tax-fields";
 import { ReservationSettingsFields } from "@/components/merchant/reservations/reservation-settings-fields";
+import { TableLayoutEditor } from "@/components/merchant/table-layout-editor";
 import { DEFAULT_RESERVATION_SETTINGS } from "@/lib/merchant/reservations";
+import { saveMainBranchDiningTables } from "@/app/merchant/table-actions";
+import { validateDiningTableDraft } from "@/lib/merchant/dining-tables";
 import {
   REWARD_COOLDOWN_UNITS,
   formatRewardCooldown,
   type RewardCooldownUnit,
 } from "@/lib/loyalty/rules";
 import { OnboardingVerifyStep } from "./onboarding-verify-step";
-import { GoogleBusinessSearch } from "@/components/merchant/google-business-search";
+import {
+  applyPlaceToDraft,
+  BranchContactFields,
+  BranchLinkFields,
+  BranchLocationFields,
+  EMPTY_BRANCH_DRAFT,
+  type BranchDraft,
+} from "@/components/merchant/branch-fields";
 
-function reservationProfilePatch(draft: OnboardingDraft) {
+const BRANCH_FIELD_TO_DRAFT: Record<keyof BranchDraft, keyof OnboardingDraft> = {
+  name: "branchName",
+  address: "address",
+  phone: "storePhone",
+  email: "storeEmail",
+  websiteUrl: "websiteUrl",
+  instagramUrl: "instagramUrl",
+  facebookUrl: "facebookUrl",
+  xUrl: "xUrl",
+  googleBusinessUrl: "googleBusinessUrl",
+  googlePlaceId: "googlePlaceId",
+  googleMapsUrl: "googleMapsUrl",
+};
+
+function reservationProfilePatch(draft: OnboardingDraft, options?: { includeHours?: boolean }) {
+  const includeHours = options?.includeHours !== false;
   return {
     reservationMaxPartySize: draft.reservationMaxPartySize,
     reservationIntervalMinutes: draft.reservationIntervalMinutes,
-    reservationOpenTime: draft.reservationOpenTime,
-    reservationCloseTime: draft.reservationCloseTime,
+    ...(includeHours
+      ? {
+          reservationOpenTime: draft.reservationOpenTime,
+          reservationCloseTime: draft.reservationCloseTime,
+        }
+      : {}),
     reservationAllowSameDay: draft.reservationAllowSameDay,
   };
+}
+
+function menuProfilePatch(draft: OnboardingDraft) {
+  return {
+    menuCgstPercent: draft.menuCgstPercent,
+    menuSgstPercent: draft.menuSgstPercent,
+    menuServiceChargePercent: draft.menuServiceChargePercent,
+  };
+}
+
+/** Queue + reservation columns from the shared store-hours step. */
+function storeHoursProfilePatch(draft: OnboardingDraft) {
+  return {
+    queueOpenTime: draft.queueOpenTime,
+    queueCloseTime: draft.queueCloseTime,
+    queueHoursTimezone: QUEUE_HOURS_TIMEZONE,
+    queueOpenDays: draft.queueOpenDays,
+    // Seating window follows the same store hours — no second prompt.
+    reservationOpenTime: draft.queueOpenTime,
+    reservationCloseTime: draft.queueCloseTime,
+  };
+}
+
+function seedDraftFromProfile(
+  draft: OnboardingDraft,
+  profile: MerchantProfile | null | undefined,
+): OnboardingDraft {
+  if (!profile) return draft;
+  const hours = hoursFromProfile(profile);
+  const open = formatTimeForInput(hours.openTime);
+  const close = formatTimeForInput(hours.closeTime);
+  return {
+    ...draft,
+    queueOpenTime: open,
+    queueCloseTime: close,
+    queueOpenDays: [...hours.openDays],
+    queueAutoStart: hours.autoStart,
+    queueAutoClose: hours.autoClose,
+    // Seating follows store hours — don't keep a stale reservation default window.
+    reservationOpenTime: open,
+    reservationCloseTime: close,
+    reservationMaxPartySize:
+      profile.reservationMaxPartySize || draft.reservationMaxPartySize,
+    reservationIntervalMinutes:
+      profile.reservationIntervalMinutes || draft.reservationIntervalMinutes,
+    reservationAllowSameDay:
+      profile.reservationAllowSameDay ?? draft.reservationAllowSameDay,
+    // ?? rather than ||: a rate they already set to 0 is a decision to keep.
+    menuCgstPercent: profile.menuCgstPercent ?? draft.menuCgstPercent,
+    menuSgstPercent: profile.menuSgstPercent ?? draft.menuSgstPercent,
+    menuServiceChargePercent:
+      profile.menuServiceChargePercent ?? draft.menuServiceChargePercent,
+  };
+}
+
+/** Product-mode: auto-select the only global branch when there's exactly one. */
+function seedBranchSelection(
+  draft: OnboardingDraft,
+  branches: Branch[],
+): OnboardingDraft {
+  if (branches.length === 1) {
+    return { ...draft, selectedBranchIds: [branches[0].id] };
+  }
+  return draft;
+}
+
+function planPathForProduct(product: MerchantProduct): string {
+  if (product === "queue") return "/merchant/queue/plan";
+  if (product === "reservation") return "/merchant/reservations/plan";
+  if (product === "menu") return "/merchant/menu/plan";
+  return "/merchant/loyalty/plan";
 }
 
 interface OnboardingWizardProps {
   mode: OnboardingMode;
   product: MerchantProduct;
   checkoutAccount?: CheckoutAccount | null;
+  /** Existing store profile — seeds hours when activating an extra product. */
+  profile?: MerchantProfile | null;
+  /** Global branches for product-mode selection (existing merchants). */
+  branches?: Branch[];
+  /** Needed to enforce per-product activation caps on the branches step. */
+  entitlements?: Entitlements | null;
   onComplete: () => void | Promise<void>;
 }
 
@@ -87,10 +208,10 @@ const STEP_HEAD: Record<
 > = {
   intro: { Icon: Sparkles, title: "Welcome to Froq", desc: "" },
   identity: { Icon: Store, title: "Your business", desc: "Add your name, business, and logo." },
-  google: {
+  location: {
     Icon: MapPin,
-    title: "Find your business on Google",
-    desc: "Search your listing, or enter your name and Google Maps link manually.",
+    title: "Your first location",
+    desc: "Find it on Google and we'll set it up as your main branch.",
   },
   verify: {
     Icon: ShieldCheck,
@@ -98,13 +219,36 @@ const STEP_HEAD: Record<
     desc: "Confirm your email and mobile before branding.",
   },
   color: { Icon: Palette, title: "Brand color", desc: "Pick the color customers see." },
-  contact: { Icon: Link2, title: "Address & links", desc: "Where to find you online and offline." },
+  contact: {
+    Icon: Link2,
+    title: "Contact & links",
+    desc: "How customers reach your main branch, online and offline.",
+  },
+  hours: {
+    Icon: Timer,
+    title: "Store timings",
+    desc: "When your main branch is open — used by Queue and Reservations.",
+  },
+  branches: {
+    Icon: MapPin,
+    title: "Select branches",
+    desc: "Choose which locations will use this product.",
+  },
   reward: { Icon: Gift, title: "Your reward", desc: "Set up the reward customers earn." },
-  queue: { Icon: Users, title: "Queue setup", desc: "Wait times, store hours, and auto sessions." },
+  queue: {
+    Icon: Users,
+    title: "Queue setup",
+    desc: "Wait times, auto sessions, and your floor plan.",
+  },
   reservation: {
     Icon: CalendarCheck,
     title: "Reservations setup",
-    desc: "Booking hours, slot spacing, and party size.",
+    desc: "Slot spacing, party size, and your floor plan.",
+  },
+  menu: {
+    Icon: Receipt,
+    title: "Menu billing",
+    desc: "What a table order adds on top of your menu prices.",
   },
   outro: { Icon: PartyPopper, title: "You're all set!", desc: "" },
 };
@@ -113,13 +257,20 @@ export function OnboardingWizard({
   mode,
   product,
   checkoutAccount,
+  profile = null,
+  branches: initialBranches = [],
+  entitlements = null,
   onComplete,
 }: OnboardingWizardProps) {
   const steps = buildOnboardingSteps(mode, product);
   const [stepIndex, setStepIndex] = useState(0);
   const [draft, setDraft] = useState<OnboardingDraft>(() =>
-    emptyOnboardingDraft(checkoutAccount),
+    seedBranchSelection(
+      seedDraftFromProfile(emptyOnboardingDraft(checkoutAccount), profile),
+      initialBranches,
+    ),
   );
+  const [knownBranches, setKnownBranches] = useState<Branch[]>(initialBranches);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const logoInputRef = useRef<HTMLInputElement>(null);
@@ -128,11 +279,71 @@ export function OnboardingWizard({
   const productMeta = PRODUCTS.find((p) => p.id === product) ?? PRODUCTS[0];
   const current = steps[stepIndex];
   const isLast = stepIndex === steps.length - 1;
-  const head = STEP_HEAD[current];
+  const head =
+    current === "branches" && knownBranches.length === 0
+      ? {
+          Icon: MapPin,
+          title: "Create your first branch",
+          desc: "Locations are shared across every Froq product.",
+        }
+      : current === "branches" && knownBranches.length === 1
+        ? {
+            Icon: MapPin,
+            title: "Select branch",
+            desc: `${productMeta.name} will run at this location. You can change this later.`,
+          }
+        : current === "branches"
+          ? {
+              Icon: MapPin,
+              title: `Which branches will use ${productMeta.name}?`,
+              desc: "Pick the locations to activate on your current plan.",
+            }
+          : STEP_HEAD[current];
   const Icon = head.Icon;
+  const maxActive = entitlements
+    ? maxActiveBranches(product, entitlements)
+    : Number.POSITIVE_INFINITY;
+  const advanceOpts = {
+    existingBranchCount: knownBranches.length,
+    maxActiveBranches: maxActive,
+  };
 
   function update<K extends keyof OnboardingDraft>(key: K, value: OnboardingDraft[K]) {
     setDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function toggleBranchSelection(branchId: string) {
+    setDraft((prev) => {
+      const selected = prev.selectedBranchIds.includes(branchId);
+      if (selected) {
+        return {
+          ...prev,
+          selectedBranchIds: prev.selectedBranchIds.filter((id) => id !== branchId),
+        };
+      }
+      if (prev.selectedBranchIds.length >= maxActive) return prev;
+      return { ...prev, selectedBranchIds: [...prev.selectedBranchIds, branchId] };
+    });
+  }
+
+  // Onboarding fills in the main branch, so it edits the same field groups the
+  // branches drawer and business settings use — through a flat-draft adapter.
+  const branchDraft: BranchDraft = {
+    name: draft.branchName,
+    address: draft.address,
+    phone: draft.storePhone,
+    email: draft.storeEmail,
+    websiteUrl: draft.websiteUrl,
+    instagramUrl: draft.instagramUrl,
+    facebookUrl: draft.facebookUrl,
+    xUrl: draft.xUrl,
+    googleBusinessUrl: draft.googleBusinessUrl,
+    googlePlaceId: draft.googlePlaceId,
+    googleMapsUrl: draft.googleMapsUrl,
+  };
+
+  function setBranchField(key: keyof BranchDraft, value: string) {
+    setDraft((prev) => ({ ...prev, [BRANCH_FIELD_TO_DRAFT[key]]: value }));
   }
 
   async function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -159,7 +370,10 @@ export function OnboardingWizard({
         ownerLastName: draft.lastName.trim() || undefined,
         brandColor: draft.brandColor,
         logoDataUrl: draft.logoDataUrl,
+        branchName: draft.branchName.trim() || undefined,
         address: draft.address,
+        storePhone: draft.storePhone.trim() || undefined,
+        storeEmail: draft.storeEmail.trim() || undefined,
         websiteUrl: draft.websiteUrl.trim() || undefined,
         googleBusinessUrl: draft.googleBusinessUrl.trim() || undefined,
         googlePlaceId: draft.googlePlaceId.trim() || undefined,
@@ -176,37 +390,63 @@ export function OnboardingWizard({
         product,
       });
       if (!res.ok) return res;
+
+      // Store hours once — seeds queue branch hours and the reservation window.
+      const hoursSaved = await updateMerchantProfile({
+        ...storeHoursProfilePatch(draft),
+        ...(product === "queue"
+          ? {
+              queueAutoStart: draft.queueAutoStart,
+              queueAutoClose: draft.queueAutoClose,
+            }
+          : {}),
+        ...(product === "reservation" ? reservationProfilePatch(draft, { includeHours: false }) : {}),
+        ...(product === "menu" ? menuProfilePatch(draft) : {}),
+      });
+      if (!hoursSaved.ok) return hoursSaved;
+
       if (product === "queue") {
         setInitialEstimatedWaitMinutes(draft.estimatedWaitMinutes);
-        await updateMerchantProfile({
-          queueOpenTime: draft.queueOpenTime,
-          queueCloseTime: draft.queueCloseTime,
-          queueHoursTimezone: "Asia/Kolkata",
-          queueOpenDays: draft.queueOpenDays,
-          queueAutoStart: draft.queueAutoSessions,
-          queueAutoClose: draft.queueAutoSessions,
-        });
+        await updateMainBranchEstimatedWait(draft.estimatedWaitMinutes);
+        if (draft.tables.length > 0 && !validateDiningTableDraft(draft.tables)) {
+          await saveMainBranchDiningTables({ tables: draft.tables });
+        }
       }
       if (product === "reservation") {
-        await updateMerchantProfile(reservationProfilePatch(draft));
+        if (draft.tables.length > 0 && !validateDiningTableDraft(draft.tables)) {
+          await saveMainBranchDiningTables({ tables: draft.tables });
+        }
       }
       return res;
     }
 
-    // Product-only onboarding for an existing store.
+    // Product-only onboarding for an existing store — don't re-ask for hours.
+    // Align reservation seating with the store hours already on the profile.
     if (product === "reservation") {
-      const saved = await updateMerchantProfile(reservationProfilePatch(draft));
+      const saved = await updateMerchantProfile({
+        ...reservationProfilePatch(draft, { includeHours: false }),
+        reservationOpenTime: draft.queueOpenTime,
+        reservationCloseTime: draft.queueCloseTime,
+      });
       if (!saved.ok) return saved;
+      if (draft.tables.length > 0 && !validateDiningTableDraft(draft.tables)) {
+        await saveMainBranchDiningTables({ tables: draft.tables });
+      }
     } else if (product === "queue") {
       setInitialEstimatedWaitMinutes(draft.estimatedWaitMinutes);
       const saved = await updateMerchantProfile({
-        queueOpenTime: draft.queueOpenTime,
-        queueCloseTime: draft.queueCloseTime,
-        queueHoursTimezone: "Asia/Kolkata",
-        queueOpenDays: draft.queueOpenDays,
-        queueAutoStart: draft.queueAutoSessions,
-        queueAutoClose: draft.queueAutoSessions,
+        queueAutoStart: draft.queueAutoStart,
+        queueAutoClose: draft.queueAutoClose,
       });
+      if (!saved.ok) return saved;
+      await updateMainBranchEstimatedWait(draft.estimatedWaitMinutes);
+      if (draft.tables.length > 0 && !validateDiningTableDraft(draft.tables)) {
+        await saveMainBranchDiningTables({ tables: draft.tables });
+      }
+    } else if (product === "menu") {
+      // Only the tax columns. This merchant may already run Loyalty, and the
+      // reward branch below would overwrite their reward with a placeholder.
+      const saved = await updateMerchantProfile(menuProfilePatch(draft));
       if (!saved.ok) return saved;
     } else {
       const saved = await updateMerchantProfile({
@@ -219,7 +459,7 @@ export function OnboardingWizard({
       });
       if (!saved.ok) return saved;
     }
-    return completeProductOnboarding(product);
+    return completeProductOnboarding(product, draft.selectedBranchIds);
   }
 
   async function finish() {
@@ -241,8 +481,62 @@ export function OnboardingWizard({
     }
   }
 
-  function handleNext() {
-    if (!canAdvanceStep(current, draft) || submitting) return;
+  async function handleNext() {
+    if (!canAdvanceStep(current, draft, advanceOpts) || submitting) return;
+
+    // Scenario 0: create the first global branch, auto-assign to this product.
+    if (current === "branches" && knownBranches.length === 0) {
+      const name = draft.newBranchName.trim();
+      if (!name) return;
+      setSubmitting(true);
+      setError("");
+      try {
+        const res = await createBranch({
+          name,
+          assignToProduct: product,
+        });
+        if (!res.ok || !res.branchId) {
+          setError(res.error ?? "Could not create branch.");
+          return;
+        }
+        const created: Branch = {
+          id: res.branchId,
+          name,
+          slug: "",
+          isDefault: true,
+          address: "",
+          phone: "",
+          email: "",
+          websiteUrl: "",
+          instagramUrl: "",
+          facebookUrl: "",
+          xUrl: "",
+          googleBusinessUrl: "",
+          googlePlaceId: "",
+          googleMapsUrl: "",
+          queueOpenTime: draft.queueOpenTime,
+          queueCloseTime: draft.queueCloseTime,
+          queueHoursTimezone: QUEUE_HOURS_TIMEZONE,
+          queueOpenDays: [...draft.queueOpenDays],
+          queueAutoStart: draft.queueAutoStart,
+          queueAutoClose: draft.queueAutoClose,
+          estimatedWaitMinutes: draft.estimatedWaitMinutes,
+        };
+        setKnownBranches([created]);
+        setDraft((prev) => ({
+          ...prev,
+          selectedBranchIds: [res.branchId!],
+          newBranchName: "",
+        }));
+        setStepIndex((s) => s + 1);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not create branch.");
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     if (isLast) {
       void finish();
       return;
@@ -324,22 +618,36 @@ export function OnboardingWizard({
                   </>
                 )}
                 <SummaryRow label="Product" value={productMeta.name} />
+                {mode === "product" && draft.selectedBranchIds.length > 0 ? (
+                  <SummaryRow
+                    label="Branches"
+                    value={knownBranches
+                      .filter((b) => draft.selectedBranchIds.includes(b.id))
+                      .map((b) => b.name)
+                      .join(", ")}
+                  />
+                ) : null}
+                {mode === "full" || product === "queue" || product === "reservation" ? (
+                  <SummaryRow
+                    label="Hours"
+                    value={formatHoursSummary({
+                      openTime: draft.queueOpenTime,
+                      closeTime: draft.queueCloseTime,
+                      openDays: draft.queueOpenDays,
+                      autoStart: draft.queueAutoStart,
+                      autoClose: draft.queueAutoClose,
+                    })}
+                  />
+                ) : null}
                 {product === "loyalty" ? (
                   <SummaryRow label="Reward" value={draft.rewardName.trim() || "—"} />
-                ) : (
-                  <>
-                    <SummaryRow label="Est. wait" value={`${draft.estimatedWaitMinutes} min / party`} />
-                    <SummaryRow
-                      label="Hours"
-                      value={formatHoursSummary({
-                        openTime: draft.queueOpenTime,
-                        closeTime: draft.queueCloseTime,
-                        openDays: draft.queueOpenDays,
-                        autoSessions: draft.queueAutoSessions,
-                      })}
-                    />
-                  </>
-                )}
+                ) : null}
+                {product === "queue" ? (
+                  <SummaryRow
+                    label="Est. wait"
+                    value={`${draft.estimatedWaitMinutes} min / party`}
+                  />
+                ) : null}
               </div>
             )}
           </div>
@@ -398,6 +706,7 @@ export function OnboardingWizard({
                       onChange={(event) => void handleLogoUpload(event)}
                     />
                   </div>
+                  <span className="merchant-field-hint">{LOGO_UPLOAD_HINT}</span>
                 </div>
 
                 <div className="wizard-field-row">
@@ -438,38 +747,39 @@ export function OnboardingWizard({
               />
             )}
 
-            {current === "google" && (
-              <div className="panel-card merchant-edit-panel">
-                <GoogleBusinessSearch
+            {current === "location" && (
+              <div className="panel-card merchant-edit-panel wizard-location-panel">
+                <BranchLocationFields
                   autoFocus
-                  selected={
-                    draft.googlePlaceId || draft.googleMapsUrl
-                      ? {
-                          placeId: draft.googlePlaceId,
-                          name: draft.businessName,
-                          address: draft.address,
-                          googleMapsUrl: draft.googleMapsUrl,
-                        }
-                      : null
-                  }
-                  onSelect={(place) => {
+                  grouped={false}
+                  draft={{
+                    ...EMPTY_BRANCH_DRAFT,
+                    name: draft.branchName,
+                    address: draft.address,
+                    googlePlaceId: draft.googlePlaceId,
+                    googleMapsUrl: draft.googleMapsUrl,
+                  }}
+                  businessName={draft.businessName}
+                  searchPlaceholder="Search business name or Google listing…"
+                  searchHint=""
+                  onChange={(key, value) => {
+                    if (key === "name") update("branchName", value);
+                    else if (key === "address") update("address", value);
+                    else if (key === "googlePlaceId") update("googlePlaceId", value);
+                    else if (key === "googleMapsUrl") update("googleMapsUrl", value);
+                  }}
+                  onApplyPlace={(place) => {
+                    // The listing names the business; the main branch takes the
+                    // area name so later branches stay tellable apart.
+                    const next = applyPlaceToDraft(EMPTY_BRANCH_DRAFT, place);
                     setDraft((prev) => ({
                       ...prev,
-                      googlePlaceId: place.placeId,
-                      googleMapsUrl: place.googleMapsUrl,
                       businessName: place.name,
-                      ...(place.address.trim() ? { address: place.address } : {}),
+                      branchName: next.name || prev.branchName,
+                      address: next.address || prev.address,
+                      googlePlaceId: next.googlePlaceId,
+                      googleMapsUrl: next.googleMapsUrl,
                     }));
-                  }}
-                  onClear={() => {
-                    setDraft((prev) => ({
-                      ...prev,
-                      googlePlaceId: "",
-                      googleMapsUrl: "",
-                    }));
-                  }}
-                  onSelectedAndContinue={() => {
-                    setStepIndex((s) => Math.min(s + 1, steps.length - 1));
                   }}
                 />
               </div>
@@ -505,43 +815,129 @@ export function OnboardingWizard({
             )}
 
             {current === "contact" && (
+              <div className="panel-card merchant-edit-panel wizard-contact-panel">
+                <BranchContactFields draft={branchDraft} onChange={setBranchField} />
+                <BranchLinkFields draft={branchDraft} onChange={setBranchField} />
+              </div>
+            )}
+
+            {current === "hours" && (
+              <div className="panel-card merchant-edit-panel">
+                <div className="wizard-queue-hours">
+                  <span className="auth-label">When are you open?</span>
+                  <span
+                    className="merchant-field-hint"
+                    style={{ display: "block", marginBottom: 12 }}
+                  >
+                    Set once for your main branch. Queue and Reservations both use these hours —
+                    you can change them later in settings.
+                  </span>
+                  <QueueHoursFields
+                    compact
+                    hideAutos
+                    value={{
+                      openTime: draft.queueOpenTime,
+                      closeTime: draft.queueCloseTime,
+                      openDays: draft.queueOpenDays,
+                      autoStart: draft.queueAutoStart,
+                      autoClose: draft.queueAutoClose,
+                    }}
+                    onChange={(hours) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        queueOpenTime: hours.openTime,
+                        queueCloseTime: hours.closeTime,
+                        queueOpenDays: hours.openDays,
+                        // Keep reservation seating aligned with store hours.
+                        reservationOpenTime: hours.openTime,
+                        reservationCloseTime: hours.closeTime,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            {current === "branches" && knownBranches.length === 0 && (
               <div className="panel-card merchant-edit-panel">
                 <WizardField
-                  label="Address"
-                  value={draft.address}
-                  maxLength={FIELD_LIMITS.address}
-                  placeholder="42 Market Street, San Francisco"
-                  onChange={(v) => update("address", v)}
+                  label="Branch name"
+                  value={draft.newBranchName}
+                  maxLength={FIELD_LIMITS.businessName}
+                  placeholder="Mumbai"
+                  onChange={(v) => update("newBranchName", v)}
                 />
-                <WizardField
-                  label="Website"
-                  value={draft.websiteUrl}
-                  maxLength={FIELD_LIMITS.url}
-                  placeholder="bloomcoffee.com"
-                  onChange={(v) => update("websiteUrl", v)}
-                />
-                <WizardField
-                  label="Instagram"
-                  value={draft.instagramUrl}
-                  maxLength={FIELD_LIMITS.url}
-                  placeholder="instagram.com/bloomcoffee"
-                  onChange={(v) => update("instagramUrl", v)}
-                />
-                <WizardField
-                  label="Facebook"
-                  value={draft.facebookUrl}
-                  maxLength={FIELD_LIMITS.url}
-                  placeholder="facebook.com/bloomcoffee"
-                  onChange={(v) => update("facebookUrl", v)}
-                />
-                <WizardField
-                  label="X (Twitter)"
-                  value={draft.xUrl}
-                  maxLength={FIELD_LIMITS.url}
-                  placeholder="x.com/bloomcoffee"
-                  onChange={(v) => update("xUrl", v)}
-                />
-                <span className="merchant-field-hint">Links are optional — add what you have.</span>
+                <span className="merchant-field-hint">
+                  Saved to your account and activated for {productMeta.name}. Other products can
+                  reuse it later.
+                </span>
+              </div>
+            )}
+
+            {current === "branches" && knownBranches.length > 0 && (
+              <div className="panel-card merchant-edit-panel wizard-branches-panel">
+                {Number.isFinite(maxActive) && (
+                  <p className="wizard-branches-limit">
+                    Plan limit · {draft.selectedBranchIds.length} of {maxActive} active{" "}
+                    {maxActive === 1 ? "branch" : "branches"}
+                  </p>
+                )}
+                <div className="wizard-branches-list" role="group" aria-label="Branches">
+                  {knownBranches.map((branch) => {
+                    const checked = draft.selectedBranchIds.includes(branch.id);
+                    const locked =
+                      !checked && draft.selectedBranchIds.length >= maxActive;
+                    return (
+                      <button
+                        key={branch.id}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={checked}
+                        disabled={locked}
+                        className={`wizard-branch-row${checked ? " is-selected" : ""}${
+                          locked ? " is-locked" : ""
+                        }`}
+                        onClick={() => {
+                          if (locked) return;
+                          toggleBranchSelection(branch.id);
+                        }}
+                      >
+                        <span
+                          className={`wizard-branch-check${checked ? " is-on" : ""}${
+                            locked ? " is-locked" : ""
+                          }`}
+                          aria-hidden="true"
+                        >
+                          {checked ? (
+                            <Check size={14} strokeWidth={3} />
+                          ) : locked ? (
+                            <Lock size={12} strokeWidth={2.4} />
+                          ) : null}
+                        </span>
+                        <span className="wizard-branch-copy">
+                          <span className="wizard-branch-name">{branch.name}</span>
+                          {branch.address ? (
+                            <span className="wizard-branch-address">{branch.address}</span>
+                          ) : null}
+                          {locked ? (
+                            <span className="wizard-branch-locked-hint">
+                              Upgrade to activate
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {draft.selectedBranchIds.length >= maxActive &&
+                knownBranches.length > maxActive ? (
+                  <Link
+                    href={planPathForProduct(product)}
+                    className="wizard-branches-upgrade"
+                  >
+                    Upgrade plan to activate more branches
+                  </Link>
+                ) : null}
               </div>
             )}
 
@@ -691,26 +1087,41 @@ export function OnboardingWizard({
                 </label>
 
                 <div className="wizard-queue-hours">
-                  <span className="auth-label">Store timings</span>
+                  <span className="auth-label">Auto sessions</span>
                   <span className="merchant-field-hint" style={{ display: "block", marginBottom: 12 }}>
-                    Set your open hours. Auto start &amp; close is recommended so the queue runs itself.
+                    Uses the store timings you set earlier. Turn auto start and auto close on
+                    independently.
                   </span>
                   <QueueHoursFields
                     compact
+                    autosOnly
                     value={{
                       openTime: draft.queueOpenTime,
                       closeTime: draft.queueCloseTime,
                       openDays: draft.queueOpenDays,
-                      autoSessions: draft.queueAutoSessions,
+                      autoStart: draft.queueAutoStart,
+                      autoClose: draft.queueAutoClose,
                     }}
                     onChange={(hours) =>
                       setDraft((prev) => ({
                         ...prev,
-                        queueOpenTime: hours.openTime,
-                        queueCloseTime: hours.closeTime,
-                        queueOpenDays: hours.openDays,
-                        queueAutoSessions: hours.autoSessions,
+                        queueAutoStart: hours.autoStart,
+                        queueAutoClose: hours.autoClose,
                       }))
+                    }
+                  />
+                </div>
+
+                <div className="wizard-queue-hours" style={{ marginTop: 20 }}>
+                  <span className="auth-label">Tables</span>
+                  <span className="merchant-field-hint" style={{ display: "block", marginBottom: 12 }}>
+                    Numbers are filled in automatically — edit any of them. Shared with Reservations.
+                  </span>
+                  <TableLayoutEditor
+                    compact
+                    value={draft.tables}
+                    onChange={(tables) =>
+                      setDraft((prev) => ({ ...prev, tables }))
                     }
                   />
                 </div>
@@ -720,13 +1131,14 @@ export function OnboardingWizard({
             {current === "reservation" && (
               <div className="panel-card merchant-edit-panel">
                 <div className="wizard-queue-hours">
-                  <span className="auth-label">Booking window</span>
+                  <span className="auth-label">Booking rules</span>
                   <span className="merchant-field-hint" style={{ display: "block", marginBottom: 12 }}>
-                    Guests can only request slots inside these hours. You can fine-tune notes,
-                    reminders and auto-decline later in settings.
+                    Guests book inside your store timings. Set how slots are spaced and how large
+                    a party you take — notes and reminders are in settings.
                   </span>
                   <ReservationSettingsFields
                     compact
+                    hideSeatingTimes
                     value={{
                       ...DEFAULT_RESERVATION_SETTINGS,
                       maxPartySize: draft.reservationMaxPartySize,
@@ -740,13 +1152,50 @@ export function OnboardingWizard({
                         ...prev,
                         reservationMaxPartySize: settings.maxPartySize,
                         reservationIntervalMinutes: settings.intervalMinutes,
-                        reservationOpenTime: settings.openTime,
-                        reservationCloseTime: settings.closeTime,
                         reservationAllowSameDay: settings.allowSameDay,
                       }))
                     }
                   />
                 </div>
+
+                <div className="wizard-queue-hours" style={{ marginTop: 20 }}>
+                  <span className="auth-label">Tables</span>
+                  <span className="merchant-field-hint" style={{ display: "block", marginBottom: 12 }}>
+                    Numbers are filled in automatically — edit any of them. Shared with Waitlist.
+                  </span>
+                  <TableLayoutEditor
+                    compact
+                    value={draft.tables}
+                    onChange={(tables) =>
+                      setDraft((prev) => ({ ...prev, tables }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            {current === "menu" && (
+              <div className="panel-card merchant-edit-panel">
+                <span className="merchant-field-hint" style={{ display: "block", marginBottom: 12 }}>
+                  Guests see these on the cart before they order. Common for
+                  restaurants here is 2.5% CGST with 2.5% SGST — change them to
+                  match your registration, and set any to 0 to leave it off.
+                </span>
+                <MenuTaxFields
+                  value={{
+                    cgstPercent: draft.menuCgstPercent,
+                    sgstPercent: draft.menuSgstPercent,
+                    serviceChargePercent: draft.menuServiceChargePercent,
+                  }}
+                  onChange={(rates) =>
+                    setDraft((prev) => ({
+                      ...prev,
+                      menuCgstPercent: rates.cgstPercent,
+                      menuSgstPercent: rates.sgstPercent,
+                      menuServiceChargePercent: rates.serviceChargePercent,
+                    }))
+                  }
+                />
               </div>
             )}
           </div>
@@ -761,8 +1210,8 @@ export function OnboardingWizard({
           <button
             type="button"
             className="cta-btn merchant-cta-accent"
-            onClick={handleNext}
-            disabled={!canAdvanceStep(current, draft) || submitting}
+            onClick={() => void handleNext()}
+            disabled={!canAdvanceStep(current, draft, advanceOpts) || submitting}
           >
             {submitting
               ? "Saving…"

@@ -7,6 +7,7 @@ import type { MerchantProduct, MerchantProfile } from "@/lib/merchant/types";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { MerchantPosterCard } from "./poster-card";
 import { useMerchantQr } from "./use-merchant-qr";
+import { posterAvailableFor } from "@/lib/merchant/poster-availability";
 
 type QrView = "qr" | "poster";
 
@@ -39,7 +40,7 @@ const DRAWER_COPY: Record<
   },
   queue: {
     title: "Queue QR",
-    productName: "Queue Management",
+    productName: "Smart Queue",
     sub: "Guests scan this QR to join your live waitlist.",
     lockedSub: "Guests will scan this to join your live waitlist.",
     tip: "Display at your entrance for the best scan rate.",
@@ -54,6 +55,15 @@ const DRAWER_COPY: Record<
     tip: "Display at your entrance or share the link with guests.",
     openLabel: "Open Booking Page",
     alt: "Reservation request QR code",
+  },
+  menu: {
+    title: "Menu QR",
+    productName: "AI Menu",
+    sub: "Guests scan this QR to open your AI menu.",
+    lockedSub: "Guests will scan this to open your AI menu.",
+    tip: "Put one on every table so guests can ask and order from their seat.",
+    openLabel: "Open Menu Page",
+    alt: "AI menu QR code",
   },
 };
 
@@ -83,7 +93,7 @@ export function MerchantQrDrawer({
   );
   const copy = DRAWER_COPY[product];
   const locked = !enabled;
-  const posterAvailable = product === "loyalty";
+  const posterAvailable = posterAvailableFor(product);
   const [view, setView] = useState<QrView>("qr");
   const [copied, setCopied] = useState(false);
 
@@ -231,7 +241,7 @@ export function MerchantQrDrawer({
             </div>
           </>
         ) : (
-          <MerchantPosterCard />
+          <MerchantPosterCard product={product} branchSlug={branchSlug} />
         )}
       </div>
     </BottomSheet>

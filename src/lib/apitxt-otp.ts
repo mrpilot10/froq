@@ -2,6 +2,7 @@ import "server-only";
 
 import { otpLog } from "@/lib/auth/otp/logger";
 import { maskPhone, toCanonicalPhone } from "@/lib/auth/otp/phone";
+import { persistWhatsAppMessage } from "@/lib/whatsapp/message-log";
 
 const APITXT_SEND_OTP_URL = "https://apitxt.com/api/sendOTP";
 
@@ -105,6 +106,15 @@ export async function sendWhatsAppOTP(
         channel: "whatsapp",
         deliveryStatus: "invalid_json",
       });
+      void persistWhatsAppMessage({
+        templateName,
+        status: "failed",
+        mobile,
+        category: "AUTHENTICATION",
+        providerStatus: res.status,
+        providerMessage: "unexpected response",
+        source: "sendOTP",
+      });
       return { ok: false, message: "Unexpected response from WhatsApp provider." };
     }
 
@@ -118,6 +128,16 @@ export async function sendWhatsAppOTP(
         channel: "whatsapp",
         country,
         deliveryStatus: "failed",
+      });
+      void persistWhatsAppMessage({
+        templateName,
+        status: "failed",
+        mobile,
+        category: "AUTHENTICATION",
+        providerStatus: parsed.status,
+        providerMessage: parsed.message ?? null,
+        requestId: parsed.data?.request_id ?? null,
+        source: "sendOTP",
       });
       return {
         ok: false,
@@ -137,6 +157,17 @@ export async function sendWhatsAppOTP(
       deliveryStatus: "success",
     });
 
+    void persistWhatsAppMessage({
+      templateName,
+      status: "sent",
+      mobile,
+      category: "AUTHENTICATION",
+      providerStatus: parsed.status,
+      providerMessage: parsed.message ?? null,
+      requestId: requestId ?? null,
+      source: "sendOTP",
+    });
+
     return {
       ok: true,
       requestId,
@@ -150,6 +181,14 @@ export async function sendWhatsAppOTP(
       reason,
       channel: "whatsapp",
       deliveryStatus: "network_error",
+    });
+    void persistWhatsAppMessage({
+      templateName,
+      status: "failed",
+      mobile,
+      category: "AUTHENTICATION",
+      providerMessage: reason,
+      source: "sendOTP",
     });
     return { ok: false, message: "Could not reach the WhatsApp provider." };
   }

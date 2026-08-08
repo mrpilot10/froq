@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDownWideNarrow, ChevronDown, UserRound } from "lucide-react";
 import { getDashboardStats } from "@/app/merchant/actions";
+import { getMenuAnalytics } from "@/app/merchant/menu-actions";
 import { getQueueAnalytics } from "@/app/merchant/queue-actions";
 import { getReservationAnalytics } from "@/app/merchant/reservation-actions";
 import { isProductEnabled } from "@/lib/merchant/entitlements";
+import type { MenuAnalytics } from "@/lib/merchant/menu-analytics";
 import type { QueueAnalyticsStats, QueueStaffOption } from "@/lib/merchant/queue-analytics";
 import type { ReservationAnalytics } from "@/lib/reservations/stats";
 import {
@@ -26,6 +28,7 @@ import {
   LoyaltyAnalyticsView,
   type ChartSort,
 } from "./analytics/loyalty-analytics-view";
+import { MenuAnalyticsView } from "./analytics/menu-analytics-view";
 import { QueueAnalyticsView } from "./analytics/queue-analytics-view";
 import { ReservationAnalyticsView } from "./analytics/reservation-analytics-view";
 import { AnalyticsSkeleton } from "./analytics/analytics-skeleton";
@@ -109,6 +112,13 @@ interface ReservationSnapshot {
   error?: string;
 }
 
+interface MenuSnapshot {
+  key: string;
+  analytics: MenuAnalytics | null;
+  truncated: boolean;
+  error?: string;
+}
+
 export function AnalyticsScreen({
   profile,
   initialStats,
@@ -145,6 +155,7 @@ export function AnalyticsScreen({
   const [loyalty, setLoyalty] = useState<LoyaltySnapshot | null>(null);
   const [queue, setQueue] = useState<QueueSnapshot | null>(null);
   const [reservation, setReservation] = useState<ReservationSnapshot | null>(null);
+  const [menu, setMenu] = useState<MenuSnapshot | null>(null);
 
   useEffect(() => {
     if (product !== "loyalty" || preloadedLoyalty) return;
@@ -195,6 +206,24 @@ export function AnalyticsScreen({
     };
   }, [product, range, branchId, loyaltyKey]);
 
+  useEffect(() => {
+    if (product !== "menu") return;
+    let cancelled = false;
+    void (async () => {
+      const result = await getMenuAnalytics({ range, branchId });
+      if (cancelled) return;
+      setMenu({
+        key: loyaltyKey,
+        analytics: result.analytics ?? null,
+        truncated: result.truncated ?? false,
+        error: result.ok ? undefined : result.error,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [product, range, branchId, loyaltyKey]);
+
   const freshLoyalty = preloadedLoyalty
     ? initialStats
     : loyalty?.key === loyaltyKey
@@ -202,6 +231,7 @@ export function AnalyticsScreen({
       : null;
   const freshQueue = queue?.key === queueKey ? queue : null;
   const freshReservation = reservation?.key === loyaltyKey ? reservation : null;
+  const freshMenu = menu?.key === loyaltyKey ? menu : null;
 
   const pending =
     product === "loyalty"
@@ -210,7 +240,9 @@ export function AnalyticsScreen({
         ? freshQueue
         : product === "reservation"
           ? freshReservation
-          : true;
+          : product === "menu"
+            ? freshMenu
+            : true;
   const cached =
     product === "loyalty"
       ? loyalty
@@ -218,7 +250,9 @@ export function AnalyticsScreen({
         ? queue
         : product === "reservation"
           ? reservation
-          : true;
+          : product === "menu"
+            ? menu
+            : true;
 
   const loading = pending === null;
   // Only the very first load gets a skeleton. Refetches keep the previous
@@ -361,6 +395,14 @@ export function AnalyticsScreen({
           sort={sort}
           loading={loading}
           error={freshReservation?.error}
+        />
+      ) : product === "menu" ? (
+        <MenuAnalyticsView
+          analytics={freshMenu?.analytics ?? menu?.analytics ?? null}
+          sort={sort}
+          loading={loading}
+          truncated={freshMenu?.truncated ?? false}
+          error={freshMenu?.error}
         />
       ) : (
         <LoyaltyAnalyticsView

@@ -1,8 +1,9 @@
 /**
- * Customer notification routing (WhatsApp vs SMS).
+ * Customer notification routing (WhatsApp + parallel email).
  *
- * Always use sendCustomerNotification — do not call WhatsApp helpers directly
- * for customer-facing alerts.
+ * Always use sendCustomerNotification — do not call WhatsApp or email helpers
+ * directly for customer-facing product alerts. No SMS fallback for product
+ * alerts (OTP SMS is separate).
  */
 
 export { sendCustomerNotification } from "./dispatcher";
@@ -16,7 +17,6 @@ export {
   shouldSendWhatsApp,
   isLoyaltyNotificationTemplate,
   isQueueNotificationTemplate,
-  buildSmsBody,
   type NotifiableCustomer,
   type NotificationChannel,
   type CustomerNotificationTemplate as CustomerNotificationTemplateName,
@@ -31,9 +31,10 @@ export {
   type ReservationDeclinedData,
 } from "./types";
 
+export { buildCustomerNotificationEmail } from "./customer-email";
+export { sendCustomerNotificationEmail } from "./customer-email-channel";
+
 export {
   markWhatsAppAvailableForPhone,
   applyNotificationPrefsFromAuth,
 } from "./prefs";
-
-export { sendTransactionalSms } from "./sms";

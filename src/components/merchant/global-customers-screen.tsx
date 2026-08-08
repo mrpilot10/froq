@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  ContactRound,
   Download,
   Mail,
   Phone,
@@ -11,23 +12,82 @@ import {
   Stamp,
   Trash2,
   Users,
+  UtensilsCrossed,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { deleteUnifiedCustomer, getUnifiedCustomers } from "@/app/merchant/actions";
+import { deleteUnifiedCustomer } from "@/app/merchant/actions";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { useMerchantWorkspace } from "@/components/merchant/merchant-workspace-context";
-import type { CustomerSource, UnifiedCustomer } from "@/lib/merchant/unified-customers";
+import { useUnifiedCustomers } from "@/components/merchant/use-unified-customers";
+import {
+  PRODUCTS,
+  comingSoonAfterProduct,
+  comingSoonBeforeProducts,
+  type ComingSoonProduct,
+} from "@/lib/merchant/nav";
+import type { MerchantProduct } from "@/lib/merchant/types";
+import type { UnifiedCustomer } from "@/lib/merchant/unified-customers";
 
-type SourceKey = "all" | "loyalty" | "queue";
-type SortKey = "recent" | "name" | "stamps" | "loyaltyVisits" | "queueVisits";
-type DetailProduct = "loyalty" | "queue";
+type LiveSourceKey = "all" | MerchantProduct;
+type TabId = LiveSourceKey | string;
+type SortKey =
+  | "recent"
+  | "name"
+  | "stamps"
+  | "loyaltyVisits"
+  | "queueVisits"
+  | "bookings"
+  | "menuVisits";
+type DetailProduct = MerchantProduct;
 
-const SOURCES: { id: SourceKey; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "loyalty", label: "Loyalty" },
-  { id: "queue", label: "Queue" },
-];
+type CustomersTab =
+  | { id: "all"; name: string; Icon: typeof ContactRound; soon: false }
+  | { id: MerchantProduct; name: string; Icon: (typeof PRODUCTS)[number]["Icon"]; soon: false }
+  | {
+      id: string;
+      name: string;
+      Icon: ComingSoonProduct["Icon"];
+      soon: true;
+      product: ComingSoonProduct;
+    };
+
+function buildCustomersTabs(): CustomersTab[] {
+  const tabs: CustomersTab[] = [{ id: "all", name: "All", Icon: ContactRound, soon: false }];
+  for (const product of comingSoonBeforeProducts()) {
+    tabs.push({
+      id: product.id,
+      name: product.name,
+      Icon: product.Icon,
+      soon: true,
+      product,
+    });
+  }
+  for (const live of PRODUCTS) {
+    tabs.push({ id: live.id, name: live.name, Icon: live.Icon, soon: false });
+    for (const product of comingSoonAfterProduct(live.id)) {
+      tabs.push({
+        id: product.id,
+        name: product.name,
+        Icon: product.Icon,
+        soon: true,
+        product,
+      });
+    }
+  }
+  return tabs;
+}
+
+const CUSTOMERS_TABS = buildCustomersTabs();
+const SOON_IDS = new Set(
+  CUSTOMERS_TABS.filter((tab): tab is Extract<CustomersTab, { soon: true }> => tab.soon).map(
+    (tab) => tab.id,
+  ),
+);
+
+function isLiveSource(id: TabId): id is LiveSourceKey {
+  return id === "all" || !SOON_IDS.has(id);
+}
 
 const SORTS: { id: SortKey; label: string }[] = [
   { id: "recent", label: "Recently seen" },
@@ -35,6 +95,8 @@ const SORTS: { id: SortKey; label: string }[] = [
   { id: "stamps", label: "Most stamps" },
   { id: "loyaltyVisits", label: "Most loyalty visits" },
   { id: "queueVisits", label: "Most queue visits" },
+  { id: "bookings", label: "Most bookings" },
+  { id: "menuVisits", label: "Most menu visits" },
 ];
 
 function initials(name: string) {
@@ -63,9 +125,15 @@ function relativeFrom(ms: number | null, nowMs: number) {
   return `${Math.round(months / 12)}y ago`;
 }
 
-function sourceLabel(source: CustomerSource) {
-  if (source === "both") return "Loyalty + Queue";
-  return source === "loyalty" ? "Loyalty only" : "Queue only";
+function sourceLabel(customer: UnifiedCustomer) {
+  const parts: string[] = [];
+  if (customer.loyalty) parts.push("Loyalty");
+  if (customer.queue) parts.push("Queue");
+  if (customer.reservation) parts.push("Reservations");
+  if (customer.menu) parts.push("Menu");
+  if (parts.length === 0) return "Unknown";
+  if (parts.length === 1) return `${parts[0]} only`;
+  return parts.join(" + ");
 }
 
 function exportCsv(rows: UnifiedCustomer[]) {
@@ -81,13 +149,17 @@ function exportCsv(rows: UnifiedCustomer[]) {
     "Seated",
     "No-shows",
     "Total guests",
+    "Reservation bookings",
+    "Completed bookings",
+    "Menu visits",
+    "Guest verifications",
     "Last seen",
   ];
   const body = rows.map((row) => [
     row.name,
     row.phone,
     row.email ?? "",
-    sourceLabel(row.source),
+    sourceLabel(row),
     row.loyalty ? `${row.loyalty.stamps}/${row.loyalty.totalStamps}` : "",
     row.loyalty?.visits ?? "",
     row.loyalty?.rewardsClaimed ?? "",
@@ -95,6 +167,10 @@ function exportCsv(rows: UnifiedCustomer[]) {
     row.queue?.seated ?? "",
     row.queue?.left ?? "",
     row.queue?.guests ?? "",
+    row.reservation?.bookings ?? "",
+    row.reservation?.completed ?? "",
+    row.menu?.visits ?? "",
+    row.menu?.specialOffers ?? "",
     row.lastSeenMs ? new Date(row.lastSeenMs).toISOString() : "",
   ]);
   const escape = (cell: string | number) => `"${String(cell).replace(/"/g, '""')}"`;
@@ -111,55 +187,37 @@ function exportCsv(rows: UnifiedCustomer[]) {
   URL.revokeObjectURL(url);
 }
 
-interface Snapshot {
-  /** Branch the rows belong to; a mismatch means a newer request is in flight. */
-  key: string;
-  customers: UnifiedCustomer[];
-  truncated: boolean;
-  fetchedAtMs: number;
-}
-
 /**
  * Workspace-level customers hub: one row per person, merged across loyalty and
  * queue, so the merchant sees stamps and waitlist history side by side.
  */
 export function GlobalCustomersScreen() {
-  const { profile, activeBranchId, onRefresh } = useMerchantWorkspace();
+  const { profile, onRefresh } = useMerchantWorkspace();
   const [query, setQuery] = useState("");
-  const [source, setSource] = useState<SourceKey>("all");
+  const [tabId, setTabId] = useState<TabId>("all");
   const [sort, setSort] = useState<SortKey>("recent");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const {
+    customers,
+    loading,
+    truncated,
+    fetchedAtMs: now,
+    refresh,
+  } = useUnifiedCustomers("all");
 
-  const requestKey = activeBranchId ?? "all";
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const result = await getUnifiedCustomers({ branchId: activeBranchId });
-      if (cancelled) return;
-      setSnapshot({
-        key: requestKey,
-        customers: result.customers,
-        truncated: result.truncated,
-        fetchedAtMs: Date.now(),
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeBranchId, requestKey]);
-
-  const fresh = snapshot?.key === requestKey ? snapshot : null;
-  const loading = fresh === null;
-  const customers = useMemo(() => fresh?.customers ?? [], [fresh]);
-  const now = fresh?.fetchedAtMs ?? Date.now();
+  const source: LiveSourceKey = isLiveSource(tabId) ? tabId : "all";
+  const soonTab = CUSTOMERS_TABS.find(
+    (tab): tab is Extract<CustomersTab, { soon: true }> => tab.soon && tab.id === tabId,
+  );
+  const SoonIcon = soonTab?.Icon;
 
   const totals = useMemo(
     () => ({
       people: customers.length,
       loyalty: customers.filter((c) => c.loyalty).length,
       queue: customers.filter((c) => c.queue).length,
+      reservation: customers.filter((c) => c.reservation).length,
+      menu: customers.filter((c) => c.menu).length,
     }),
     [customers],
   );
@@ -171,6 +229,8 @@ export function GlobalCustomersScreen() {
     const filtered = customers.filter((customer) => {
       if (source === "loyalty" && !customer.loyalty) return false;
       if (source === "queue" && !customer.queue) return false;
+      if (source === "reservation" && !customer.reservation) return false;
+      if (source === "menu" && !customer.menu) return false;
       if (!q) return true;
       if (customer.name.toLowerCase().includes(q)) return true;
       if (digits && customer.phone.replace(/\D/g, "").includes(digits)) return true;
@@ -182,6 +242,9 @@ export function GlobalCustomersScreen() {
       if (sort === "stamps") return (b.loyalty?.stamps ?? 0) - (a.loyalty?.stamps ?? 0);
       if (sort === "loyaltyVisits") return (b.loyalty?.visits ?? 0) - (a.loyalty?.visits ?? 0);
       if (sort === "queueVisits") return (b.queue?.visits ?? 0) - (a.queue?.visits ?? 0);
+      if (sort === "bookings")
+        return (b.reservation?.bookings ?? 0) - (a.reservation?.bookings ?? 0);
+      if (sort === "menuVisits") return (b.menu?.visits ?? 0) - (a.menu?.visits ?? 0);
       return (b.lastSeenMs ?? 0) - (a.lastSeenMs ?? 0);
     });
   }, [customers, query, source, sort]);
@@ -195,29 +258,51 @@ export function GlobalCustomersScreen() {
       <div className="tab-head">
         <h2 className="tab-title">All customers</h2>
         <p className="tab-sub">
-          {loading
-            ? `Everyone who has visited ${profile.businessName}`
-            : filtering
-              ? `${visible.length} of ${totals.people} people`
-              : `${totals.people} people · ${totals.loyalty} loyalty · ${totals.queue} queue`}
+          {soonTab
+            ? soonTab.product.tagline
+            : loading
+              ? `Everyone who has visited ${profile.businessName}`
+              : filtering
+                ? `${visible.length} of ${totals.people} people`
+                : `${totals.people} people · ${totals.loyalty} loyalty · ${totals.queue} queue · ${totals.reservation} reservations · ${totals.menu} menu`}
         </p>
       </div>
 
       <div className="queue-tabs merchant-analytics-tabs" role="tablist" aria-label="Filter by product">
-        {SOURCES.map(({ id, label }) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={source === id}
-            className={`queue-tab${source === id ? " active" : ""}`}
-            onClick={() => setSource(id)}
-          >
-            <span>{label}</span>
-          </button>
-        ))}
+        {CUSTOMERS_TABS.map((tab) => {
+          const Icon = tab.Icon;
+          const selectedTab = tabId === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={selectedTab}
+              className={`queue-tab${selectedTab ? " active" : ""}${tab.soon ? " queue-tab--soon" : ""}`}
+              onClick={() => setTabId(tab.id)}
+            >
+              <Icon size={15} strokeWidth={2.3} aria-hidden="true" />
+              <span>{tab.name}</span>
+              {tab.soon ? <span className="queue-tab-soon">Soon</span> : null}
+            </button>
+          );
+        })}
       </div>
 
+      {soonTab && SoonIcon ? (
+        <div className="panel-card merchant-analytics-coming-soon">
+          <div className="merchant-coming-soon-icon" aria-hidden>
+            <SoonIcon size={28} strokeWidth={2.1} />
+          </div>
+          <span className="merchant-coming-soon-badge">Coming soon</span>
+          <h3 className="merchant-coming-soon-name">{soonTab.product.name}</h3>
+          <p className="merchant-coming-soon-headline">{soonTab.product.headline}</p>
+          <p className="merchant-coming-soon-sub">
+            Guests for this product will show up here as soon as it launches.
+          </p>
+        </div>
+      ) : (
+        <>
       <label className="merchant-customer-search-field">
         <Search size={16} strokeWidth={2.2} aria-hidden />
         <input
@@ -271,7 +356,7 @@ export function GlobalCustomersScreen() {
         </button>
       </div>
 
-      {fresh?.truncated ? (
+      {truncated ? (
         <p className="lhist-truncated">
           Showing the most recent records only. Filter by branch to see a complete list.
         </p>
@@ -290,7 +375,7 @@ export function GlobalCustomersScreen() {
           <p className="merchant-empty-sub">
             {filtering
               ? "Try a different name, number, or product filter."
-              : "People appear here as soon as they join your loyalty program or a waitlist."}
+              : "People appear here as soon as they join loyalty, a waitlist, book a table, or leave details on your menu."}
           </p>
         </div>
       ) : (
@@ -305,9 +390,9 @@ export function GlobalCustomersScreen() {
                 >
                   <div className="merchant-avatar">{initials(customer.name)}</div>
                   <div className="merchant-list-copy">
-                    <div className="merchant-list-title">
-                      {customer.name}
-                      {customer.banned ? (
+                    <div className="ucust-name-line">
+                      <span className="merchant-list-title">{customer.name}</span>
+                      {customer.banned && customer.loyalty ? (
                         <span className="merchant-badge merchant-badge--banned">Banned</span>
                       ) : null}
                     </div>
@@ -328,6 +413,20 @@ export function GlobalCustomersScreen() {
                         {customer.queue.visits}
                       </span>
                     ) : null}
+                    {customer.reservation ? (
+                      <span
+                        className="ucust-pill ucust-pill--reservation"
+                        title="Reservation bookings"
+                      >
+                        {customer.reservation.bookings}
+                      </span>
+                    ) : null}
+                    {customer.menu ? (
+                      <span className="ucust-pill ucust-pill--menu" title="Menu visits">
+                        <UtensilsCrossed size={11} strokeWidth={2.5} aria-hidden />
+                        {customer.menu.visits}
+                      </span>
+                    ) : null}
                   </div>
                   <ChevronRight
                     size={16}
@@ -346,16 +445,14 @@ export function GlobalCustomersScreen() {
         customer={selected}
         nowMs={now}
         onClose={() => setSelectedKey(null)}
-        onDeleted={(key) => {
+        onDeleted={() => {
           setSelectedKey(null);
-          setSnapshot((prev) =>
-            prev
-              ? { ...prev, customers: prev.customers.filter((row) => row.key !== key) }
-              : prev,
-          );
+          void refresh();
           void onRefresh();
         }}
       />
+        </>
+      )}
     </div>
   );
 }
@@ -424,19 +521,35 @@ function CustomerSheetBody({
 }) {
   const hasLoyalty = Boolean(customer.loyalty);
   const hasQueue = Boolean(customer.queue);
-  const [product, setProduct] = useState<DetailProduct>(
-    customer.source === "queue" && !hasLoyalty ? "queue" : "loyalty",
-  );
+  const hasReservation = Boolean(customer.reservation);
+  const hasMenu = Boolean(customer.menu);
+  const [product, setProduct] = useState<DetailProduct>(() => {
+    if (customer.source === "menu" && !hasLoyalty && !hasQueue && !hasReservation) return "menu";
+    if (customer.source === "reservation" && !hasLoyalty && !hasQueue) return "reservation";
+    if (customer.source === "queue" && !hasLoyalty) return "queue";
+    if (hasLoyalty) return "loyalty";
+    if (hasQueue) return "queue";
+    if (hasReservation) return "reservation";
+    return "menu";
+  });
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const showSwitcher = hasLoyalty && hasQueue;
-  const activeProduct: DetailProduct =
-    product === "loyalty" && !hasLoyalty && hasQueue
-      ? "queue"
-      : product === "queue" && !hasQueue && hasLoyalty
-        ? "loyalty"
-        : product;
+  const productCount = [hasLoyalty, hasQueue, hasReservation, hasMenu].filter(Boolean).length;
+  const showSwitcher = productCount > 1;
+
+  function resolveActiveProduct(preferred: DetailProduct): DetailProduct {
+    if (preferred === "loyalty" && hasLoyalty) return "loyalty";
+    if (preferred === "queue" && hasQueue) return "queue";
+    if (preferred === "reservation" && hasReservation) return "reservation";
+    if (preferred === "menu" && hasMenu) return "menu";
+    if (hasLoyalty) return "loyalty";
+    if (hasQueue) return "queue";
+    if (hasReservation) return "reservation";
+    return "menu";
+  }
+
+  const activeProduct = resolveActiveProduct(product);
 
   async function handleDelete() {
     if (deleting) return;
@@ -464,9 +577,14 @@ function CustomerSheetBody({
         <div className="merchant-avatar merchant-avatar--lg">{initials(customer.name)}</div>
         <div className="merchant-drawer-head-copy">
           <h3 id="unified-customer-name" className="merchant-drawer-name">
-            {customer.name}
+            <span className="ucust-name-line">
+              <span>{customer.name}</span>
+              {customer.banned && customer.loyalty ? (
+                <span className="merchant-badge merchant-badge--banned">Banned</span>
+              ) : null}
+            </span>
           </h3>
-          <span className="merchant-list-sub">{sourceLabel(customer.source)}</span>
+          <span className="merchant-list-sub">{sourceLabel(customer)}</span>
         </div>
       </div>
 
@@ -476,26 +594,53 @@ function CustomerSheetBody({
           role="tablist"
           aria-label="Customer product"
         >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeProduct === "loyalty"}
-            className={`queue-tab${activeProduct === "loyalty" ? " active" : ""}`}
-            onClick={() => setProduct("loyalty")}
-          >
-            <Stamp size={14} strokeWidth={2.3} aria-hidden />
-            <span>Loyalty</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeProduct === "queue"}
-            className={`queue-tab${activeProduct === "queue" ? " active" : ""}`}
-            onClick={() => setProduct("queue")}
-          >
-            <Users size={14} strokeWidth={2.3} aria-hidden />
-            <span>Queue</span>
-          </button>
+          {hasLoyalty ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeProduct === "loyalty"}
+              className={`queue-tab${activeProduct === "loyalty" ? " active" : ""}`}
+              onClick={() => setProduct("loyalty")}
+            >
+              <Stamp size={14} strokeWidth={2.3} aria-hidden />
+              <span>Loyalty</span>
+            </button>
+          ) : null}
+          {hasQueue ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeProduct === "queue"}
+              className={`queue-tab${activeProduct === "queue" ? " active" : ""}`}
+              onClick={() => setProduct("queue")}
+            >
+              <Users size={14} strokeWidth={2.3} aria-hidden />
+              <span>Queue</span>
+            </button>
+          ) : null}
+          {hasReservation ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeProduct === "reservation"}
+              className={`queue-tab${activeProduct === "reservation" ? " active" : ""}`}
+              onClick={() => setProduct("reservation")}
+            >
+              <span>Reservations</span>
+            </button>
+          ) : null}
+          {hasMenu ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeProduct === "menu"}
+              className={`queue-tab${activeProduct === "menu" ? " active" : ""}`}
+              onClick={() => setProduct("menu")}
+            >
+              <UtensilsCrossed size={14} strokeWidth={2.3} aria-hidden />
+              <span>Menu</span>
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -547,7 +692,61 @@ function CustomerSheetBody({
         </div>
       ) : null}
 
-      {!customer.loyalty && !customer.queue ? (
+      {activeProduct === "reservation" && customer.reservation ? (
+        <div className="merchant-drawer-stats">
+          <div className="merchant-drawer-stat merchant-drawer-stat--accent">
+            <span className="merchant-drawer-stat-label">Bookings</span>
+            <span className="merchant-drawer-stat-value">
+              {customer.reservation.bookings}
+            </span>
+          </div>
+          <div className="merchant-drawer-stat">
+            <span className="merchant-drawer-stat-label">Completed</span>
+            <span className="merchant-drawer-stat-value">
+              {customer.reservation.completed}
+            </span>
+          </div>
+          <div className="merchant-drawer-stat">
+            <span className="merchant-drawer-stat-label">No-shows</span>
+            <span className="merchant-drawer-stat-value">
+              {customer.reservation.noShows}
+            </span>
+          </div>
+          <div className="merchant-drawer-stat">
+            <span className="merchant-drawer-stat-label">Last booked</span>
+            <span className="merchant-drawer-stat-value">
+              {relativeFrom(customer.reservation.lastBookedMs, nowMs)}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {activeProduct === "menu" && customer.menu ? (
+        <div className="merchant-drawer-stats">
+          <div className="merchant-drawer-stat merchant-drawer-stat--accent">
+            <span className="merchant-drawer-stat-label">Menu visits</span>
+            <span className="merchant-drawer-stat-value">{customer.menu.visits}</span>
+          </div>
+          <div className="merchant-drawer-stat">
+            <span className="merchant-drawer-stat-label">Guest verifications</span>
+            <span className="merchant-drawer-stat-value">{customer.menu.specialOffers}</span>
+          </div>
+          <div className="merchant-drawer-stat">
+            <span className="merchant-drawer-stat-label">Last party</span>
+            <span className="merchant-drawer-stat-value">
+              {customer.menu.lastPartySize ?? "—"}
+            </span>
+          </div>
+          <div className="merchant-drawer-stat">
+            <span className="merchant-drawer-stat-label">Last seen</span>
+            <span className="merchant-drawer-stat-value">
+              {relativeFrom(customer.menu.lastSeenMs, nowMs)}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      {!customer.loyalty && !customer.queue && !customer.reservation && !customer.menu ? (
         <p className="merchant-empty-sub" style={{ margin: 0 }}>
           No product activity recorded yet.
         </p>

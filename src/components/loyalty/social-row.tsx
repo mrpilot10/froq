@@ -42,9 +42,10 @@ export function SocialRow({ links, className = "social-row" }: SocialRowProps) {
 
 interface FollowUsProps {
   links: BusinessInfo["socialLinks"];
+  className?: string;
 }
 
-export function FollowUs({ links }: FollowUsProps) {
+export function FollowUs({ links, className = "follow-us" }: FollowUsProps) {
   const hasAny =
     Boolean(links.instagram) ||
     Boolean(links.whatsapp) ||
@@ -53,7 +54,7 @@ export function FollowUs({ links }: FollowUsProps) {
   if (!hasAny) return null;
 
   return (
-    <div className="follow-us">
+    <div className={className}>
       <p className="follow-us-label">Follow Us</p>
       <SocialRow links={links} className="social-row follow-us-icons" />
     </div>

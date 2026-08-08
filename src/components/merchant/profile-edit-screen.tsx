@@ -3,21 +3,38 @@
 import { useRef, useState, type ChangeEvent } from "react";
 import { Check, ImagePlus, Trash2 } from "lucide-react";
 import Image from "next/image";
+import { toast } from "sonner";
 import { BottomSheet } from "@/components/loyalty/bottom-sheet";
 import { BRAND_COLORS, FIELD_LIMITS } from "@/lib/merchant/constants";
-import { fileToLogoDataUrl } from "@/lib/merchant/image";
-import type {
-  Branch,
-  MemberRole,
-  MerchantEditSection,
-  MerchantProduct,
-  MerchantProfile,
+import { fileToLogoDataUrl, LOGO_UPLOAD_HINT } from "@/lib/merchant/image";
+import {
+  validateQueueStoreHours,
+  type QueueStoreHours,
+} from "@/lib/merchant/queue-hours";
+import {
+  isBranchEditSection,
+  type Branch,
+  type BranchContact,
+  type MemberRole,
+  type MerchantEditSection,
+  type MerchantProduct,
+  type MerchantProfile,
 } from "@/lib/merchant/types";
 import {
   AccountSettingsPanel,
   type AccountSettingsHandle,
 } from "./account-settings-panel";
-import { GoogleBusinessSearch } from "./google-business-search";
+import {
+  applyPlaceToDraft,
+  BranchContactFields,
+  BranchLinkFields,
+  BranchLocationFields,
+  BranchTimingsFields,
+  EMPTY_BRANCH_DRAFT,
+  toBranchDraft,
+  type BranchDraft,
+} from "./branch-fields";
+import { hoursFromBranch } from "./queue/queue-hours-fields";
 
 interface MerchantProfileEditScreenProps {
   section: MerchantEditSection;
@@ -28,9 +45,27 @@ interface MerchantProfileEditScreenProps {
   productIds?: MerchantProduct[];
   branchIds?: string[];
   branches?: Branch[];
+  /** Branch whose contact details, links, and listing are being edited. */
+  editBranch?: Branch | null;
   onChange: (profile: MerchantProfile) => void;
   onClose: () => void;
   onSave: () => void;
+  onSaveBranch?: (
+    branchId: string,
+    patch: Partial<BranchContact> & { name?: string },
+  ) => Promise<boolean> | boolean;
+  /** Contact + store timings for a branch (preferred over separate saves). */
+  onSaveBranchDetails?: (
+    branchId: string,
+    patch: Partial<BranchContact> & { name?: string },
+    hours: Pick<QueueStoreHours, "openTime" | "closeTime" | "openDays">,
+  ) => Promise<boolean> | boolean;
+  /** @deprecated Prefer onSaveBranchDetails — kept for legacy callers. */
+  onSaveStoreHours?: (
+    branchId: string,
+    hours: Pick<QueueStoreHours, "openTime" | "closeTime" | "openDays">,
+  ) => Promise<boolean> | boolean;
+  onSelectEditBranch?: (branchId: string) => void;
   onAccountNameUpdated?: (firstName: string, lastName: string) => void;
   /** Non-owners use this to leave the store and delete their login. */
   onDeleteAccount?: () => void;
@@ -42,15 +77,11 @@ const SECTION_META: Record<
 > = {
   business: {
     title: "Store details",
-    subtitle: "Logo, owner, business name, and location",
+    subtitle: "Logo, brand color, and business name",
   },
-  links: {
-    title: "Links & social",
-    subtitle: "Website and socials",
-  },
-  google: {
-    title: "Google Business",
-    subtitle: "Link your listing for reviews and maps",
+  branch: {
+    title: "Branch details",
+    subtitle: "Location, timings, contact, and links for this branch",
   },
   loyalty: {
     title: "Rewards & stamps",
@@ -109,36 +140,51 @@ function LimitedField({
   );
 }
 
-interface PlainFieldProps {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-  placeholder?: string;
-  inputMode?: "text" | "url" | "email" | "tel";
-}
-
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
+/**
+ * Branch details belong to one location, so the sheet has to say which one —
+ * and offer a way to switch when the merchant runs more than one.
+ */
+function BranchScopeNotice({
+  branches,
+  editBranch,
+  onSelectEditBranch,
+}: {
+  branches: Branch[];
+  editBranch: Branch | null;
+  onSelectEditBranch?: (branchId: string) => void;
+}) {
+  if (!editBranch) {
+    return (
+      <p className="merchant-field-hint" role="status">
+        Add a branch first to publish location, contact, and links.
+      </p>
+    );
+  }
+  if (branches.length < 2 || !onSelectEditBranch) {
+    return (
+      <p className="merchant-branch-scope" role="status">
+        Applies to <strong>{editBranch.name}</strong>
+      </p>
+    );
+  }
   return (
     <label className="auth-field">
-      <span className="auth-label">{label}</span>
-      <input className="auth-input auth-input--readonly" type="text" value={value} readOnly aria-readonly="true" />
-    </label>
-  );
-}
-
-function PlainField({ label, value, onChange, type = "text", placeholder, inputMode }: PlainFieldProps) {
-  return (
-    <label className="auth-field">
-      <span className="auth-label">{label}</span>
-      <input
+      <span className="auth-label">Branch</span>
+      <select
         className="auth-input"
-        type={type}
-        inputMode={inputMode}
-        placeholder={placeholder}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
+        value={editBranch.id}
+        onChange={(event) => onSelectEditBranch(event.target.value)}
+      >
+        {branches.map((branch) => (
+          <option key={branch.id} value={branch.id}>
+            {branch.name}
+            {branch.isDefault ? " (Main)" : ""}
+          </option>
+        ))}
+      </select>
+      <span className="merchant-field-hint">
+        Each branch publishes its own contact details, links, and open hours.
+      </span>
     </label>
   );
 }
@@ -152,9 +198,14 @@ export function MerchantProfileEditScreen({
   productIds = [],
   branchIds = [],
   branches = [],
+  editBranch = null,
   onChange,
   onClose,
   onSave,
+  onSaveBranch,
+  onSaveBranchDetails,
+  onSaveStoreHours,
+  onSelectEditBranch,
   onAccountNameUpdated,
   onDeleteAccount,
 }: MerchantProfileEditScreenProps) {
@@ -162,8 +213,75 @@ export function MerchantProfileEditScreen({
   const rewardImageInputRef = useRef<HTMLInputElement>(null);
   const accountRef = useRef<AccountSettingsHandle>(null);
   const [closingAccount, setClosingAccount] = useState(false);
+  const [savingBranch, setSavingBranch] = useState(false);
+  const [draftFor, setDraftFor] = useState({
+    branchId: editBranch?.id ?? "",
+    draft: toBranchDraft(editBranch),
+    hours: hoursFromBranch(editBranch, profile),
+  });
+
+  const branchSection = isBranchEditSection(section);
+  const branchId = editBranch?.id ?? "";
+  // Only owners can rename a branch, so everyone else edits it without the name field.
+  const canRenameBranch = role === "owner";
+
+  // Re-seed the draft when the sheet targets a different branch, so switching
+  // branches mid-edit never carries the previous one's values over.
+  if (draftFor.branchId !== branchId) {
+    setDraftFor({
+      branchId,
+      draft: toBranchDraft(editBranch),
+      hours: hoursFromBranch(editBranch, profile),
+    });
+  }
+  const branchDraft = draftFor.branchId === branchId ? draftFor.draft : EMPTY_BRANCH_DRAFT;
+  const hoursDraft =
+    draftFor.branchId === branchId
+      ? draftFor.hours
+      : hoursFromBranch(editBranch, profile);
 
   const meta = section ? SECTION_META[section] : null;
+
+  function setBranchDraft(next: (prev: BranchDraft) => BranchDraft) {
+    setDraftFor((prev) => ({ ...prev, draft: next(prev.draft) }));
+  }
+
+  function updateBranchField<K extends keyof BranchDraft>(key: K, value: BranchDraft[K]) {
+    setBranchDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSaveBranch() {
+    if (!branchId || (!onSaveBranchDetails && !onSaveBranch)) return;
+    const hoursError = validateQueueStoreHours(hoursDraft);
+    if (hoursError) {
+      toast.error(hoursError);
+      return;
+    }
+    setSavingBranch(true);
+    try {
+      const { name, ...contact } = branchDraft;
+      const patch = canRenameBranch && name.trim() ? { ...contact, name: name.trim() } : contact;
+      const hours = {
+        openTime: hoursDraft.openTime,
+        closeTime: hoursDraft.closeTime,
+        openDays: hoursDraft.openDays,
+      };
+      if (onSaveBranchDetails) {
+        const ok = await onSaveBranchDetails(branchId, patch, hours);
+        if (ok !== false) onClose();
+        return;
+      }
+      const ok = await onSaveBranch?.(branchId, patch);
+      if (ok === false) return;
+      if (onSaveStoreHours) {
+        const hoursOk = await onSaveStoreHours(branchId, hours);
+        if (hoursOk === false) return;
+      }
+      onClose();
+    } finally {
+      setSavingBranch(false);
+    }
+  }
 
   async function handleAccountDone() {
     setClosingAccount(true);
@@ -268,7 +386,7 @@ export function MerchantProfileEditScreen({
                   onChange={(event) => void handleLogoUpload(event)}
                 />
               </div>
-              <span className="merchant-field-hint">PNG, JPG, or SVG. Square works best.</span>
+              <span className="merchant-field-hint">{LOGO_UPLOAD_HINT}</span>
             </div>
 
             <div className="merchant-color-field">
@@ -301,87 +419,43 @@ export function MerchantProfileEditScreen({
               value={profile.businessName}
               maxLength={FIELD_LIMITS.businessName}
               onChange={(v) => updateField("businessName", v)}
-            />
-            <div className="wizard-field-row">
-              <LimitedField
-                label="Owner first name"
-                value={profile.ownerFirstName}
-                maxLength={40}
-                onChange={(v) => updateField("ownerFirstName", v)}
-              />
-              <LimitedField
-                label="Owner last name"
-                value={profile.ownerLastName}
-                maxLength={40}
-                onChange={(v) => updateField("ownerLastName", v)}
-              />
-            </div>
-            <LimitedField
-              label="Address"
-              value={profile.address}
-              maxLength={FIELD_LIMITS.address}
-              onChange={(v) => updateField("address", v)}
+              hint="Shared by every branch, and shown on your customer loyalty card."
             />
           </>
         )}
 
-        {section === "google" && (
-          <GoogleBusinessSearch
-            selected={
-              profile.googlePlaceId || profile.googleMapsUrl
-                ? {
-                    placeId: profile.googlePlaceId,
-                    name: profile.businessName,
-                    address: profile.address,
-                    googleMapsUrl: profile.googleMapsUrl,
-                  }
-                : null
-            }
-            onSelect={(place) =>
-              onChange({
-                ...profile,
-                googlePlaceId: place.placeId,
-                googleMapsUrl: place.googleMapsUrl,
-                businessName: place.name,
-                ...(place.address.trim() ? { address: place.address } : {}),
-              })
-            }
-            onClear={() =>
-              onChange({
-                ...profile,
-                googlePlaceId: "",
-                googleMapsUrl: "",
-              })
-            }
+        {branchSection && (
+          <BranchScopeNotice
+            branches={branches}
+            editBranch={editBranch}
+            onSelectEditBranch={onSelectEditBranch}
           />
         )}
 
-        {section === "links" && (
+        {section === "branch" && editBranch && (
           <>
-            <PlainField
-              label="Website"
-              value={profile.websiteUrl}
-              onChange={(v) => updateField("websiteUrl", v)}
-              placeholder="yourbusiness.com"
+            <BranchLocationFields
+              draft={branchDraft}
+              onChange={updateBranchField}
+              onApplyPlace={(place) =>
+                setBranchDraft((prev) =>
+                  applyPlaceToDraft(
+                    prev,
+                    place,
+                    branches.filter((b) => b.id !== branchId).map((b) => b.name),
+                  ),
+                )
+              }
+              businessName={profile.businessName}
+              showName={canRenameBranch}
+              searchHint="We’ll fill this branch’s address and map link from the listing you pick."
             />
-            <PlainField
-              label="Instagram"
-              value={profile.instagramUrl}
-              onChange={(v) => updateField("instagramUrl", v)}
-              placeholder="instagram.com/handle"
+            <BranchTimingsFields
+              value={hoursDraft}
+              onChange={(hours) => setDraftFor((prev) => ({ ...prev, hours }))}
             />
-            <PlainField
-              label="Facebook"
-              value={profile.facebookUrl}
-              onChange={(v) => updateField("facebookUrl", v)}
-              placeholder="facebook.com/page"
-            />
-            <PlainField
-              label="X (Twitter)"
-              value={profile.xUrl}
-              onChange={(v) => updateField("xUrl", v)}
-              placeholder="x.com/handle"
-            />
+            <BranchContactFields draft={branchDraft} onChange={updateBranchField} />
+            <BranchLinkFields draft={branchDraft} onChange={updateBranchField} />
           </>
         )}
 
@@ -576,8 +650,15 @@ export function MerchantProfileEditScreen({
               <button type="button" className="merchant-edit-cancel" onClick={onClose}>
                 Cancel
               </button>
-              <button type="button" className="cta-btn merchant-cta-accent" onClick={onSave}>
-                Save changes
+              <button
+                type="button"
+                className="cta-btn merchant-cta-accent"
+                disabled={branchSection && (!branchId || savingBranch)}
+                onClick={
+                  branchSection ? () => void handleSaveBranch() : onSave
+                }
+              >
+                {branchSection && savingBranch ? "Saving…" : "Save changes"}
               </button>
             </div>
           )}

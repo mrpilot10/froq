@@ -9,6 +9,7 @@ export default function BusinessSettingsPage() {
     role,
     branches,
     members,
+    editBranch,
     onEditSection,
     onManageBranches,
     onManageTeam,
@@ -21,6 +22,7 @@ export default function BusinessSettingsPage() {
       role={role}
       branchCount={branches.length}
       memberCount={members.length}
+      editBranch={editBranch}
       onEditSection={onEditSection}
       onManageBranches={onManageBranches}
       onManageTeam={onManageTeam}

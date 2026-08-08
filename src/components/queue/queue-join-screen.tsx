@@ -15,37 +15,74 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { formatPhoneDisplay, isValidEmail, isValidPhone } from "@/lib/auth/format";
+import {
+  formatPhoneDisplay,
+  isValidEmail,
+  isValidPhone,
+  nationalMobileInputDigits,
+} from "@/lib/auth/format";
 import { CALL_ACCEPT_MINUTES } from "@/lib/merchant/queue-settings";
 import { waitSegments } from "@/lib/queue/format";
-import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
-import { FroqFooter } from "@/components/shared/froq-footer";
+import { BusinessContactRow } from "@/components/loyalty/business-contact-row";
+import { QueueGuestFooter } from "@/components/queue/queue-guest-footer";
 import {
   getLiveQueueTicket,
   joinLiveQueue,
   type PublicQueueTicketStatus,
+  type QueueJoinGate,
   type QueuePageInitialTicket,
+  type QueuePageSocialLinks,
 } from "@/app/queue/actions";
 import { TurnstileField } from "@/components/turnstile/turnstile-field";
 import { useTurnstile } from "@/lib/turnstile/use-turnstile";
 
 interface QueueJoinScreenProps {
   slug: string;
+  /** From `?b=` on branch-scoped QR codes. */
+  branchSlug?: string | null;
   businessName: string;
   brandColor: string;
   logoUrl: string | null;
   banner?: string;
   bannerLink?: string;
-  /** From /queue/frq_… WhatsApp links — restores live ticket without localStorage. */
-  /** Queue ↔ AI Menu — show View our AI menu on the waitlist ticket. */
+  phone?: string;
+  address?: string;
+  googleMapsUrl?: string;
+  socialLinks?: QueuePageSocialLinks;
+  joinGate?: QueueJoinGate;
+  /** Queue ↔ AI Menu — show "View our AI menu" on the waitlist ticket. */
   aiMenuEnabled?: boolean;
+  /** From /queue/frq_… WhatsApp links — restores live ticket without localStorage. */
   initialTicket?: QueuePageInitialTicket;
 }
 
+const JOIN_GATE_COPY: Record<
+  Exclude<QueueJoinGate, "open">,
+  { title: string; sub: (businessName: string) => string }
+> = {
+  closed: {
+    title: "Queue isn't open",
+    sub: (businessName) =>
+      `This queue isn't open right now. Please check with ${businessName}, or try again later.`,
+  },
+  paused: {
+    title: "Queue is paused",
+    sub: () => "The queue is paused. Please try again in a few minutes.",
+  },
+  unavailable: {
+    title: "Not taking guests",
+    sub: () =>
+      "This queue isn't taking new guests right now. Please ask the staff.",
+  },
+};
+
 interface Ticket {
   entryId?: string;
-  /** Queue position number only (e.g. "1") — UI prefixes with #. */
+  /** Live place in line (e.g. "1") — UI prefixes with #. Recalculated on poll. */
   token: string;
+  /** Stable session ticket # (join order). Kept for seated/left “Was #N”. */
+  ticketNumber?: string;
+  /** Customer public token — Menu CTA when AI Menu integration is on. */
   publicToken?: string;
   name: string;
   phone: string;
@@ -77,16 +114,20 @@ function formatCountdown(msLeft: number) {
 
 export function QueueJoinScreen({
   slug,
+  branchSlug = null,
   businessName,
   brandColor,
   logoUrl,
   banner,
   bannerLink,
+  phone: storePhone,
+  address,
+  googleMapsUrl,
+  socialLinks = {},
+  joinGate = "open",
   aiMenuEnabled = false,
   initialTicket,
 }: QueueJoinScreenProps) {
-  useBrandTheme(brandColor);
-
   const storageKey = `froq.queue.ticket.${slug}`;
 
   const [ready, setReady] = useState(false);
@@ -149,7 +190,14 @@ export function QueueJoinScreen({
           status: remote.status,
           name: remote.name || prev.name,
           party: remote.partySize || prev.party,
-          token: queueNumberLabel(remote.tokenLabel, Number(prev.token) || 1),
+          // Always show live place-in-line while waiting/called — never session ticket #.
+          token: queueNumberLabel(remote.queuePosition, Number(prev.token) || 1),
+          ticketNumber: queueNumberLabel(
+            remote.tokenLabel,
+            Number(prev.ticketNumber) || Number(prev.token) || 1,
+          ),
+          publicToken: remote.publicToken || prev.publicToken,
+          waitMinutes: Math.max(1, remote.queuePosition) * 8,
           calledAtMs: remote.calledAtMs,
           acceptByMs: remote.acceptByMs,
         };
@@ -208,6 +256,7 @@ export function QueueJoinScreen({
         phone,
         partySize: party,
         email: email.trim() || undefined,
+        branchSlug,
         captchaToken: captcha.token ?? undefined,
       });
       captcha.reset();
@@ -220,7 +269,8 @@ export function QueueJoinScreen({
       const position = result.queuePosition ?? 1;
       const next: Ticket = {
         entryId: result.entryId,
-        token: queueNumberLabel(result.tokenLabel ?? position, position),
+        token: queueNumberLabel(position),
+        ticketNumber: queueNumberLabel(result.tokenLabel ?? position, position),
         publicToken: result.publicToken,
         name: name.trim(),
         phone: `+91${phone}`,
@@ -238,7 +288,7 @@ export function QueueJoinScreen({
     } finally {
       setJoining(false);
     }
-  }, [name, phone, email, party, persistTicket, businessName, slug, captcha]);
+  }, [name, phone, email, party, persistTicket, businessName, slug, branchSlug, captcha]);
 
   const leaveQueue = useCallback(() => {
     persistTicket(null);
@@ -268,13 +318,18 @@ export function QueueJoinScreen({
     left: { label: "Left queue", cls: "left" },
   };
 
+  const canJoin = joinGate === "open";
+  const showJoinForm = ready && !ticket && canJoin;
+  const showJoinGate = ready && !ticket && !canJoin;
+  const gateCopy = joinGate !== "open" ? JOIN_GATE_COPY[joinGate] : null;
+
   return (
     <div className="loyalty-page">
       <div className="loyalty-screen auth-screen">
         <header className="merchant-auth-head">
           <div className="merchant-auth-logo" style={{ background: brandColor }}>
             {logoUrl ? (
-              <Image src={logoUrl} alt={businessName} width={56} height={56} unoptimized />
+              <Image src={logoUrl} alt={businessName} width={88} height={88} unoptimized />
             ) : (
               <span className="merchant-auth-logo-letter" aria-hidden="true">
                 {brandInitial(businessName)}
@@ -282,13 +337,15 @@ export function QueueJoinScreen({
             )}
           </div>
           <h1 className="merchant-auth-brand">{businessName}</h1>
-          <p className="merchant-auth-tag qjoin-live">
-            <span className="qjoin-live-dot" aria-hidden="true" />
-            Live waitlist
-          </p>
+          <BusinessContactRow
+            phone={storePhone}
+            address={address}
+            googleMapsUrl={googleMapsUrl}
+            website={socialLinks.website}
+          />
         </header>
 
-        {(!ready || !ticket) && (
+        {(!ready || showJoinForm) && (
         <div className="auth-card">
           {!ready && (
             // A saved ticket is restored from localStorage, so we don't yet know
@@ -320,11 +377,11 @@ export function QueueJoinScreen({
             </div>
           )}
 
-          {ready && !ticket && (
+          {showJoinForm && (
             <>
               <div className="auth-head">
                 <div className="auth-badge" aria-hidden="true">
-                  <Users size={24} strokeWidth={2} color="#fff" />
+                  <Users size={24} strokeWidth={2} />
                 </div>
                 <h2 className="auth-title">Join the queue</h2>
                 <p className="auth-sub">
@@ -358,7 +415,7 @@ export function QueueJoinScreen({
                     placeholder="98765 43210"
                     value={phone}
                     onChange={(e) => {
-                      setPhone(e.target.value.replace(/\D/g, "").slice(0, 10));
+                      setPhone(nationalMobileInputDigits(e.target.value));
                       setError("");
                     }}
                   />
@@ -433,6 +490,18 @@ export function QueueJoinScreen({
         </div>
         )}
 
+        {showJoinGate && gateCopy && (
+          <div className="auth-card">
+            <div className="auth-head">
+              <div className="auth-badge" aria-hidden="true">
+                <Users size={24} strokeWidth={2} />
+              </div>
+              <h2 className="auth-title">{gateCopy.title}</h2>
+              <p className="auth-sub">{gateCopy.sub(businessName)}</p>
+            </div>
+          </div>
+        )}
+
         {ready && ticket && (
           <div className={`qjoin-ticket-view qjoin-ticket-view--${status}`}>
             <div className="pass-stack">
@@ -451,7 +520,7 @@ export function QueueJoinScreen({
                 {status === "waiting" && (
                   <>
                     <div className="qpass-token">
-                      <span className="qpass-token-label">Your number</span>
+                      <span className="qpass-token-label">In line</span>
                       <span className="qpass-token-value">
                         <span className="qpass-token-hash" aria-hidden="true">
                           #
@@ -491,7 +560,7 @@ export function QueueJoinScreen({
                 {status === "called" && (
                   <>
                     <div className="qpass-token qpass-token--compact">
-                      <span className="qpass-token-label">Your number</span>
+                      <span className="qpass-token-label">Your place</span>
                       <span className="qpass-token-value qpass-token-value--sm">
                         <span className="qpass-token-hash" aria-hidden="true">
                           #
@@ -534,7 +603,9 @@ export function QueueJoinScreen({
                     <h2 className="qpass-outcome-title">You&apos;re seated</h2>
                     <span className="qpass-token-name">
                       <UserRound size={13} strokeWidth={2.3} />
-                      #{queueNumberLabel(ticket.token)} · {ticket.name}
+                      #
+                      {queueNumberLabel(ticket.ticketNumber ?? ticket.token)} ·{" "}
+                      {ticket.name}
                     </span>
                   </div>
                 )}
@@ -550,7 +621,9 @@ export function QueueJoinScreen({
                     </p>
                     <span className="qpass-token-name">
                       <UserRound size={13} strokeWidth={2.3} />
-                      Was #{queueNumberLabel(ticket.token)} · {ticket.name}
+                      Was #
+                      {queueNumberLabel(ticket.ticketNumber ?? ticket.token)} ·{" "}
+                      {ticket.name}
                     </span>
                   </div>
                 )}
@@ -565,18 +638,43 @@ export function QueueJoinScreen({
                   </p>
                   <p className="qjoin-hint">
                     <Phone size={15} strokeWidth={2.2} />
-                    We&apos;ll text {formatPhoneDisplay(ticket.phone.replace("+91", ""))} when
-                    your table is ready.
+                    <span className="qjoin-hint-copy">
+                      We&apos;ll text{" "}
+                      <span className="qjoin-hint-phone">
+                        {formatPhoneDisplay(ticket.phone.replace("+91", ""))}
+                      </span>{" "}
+                      when your table is ready.
+                    </span>
                   </p>
+                  {aiMenuEnabled && ticket.publicToken ? (
+                    <a
+                      className="qjoin-ai-menu"
+                      href={`/m/${encodeURIComponent(ticket.publicToken)}`}
+                    >
+                      <UtensilsCrossed size={16} strokeWidth={2.3} aria-hidden="true" />
+                      View our AI menu
+                    </a>
+                  ) : null}
                 </>
               )}
 
               {status === "called" && (
-                <p className="qjoin-hint qjoin-hint--call">
-                  <Timer size={15} strokeWidth={2.2} />
-                  Your table is ready. Head over now — the timer above shows how long you
-                  have to arrive.
-                </p>
+                <>
+                  <p className="qjoin-hint qjoin-hint--call">
+                    <Timer size={15} strokeWidth={2.2} />
+                    Your table is ready. Head over now — the timer above shows how long you
+                    have to arrive.
+                  </p>
+                  {aiMenuEnabled && ticket.publicToken ? (
+                    <a
+                      className="qjoin-ai-menu"
+                      href={`/m/${encodeURIComponent(ticket.publicToken)}`}
+                    >
+                      <UtensilsCrossed size={16} strokeWidth={2.3} aria-hidden="true" />
+                      View our AI menu
+                    </a>
+                  ) : null}
+                </>
               )}
 
               {status === "left" && (
@@ -617,20 +715,9 @@ export function QueueJoinScreen({
               )}
 
               {status === "waiting" && (
-                <>
-                  {aiMenuEnabled && ticket.publicToken ? (
-                    <a
-                      className="qjoin-ai-menu"
-                      href={`/m/${encodeURIComponent(ticket.publicToken)}`}
-                    >
-                      <UtensilsCrossed size={16} strokeWidth={2.3} aria-hidden="true" />
-                      View our AI menu
-                    </a>
-                  ) : null}
-                  <button type="button" className="qjoin-leave" onClick={leaveQueue}>
-                    Leave the queue
-                  </button>
-                </>
+                <button type="button" className="qjoin-leave" onClick={leaveQueue}>
+                  Leave the queue
+                </button>
               )}
 
               {(status === "seated" || status === "left") && (
@@ -652,7 +739,7 @@ export function QueueJoinScreen({
           </div>
         )}
 
-        <FroqFooter />
+        <QueueGuestFooter socialLinks={socialLinks} />
       </div>
     </div>
   );

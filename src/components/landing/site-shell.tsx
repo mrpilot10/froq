@@ -12,7 +12,7 @@ import { FroqFooter } from "@/components/shared/froq-footer";
 const SITE_NAV = [
   { label: "Home", href: "/" },
   { label: "Loyalty Stamps", href: "/loyalty-stamps" },
-  { label: "Queue Management", href: "/queue-management" },
+  { label: "Smart Queue", href: "/queue-management" },
   { label: "Help", href: "/help" },
 ] as const;
 

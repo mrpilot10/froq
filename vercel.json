@@ -17,11 +17,23 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/reservation-auto-decline",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/reservation-queue-holds",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/approval-escalation",
       "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/birthday-double-stamps",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/billing-notices",
       "schedule": "0 * * * *"
     }
   ]

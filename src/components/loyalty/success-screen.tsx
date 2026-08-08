@@ -6,7 +6,7 @@ import type { BusinessInfo } from "@/lib/loyalty/types";
 import { BottomSheet } from "./bottom-sheet";
 import { GoogleIcon } from "./icons";
 import { ProgressBlock } from "./progress-block";
-import { SocialRow } from "./social-row";
+import { FollowUs } from "./social-row";
 
 const LOADING_DELAY_MS = 1400;
 
@@ -23,7 +23,7 @@ export function SuccessScreen({
   filled,
   onBackToCard,
 }: SuccessScreenProps) {
-  const { totalStamps } = business;
+  const { totalStamps, socialLinks } = business;
   const left = totalStamps - filled;
   const [isLoading, setIsLoading] = useState(false);
 
@@ -71,15 +71,13 @@ export function SuccessScreen({
             showPending
           />
 
-          <div className="thanks-divider" />
-
-          {business.socialLinks.googleReviews && (
-            <>
+          {socialLinks.googleReviews && (
+            <section className="thanks-grow">
               <div className="thanks-section-label">Help us grow</div>
 
               <a
                 className="review-btn"
-                href={business.socialLinks.googleReviews}
+                href={socialLinks.googleReviews}
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -94,14 +92,14 @@ export function SuccessScreen({
                   <ChevronRight size={14} strokeWidth={2.4} color="#fff" />
                 </div>
               </a>
-            </>
+            </section>
           )}
 
-          <SocialRow links={business.socialLinks} className="thanks-social-row" />
-
-          <button type="button" className="done-btn" onClick={onBackToCard}>
+          <button type="button" className="done-btn thanks-done" onClick={onBackToCard}>
             Done
           </button>
+
+          <FollowUs links={socialLinks} className="follow-us follow-us--footer" />
         </>
       )}
     </BottomSheet>

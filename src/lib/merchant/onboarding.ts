@@ -1,22 +1,29 @@
+import { DEFAULT_MENU_TAX_RATES } from "@/lib/menu/tax";
 import type { CheckoutAccount } from "./checkout";
 import type { MerchantProduct } from "./types";
 import { BRAND_COLORS } from "./constants";
 import { DEFAULT_ESTIMATED_WAIT_MINUTES } from "./queue-settings";
 import { DEFAULT_QUEUE_STORE_HOURS } from "./queue-hours";
 import { DEFAULT_RESERVATION_SETTINGS } from "./reservations";
+import {
+  type GeneratedTable,
+} from "./dining-tables";
 import type { RewardCooldownUnit } from "@/lib/loyalty/rules";
 
 /** One rendered screen in the onboarding wizard. */
 export type OnboardingStep =
   | "intro"
   | "identity" // first/last name, business name, logo
-  | "google" // find business on Google Places
+  | "location" // Google Places search that names and addresses the main branch
   | "verify" // email + phone verification before branding
   | "color" // brand color
-  | "contact" // address + social links
+  | "contact" // main branch phone/email/website + social links
+  | "hours" // store / branch open hours — once, shared by every product
+  | "branches" // product-mode: pick which global branches this product activates
   | "reward" // loyalty product setup
   | "queue" // queue product setup
   | "reservation" // reservations product setup
+  | "menu" // AI Menu product setup — what a table order bills
   | "outro";
 
 /**
@@ -35,7 +42,13 @@ export interface OnboardingDraft {
   emailVerified: boolean;
   phoneVerified: boolean;
   brandColor: string;
+  /** Name of the first (main) branch — derived from the Google listing. */
+  branchName: string;
   address: string;
+  /** Public store phone shown to customers, separate from the login phone. */
+  storePhone: string;
+  /** Public store email shown to customers, separate from the login email. */
+  storeEmail: string;
   websiteUrl: string;
   googleBusinessUrl: string;
   googlePlaceId: string;
@@ -53,18 +66,34 @@ export interface OnboardingDraft {
   rewardCooldownUnit: RewardCooldownUnit;
   /** Shown in onboarding. Condition: purchase of ₹X+. */
   minPurchaseAmount: number;
-  // Queue product block
-  estimatedWaitMinutes: number;
+  // Store hours (shared — filled on the hours step, used by queue + reservations)
   queueOpenTime: string;
   queueCloseTime: string;
   queueOpenDays: number[];
-  queueAutoSessions: boolean;
+  // Queue product block
+  estimatedWaitMinutes: number;
+  queueAutoStart: boolean;
+  queueAutoClose: boolean;
+  // AI Menu product block — percent added on top of a table order's subtotal
+  menuCgstPercent: number;
+  menuSgstPercent: number;
+  menuServiceChargePercent: number;
   // Reservations product block
   reservationMaxPartySize: number;
   reservationIntervalMinutes: number;
+  /** Seeded from store hours; kept in sync so reservation slots match the store. */
   reservationOpenTime: string;
   reservationCloseTime: string;
   reservationAllowSameDay: boolean;
+  /** Individual tables with editable numbers for the main branch. */
+  tables: GeneratedTable[];
+  /**
+   * Product-mode only: global branches to activate for this product.
+   * Seeded from existing locations (auto-select when there's exactly one).
+   */
+  selectedBranchIds: string[];
+  /** Product-mode only: name for creating the first global branch when none exist. */
+  newBranchName: string;
 }
 
 export function emptyOnboardingDraft(account?: CheckoutAccount | null): OnboardingDraft {
@@ -79,7 +108,10 @@ export function emptyOnboardingDraft(account?: CheckoutAccount | null): Onboardi
     emailVerified: false,
     phoneVerified: false,
     brandColor: BRAND_COLORS[0].value,
+    branchName: "",
     address: location,
+    storePhone: "",
+    storeEmail: "",
     websiteUrl: "",
     googleBusinessUrl: "",
     googlePlaceId: "",
@@ -97,22 +129,35 @@ export function emptyOnboardingDraft(account?: CheckoutAccount | null): Onboardi
     queueOpenTime: DEFAULT_QUEUE_STORE_HOURS.openTime,
     queueCloseTime: DEFAULT_QUEUE_STORE_HOURS.closeTime,
     queueOpenDays: [...DEFAULT_QUEUE_STORE_HOURS.openDays],
-    queueAutoSessions: DEFAULT_QUEUE_STORE_HOURS.autoSessions,
+    queueAutoStart: DEFAULT_QUEUE_STORE_HOURS.autoStart,
+    queueAutoClose: DEFAULT_QUEUE_STORE_HOURS.autoClose,
+    menuCgstPercent: DEFAULT_MENU_TAX_RATES.cgstPercent,
+    menuSgstPercent: DEFAULT_MENU_TAX_RATES.sgstPercent,
+    menuServiceChargePercent: DEFAULT_MENU_TAX_RATES.serviceChargePercent,
     reservationMaxPartySize: DEFAULT_RESERVATION_SETTINGS.maxPartySize,
     reservationIntervalMinutes: DEFAULT_RESERVATION_SETTINGS.intervalMinutes,
-    reservationOpenTime: DEFAULT_RESERVATION_SETTINGS.openTime,
-    reservationCloseTime: DEFAULT_RESERVATION_SETTINGS.closeTime,
+    // Same window as store hours — not a second booking-hours prompt.
+    reservationOpenTime: DEFAULT_QUEUE_STORE_HOURS.openTime,
+    reservationCloseTime: DEFAULT_QUEUE_STORE_HOURS.closeTime,
     reservationAllowSameDay: DEFAULT_RESERVATION_SETTINGS.allowSameDay,
+    tables: [],
+    selectedBranchIds: [],
+    newBranchName: "",
   };
 }
 
 function productStep(product: MerchantProduct): OnboardingStep {
   if (product === "queue") return "queue";
   if (product === "reservation") return "reservation";
+  if (product === "menu") return "menu";
   return "reward";
 }
 
-/** Ordered list of steps for a given mode + product. */
+/**
+ * Ordered list of steps for a given mode + product.
+ * Store hours are collected once in full onboarding (shared by every product).
+ * Product-mode reuses global branches — pick / create, then product settings.
+ */
 export function buildOnboardingSteps(
   mode: OnboardingMode,
   product: MerchantProduct,
@@ -121,27 +166,45 @@ export function buildOnboardingSteps(
     return [
       "intro",
       "identity",
-      "google",
+      "location",
       "verify",
       "color",
       "contact",
+      "hours",
       productStep(product),
       "outro",
     ];
   }
-  return ["intro", productStep(product), "outro"];
+  return ["intro", "branches", productStep(product), "outro"];
 }
 
 /** Whether the Continue button is enabled for the current step. */
-export function canAdvanceStep(step: OnboardingStep, draft: OnboardingDraft): boolean {
+export function canAdvanceStep(
+  step: OnboardingStep,
+  draft: OnboardingDraft,
+  opts?: { existingBranchCount?: number; maxActiveBranches?: number },
+): boolean {
   switch (step) {
     case "identity":
       return draft.firstName.trim().length > 0 && draft.businessName.trim().length > 0;
-    case "google":
-      // Optional — selecting a place auto-advances; Continue lets them skip.
+    case "location":
+      // Optional — picking a listing auto-advances; Continue lets them skip.
       return true;
     case "verify":
       return draft.emailVerified && draft.phoneVerified;
+    case "hours":
+      return (
+        draft.queueOpenDays.length > 0 &&
+        Boolean(draft.queueOpenTime) &&
+        Boolean(draft.queueCloseTime)
+      );
+    case "branches": {
+      const existing = opts?.existingBranchCount ?? 0;
+      const max = opts?.maxActiveBranches ?? Infinity;
+      if (existing === 0) return draft.newBranchName.trim().length > 0;
+      if (draft.selectedBranchIds.length === 0) return false;
+      return draft.selectedBranchIds.length <= max;
+    }
     case "reward":
       return draft.rewardTitle.trim().length > 0 && draft.rewardName.trim().length > 0;
     default:

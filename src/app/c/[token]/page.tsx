@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { resolveCustomerBrandColor } from "@/app/actions/customer";
 import { CustomerHubGate } from "@/components/auth/customer-hub-gate";
+import { BrandThemeStyle } from "@/components/shared/brand-theme-style";
 
 export const metadata: Metadata = {
   title: "Your Froq — customer hub",
@@ -17,5 +19,13 @@ export default async function CustomerHubPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  return <CustomerHubGate token={token} />;
+  // Paint the shop's colour before the card arrives, so the skeleton isn't green.
+  const brandColor = await resolveCustomerBrandColor(token);
+
+  return (
+    <>
+      <BrandThemeStyle color={brandColor} />
+      <CustomerHubGate token={token} />
+    </>
+  );
 }

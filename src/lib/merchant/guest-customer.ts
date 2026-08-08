@@ -9,6 +9,7 @@ export interface GuestCustomer {
   publicToken: string;
   phone: string;
   name: string;
+  email: string | null;
   whatsappAvailable: boolean;
   preferred: "sms" | "whatsapp";
 }
@@ -31,6 +32,8 @@ export async function ensureGuestCustomer(input: {
   branchId?: string | null;
   name: string;
   phone: string;
+  email?: string | null;
+  birthdate?: string | null;
 }): Promise<GuestCustomer | null> {
   const phoneE164 = normalizeGuestPhone(input.phone);
   if (!phoneE164) return null;
@@ -39,11 +42,13 @@ export async function ensureGuestCustomer(input: {
   const national = phoneE164.replace(/\D/g, "").slice(-10);
   const variants = [phoneE164, national, `91${national}`, `+91${national}`];
   const givenName = input.name.trim();
+  const email = input.email?.trim().toLowerCase() || null;
+  const birthdate = input.birthdate?.trim() || null;
 
   const { data: existing } = await admin
     .from("customers")
     .select(
-      "id, name, phone, public_token, whatsapp_available, preferred_notification_channel",
+      "id, name, phone, email, birthdate, public_token, whatsapp_available, preferred_notification_channel",
     )
     .eq("merchant_id", input.merchantId)
     .in("phone", variants)
@@ -51,17 +56,19 @@ export async function ensureGuestCustomer(input: {
     .maybeSingle();
 
   if (existing?.public_token) {
-    // The name given for this visit wins over whatever is on file: a shared or
-    // recycled phone number would otherwise greet the guest by someone else's
-    // name in every WhatsApp message.
-    if (givenName && givenName !== existing.name) {
-      await admin.from("customers").update({ name: givenName }).eq("id", existing.id);
+    const patch: Record<string, string> = {};
+    if (givenName && givenName !== existing.name) patch.name = givenName;
+    if (email && email !== existing.email) patch.email = email;
+    if (birthdate && birthdate !== existing.birthdate) patch.birthdate = birthdate;
+    if (Object.keys(patch).length > 0) {
+      await admin.from("customers").update(patch).eq("id", existing.id);
     }
     return {
       id: existing.id,
       publicToken: existing.public_token,
       phone: existing.phone,
       name: givenName || existing.name,
+      email: email ?? ((existing.email as string | null) ?? null),
       whatsappAvailable: existing.whatsapp_available === true,
       preferred:
         existing.preferred_notification_channel === "whatsapp" ? "whatsapp" : "sms",
@@ -75,9 +82,11 @@ export async function ensureGuestCustomer(input: {
       branch_id: input.branchId ?? null,
       name: givenName || "Guest",
       phone: phoneE164,
+      email,
+      birthdate,
     })
     .select(
-      "id, name, phone, public_token, whatsapp_available, preferred_notification_channel",
+      "id, name, phone, email, public_token, whatsapp_available, preferred_notification_channel",
     )
     .single();
 
@@ -103,6 +112,7 @@ export async function ensureGuestCustomer(input: {
     publicToken: inserted.public_token,
     phone: inserted.phone,
     name: inserted.name,
+    email: (inserted.email as string | null) ?? null,
     whatsappAvailable: inserted.whatsapp_available === true,
     preferred:
       inserted.preferred_notification_channel === "whatsapp" ? "whatsapp" : "sms",

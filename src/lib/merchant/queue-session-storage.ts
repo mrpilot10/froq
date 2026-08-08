@@ -22,6 +22,8 @@ export interface QueueSessionRecord extends QueueSessionActor {
   left: number;
   avgWait: number;
   longestWait: number;
+  /** Real `queue_sessions.id` when known (newer archives). */
+  dbSessionId?: string;
 }
 
 export interface QueueSessionSnapshot extends QueueSessionActor {
@@ -37,6 +39,8 @@ export interface QueueEndedSummary extends QueueSessionActor {
   left: number;
   avgWait: number;
   longestWait: number;
+  /** Real `queue_sessions.id` from the end-queue response. */
+  sessionId?: string;
 }
 
 export interface PersistedLiveQueue {
@@ -148,11 +152,21 @@ export function readQueueHistory(
 export function archiveQueueSession(
   queueUrl: string,
   branchId: string | null,
-  summary: Omit<QueueSessionRecord, "id">,
+  summary: Omit<QueueSessionRecord, "id"> & { sessionId?: string },
 ): QueueSessionRecord {
+  const dbSessionId = summary.sessionId ?? summary.dbSessionId;
   const record: QueueSessionRecord = {
-    id: `qs-${summary.number}-${summary.endedAtMs}`,
-    ...summary,
+    id: dbSessionId ?? `qs-${summary.number}-${summary.endedAtMs}`,
+    number: summary.number,
+    startedAtMs: summary.startedAtMs,
+    endedAtMs: summary.endedAtMs,
+    served: summary.served,
+    left: summary.left,
+    avgWait: summary.avgWait,
+    longestWait: summary.longestWait,
+    startedByName: summary.startedByName,
+    startedByRole: summary.startedByRole,
+    ...(dbSessionId ? { dbSessionId } : {}),
   };
 
   if (typeof window === "undefined") return record;
@@ -164,7 +178,8 @@ export function archiveQueueSession(
       ...existing.filter(
         (s) =>
           !(s.number === record.number && s.endedAtMs === record.endedAtMs) &&
-          s.id !== record.id,
+          s.id !== record.id &&
+          !(dbSessionId && s.dbSessionId === dbSessionId),
       ),
     ].slice(0, MAX_HISTORY);
     window.localStorage.setItem(
@@ -181,6 +196,60 @@ export function archiveQueueSession(
   }
 
   return record;
+}
+
+/**
+ * Drop a deleted session from local history. Matches on the db id when the
+ * record has one and falls back to number + end time for archives written
+ * before session ids were stored.
+ */
+export function removeQueueSessionRecord(
+  queueUrl: string,
+  branchId: string | null,
+  target: Pick<QueueSessionRecord, "id" | "number" | "endedAtMs"> & {
+    dbSessionId?: string;
+  },
+): void {
+  if (typeof window === "undefined") return;
+
+  const sameSession = (
+    candidate: { dbSessionId?: string; id?: string; number: number; endedAtMs: number },
+  ) =>
+    (target.dbSessionId != null && candidate.dbSessionId === target.dbSessionId) ||
+    (candidate.id != null && candidate.id === target.id) ||
+    (candidate.number === target.number && candidate.endedAtMs === target.endedAtMs);
+
+  try {
+    const next = readQueueHistory(queueUrl, branchId).filter(
+      (session) => !sameSession(session),
+    );
+    window.localStorage.setItem(
+      queueHistoryStorageKey(queueUrl, branchId),
+      JSON.stringify(next),
+    );
+
+    // A just-ended session also lives on the live snapshot, where it drives the
+    // home screen recap. Without clearing it there the deleted session reappears
+    // the next time History rebuilds its view.
+    const snapshot = readLiveQueueSnapshot(queueUrl, branchId);
+    const summary = snapshot?.endedSummary;
+    if (
+      snapshot &&
+      summary &&
+      sameSession({ dbSessionId: summary.sessionId, ...summary })
+    ) {
+      window.localStorage.setItem(
+        queueSessionStorageKey(queueUrl, branchId),
+        JSON.stringify({ ...snapshot, endedSummary: null }),
+      );
+    }
+
+    window.dispatchEvent(
+      new CustomEvent("froq:queue-history", { detail: { queueUrl, branchId } }),
+    );
+  } catch {
+    /* ignore quota */
+  }
 }
 
 /** Archived sessions plus the current ended summary if it isn't archived yet. */
@@ -209,7 +278,7 @@ export function loadQueueHistoryView(
     if (!already) {
       sessions = [
         {
-          id: `qs-current-${summary.number}-${summary.endedAtMs}`,
+          id: summary.sessionId ?? `qs-current-${summary.number}-${summary.endedAtMs}`,
           number: summary.number,
           startedAtMs: summary.startedAtMs,
           endedAtMs: summary.endedAtMs,
@@ -219,6 +288,7 @@ export function loadQueueHistoryView(
           longestWait: summary.longestWait,
           startedByName: summary.startedByName,
           startedByRole: summary.startedByRole,
+          ...(summary.sessionId ? { dbSessionId: summary.sessionId } : {}),
         },
         ...archived,
       ];
@@ -239,4 +309,93 @@ export function loadQueueHistoryView(
       : null;
 
   return { sessions, live };
+}
+
+/**
+ * Branch ids that have local queue history/session keys for this queue URL.
+ * `null` in read APIs maps to the literal `:all` bucket — that is NOT an
+ * aggregate of per-branch keys, so callers must never treat `null` as "sum all".
+ */
+function discoverQueueLocalBranchIds(queueUrl: string): string[] {
+  if (typeof window === "undefined") return [];
+  const prefixes = [
+    `${HISTORY_PREFIX}${queueUrl}:`,
+    `froq.queue.session:${queueUrl}:`,
+  ];
+  const ids = new Set<string>();
+  for (let i = 0; i < window.localStorage.length; i += 1) {
+    const key = window.localStorage.key(i);
+    if (!key) continue;
+    for (const prefix of prefixes) {
+      if (!key.startsWith(prefix)) continue;
+      const suffix = key.slice(prefix.length);
+      if (suffix && suffix !== "all") ids.add(suffix);
+    }
+  }
+  return Array.from(ids);
+}
+
+/**
+ * Merge archived (+ just-ended) sessions across every branch. Dedupes by
+ * db/session id so the same archive never counts twice.
+ */
+export function loadQueueHistoryAcrossBranches(
+  queueUrl: string,
+  branchIds: ReadonlyArray<string | null | undefined> = [],
+): QueueSessionRecord[] {
+  const ids = new Set<string | null>();
+  for (const id of branchIds) {
+    if (id) ids.add(id);
+  }
+  for (const id of discoverQueueLocalBranchIds(queueUrl)) {
+    ids.add(id);
+  }
+  // Legacy / mistaken `:all` bucket — include if present, never as a substitute
+  // for scanning real branch keys.
+  ids.add(null);
+
+  const seen = new Set<string>();
+  const sessions: QueueSessionRecord[] = [];
+  for (const branchId of ids) {
+    const { sessions: branchSessions } = loadQueueHistoryView(queueUrl, branchId);
+    for (const session of branchSessions) {
+      const key =
+        session.dbSessionId ??
+        `${session.id}:${session.number}:${session.endedAtMs}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      sessions.push(session);
+    }
+  }
+  return sessions.sort((a, b) => b.endedAtMs - a.endedAtMs);
+}
+
+/** Trial = from trial start; paid = calendar month start. */
+export function queueUsageWindowStartMs(input: {
+  now?: number;
+  onTrial: boolean;
+  trialStartedAt?: string | null;
+}): number {
+  const now = input.now ?? Date.now();
+  if (input.onTrial && input.trialStartedAt) {
+    const trialStart = Date.parse(input.trialStartedAt);
+    if (!Number.isNaN(trialStart)) return trialStart;
+  }
+  const d = new Date(now);
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * Plan meter: served + left across ALL branches in the billing/trial window.
+ */
+export function countQueueTicketsUsedInWindow(
+  queueUrl: string,
+  branchIds: ReadonlyArray<string | null | undefined>,
+  windowStartMs: number,
+): number {
+  return loadQueueHistoryAcrossBranches(queueUrl, branchIds)
+    .filter((s) => s.endedAtMs >= windowStartMs)
+    .reduce((sum, s) => sum + (Number(s.served) || 0) + (Number(s.left) || 0), 0);
 }

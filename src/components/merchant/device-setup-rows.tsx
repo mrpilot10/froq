@@ -248,7 +248,7 @@ export function DeviceSetupRows({
           : "Not available on this device"
         : iosNeedsInstall
           ? "Install Froq first, then open it to enable"
-          : "Real-time approval & reward alerts";
+          : "Real-time alerts on this device";
 
   const installSubText = installed
     ? "Installed on this device"
@@ -387,7 +387,7 @@ export function DeviceSetupPanel() {
       <div className="panel-card merchant-device-panel">
         <DeviceSetupRows state={state} variant="merged" />
         <p className="merchant-device-panel-hint">
-          Install Froq and allow notifications on each device where you want approval alerts.
+          Install Froq and allow notifications on each device where you want alerts.
         </p>
       </div>
     </div>

@@ -19,9 +19,13 @@ export type LiveQueueEntry = {
   acceptByMs?: number;
   seatedAtMs?: number;
   leftAtMs?: number;
-  status: "waiting" | "called" | "seated" | "left";
+  status: "held" | "waiting" | "called" | "seated" | "left";
   kind: "walkin" | "reservation";
   reservationTime?: string;
+  reservationId?: string;
+  /** Assigned table when seated. */
+  tableNumber?: number;
+  diningTableId?: string;
   /** How many of the 3 call reminders have been delivered (0–3). */
   remindersSent?: number;
 };
@@ -62,6 +66,9 @@ export function mapQueueEntryRow(row: QueueEntryRow): LiveQueueEntry {
     status: row.status,
     kind: row.kind,
     reservationTime: row.reservation_time ?? undefined,
+    reservationId: row.reservation_id ?? undefined,
+    tableNumber: row.table_number ?? undefined,
+    diningTableId: row.dining_table_id ?? undefined,
   };
 }
 
@@ -77,6 +84,13 @@ export function mapQueueSessionRow(row: QueueSessionRow): LiveQueueSession {
   };
 }
 
+/**
+ * Open (live/paused) session for one branch — or legacy unscoped (`branch_id` null)
+ * when `branchId` is omitted.
+ *
+ * Never falls back across branches. A Gala lookup must not return WING-E's
+ * session (and vice versa); that was coupling Start/End/hydrate across branches.
+ */
 export async function getOpenQueueSession(
   merchantId: string,
   branchId?: string | null,
@@ -93,11 +107,11 @@ export async function getOpenQueueSession(
       .order("started_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (branched) return branched as QueueSessionRow;
+    return (branched as QueueSessionRow | null) ?? null;
   }
 
-  // Prefer an unscoped session, then any open session for this merchant
-  // (QR joins often omit branch while the dashboard has one selected).
+  // No branch: only legacy merchant-wide (null branch_id) sessions.
+  // Do not pick an arbitrary branched session — that couples multi-branch queues.
   const { data: unscoped } = await admin
     .from("queue_sessions")
     .select("*")
@@ -107,17 +121,86 @@ export async function getOpenQueueSession(
     .order("started_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (unscoped) return unscoped as QueueSessionRow;
+  return (unscoped as QueueSessionRow | null) ?? null;
+}
 
-  const { data: anyOpen } = await admin
-    .from("queue_sessions")
-    .select("*")
+/** Default branch id for a merchant, or the oldest branch if none is marked default. */
+export async function resolveDefaultBranchId(
+  merchantId: string,
+): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data: preferred } = await admin
+    .from("branches")
+    .select("id")
     .eq("merchant_id", merchantId)
-    .in("status", ["live", "paused"])
-    .order("started_at", { ascending: false })
+    .eq("is_default", true)
+    .maybeSingle();
+  if (preferred?.id) return preferred.id;
+
+  const { data: anyBranch } = await admin
+    .from("branches")
+    .select("id")
+    .eq("merchant_id", merchantId)
+    .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
-  return (anyOpen as QueueSessionRow | null) ?? null;
+  return anyBranch?.id ?? null;
+}
+
+/**
+ * Resolve which branch a public queue join / gate should use.
+ * `branchSlug` from `?b=` wins; otherwise the merchant default branch.
+ */
+export async function resolveJoinBranchId(
+  merchantId: string,
+  branchSlug?: string | null,
+): Promise<string | null> {
+  const slug = branchSlug?.trim();
+  if (slug) {
+    const admin = createAdminClient();
+    const { data: branch } = await admin
+      .from("branches")
+      .select("id")
+      .eq("merchant_id", merchantId)
+      .eq("slug", slug)
+      .maybeSingle();
+    if (branch?.id) return branch.id;
+  }
+  return resolveDefaultBranchId(merchantId);
+}
+
+/**
+ * Branch id for merchant Start queue.
+ * Multi-branch merchants must pass an explicit branch; single-branch falls back
+ * to that branch so we never create a null `branch_id` global session.
+ */
+export async function resolveStartBranchId(
+  merchantId: string,
+  requestedBranchId?: string | null,
+): Promise<{ ok: true; branchId: string | null } | { ok: false; error: string }> {
+  const admin = createAdminClient();
+  const { data: branches } = await admin
+    .from("branches")
+    .select("id")
+    .eq("merchant_id", merchantId)
+    .order("created_at", { ascending: true });
+  const list = branches ?? [];
+
+  if (requestedBranchId) {
+    if (!list.some((b) => b.id === requestedBranchId)) {
+      return { ok: false, error: "Invalid branch." };
+    }
+    return { ok: true, branchId: requestedBranchId };
+  }
+
+  if (list.length > 1) {
+    return { ok: false, error: "Select a branch to start its queue." };
+  }
+  if (list.length === 1) {
+    return { ok: true, branchId: list[0].id };
+  }
+  // Legacy merchants with no branch rows — allow unscoped session.
+  return { ok: true, branchId: null };
 }
 
 export async function listSessionEntries(sessionId: string): Promise<QueueEntryRow[]> {
@@ -130,7 +213,14 @@ export async function listSessionEntries(sessionId: string): Promise<QueueEntryR
   return (data as QueueEntryRow[] | null) ?? [];
 }
 
-export async function countWaitingAhead(
+/** Statuses that still occupy a place-in-line slot on the live board. */
+export const ACTIVE_LINE_STATUSES = ["held", "waiting", "called"] as const;
+
+/**
+ * Count parties on the line (held + waiting + called) with joined_at <= before.
+ * Used for walk-in / reservation queue position including held slots ahead.
+ */
+export async function countLineAhead(
   sessionId: string,
   beforeJoinedAt: string,
 ): Promise<number> {
@@ -139,7 +229,43 @@ export async function countWaitingAhead(
     .from("queue_entries")
     .select("id", { count: "exact", head: true })
     .eq("session_id", sessionId)
-    .eq("status", "waiting")
-    .lt("joined_at", beforeJoinedAt);
+    .in("status", [...ACTIVE_LINE_STATUSES])
+    .lte("joined_at", beforeJoinedAt);
   return count ?? 0;
+}
+
+export async function countWaitingAhead(
+  sessionId: string,
+  beforeJoinedAt: string,
+): Promise<number> {
+  return countLineAhead(sessionId, beforeJoinedAt);
+}
+
+/**
+ * Stable session ticket # — join order among *all* entries (including seated/left).
+ * Do not show this as “place in line”; use {@link liveQueuePosition} for that.
+ */
+export async function sessionTicketNumber(
+  sessionId: string,
+  joinedAt: string,
+): Promise<number> {
+  const admin = createAdminClient();
+  const { count } = await admin
+    .from("queue_entries")
+    .select("id", { count: "exact", head: true })
+    .eq("session_id", sessionId)
+    .lte("joined_at", joinedAt);
+  return Math.max(1, count ?? 1);
+}
+
+/**
+ * 1-based place in line among held + waiting + called guests.
+ * Seated / left do not count. Held reservation slots block places ahead so
+ * walk-in ETAs include upcoming confirmed reservations.
+ */
+export async function liveQueuePosition(
+  sessionId: string,
+  joinedAt: string,
+): Promise<number> {
+  return Math.max(1, await countLineAhead(sessionId, joinedAt));
 }

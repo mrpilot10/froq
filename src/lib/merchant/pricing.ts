@@ -25,6 +25,8 @@ export interface PricingPlan {
   /** Absolute savings vs paying monthly for 12 months. */
   saveAmount?: number;
   saveLabel?: string;
+  /** Yearly marketing badge, e.g. "1 Month Free". */
+  freeMonthsLabel?: string;
 }
 
 function inr(amount: number) {
@@ -41,8 +43,7 @@ const LOYALTY_FEATURES = {
     "WhatsApp Notifications",
     "Advanced Analytics",
     "Email Support",
-    "Secure Cloud Hosting",
-    "Free Updates",
+    "Unlimited Staff",
   ],
   growth: [
     "3 Branches",
@@ -52,9 +53,8 @@ const LOYALTY_FEATURES = {
     "QR Stamp Collection",
     "WhatsApp Notifications",
     "Advanced Analytics",
-    "Add Staff",
-    "Priority Support",
-    "Secure Cloud Hosting",
+    "Email Support",
+    "Unlimited Staff",
   ],
   pro: [
     "10 Branches",
@@ -64,9 +64,8 @@ const LOYALTY_FEATURES = {
     "QR Stamp Collection",
     "WhatsApp Notifications",
     "Advanced Analytics",
-    "Add Staff",
-    "Priority Support",
-    "Multi-Branch Dashboard",
+    "Email Support",
+    "Unlimited Staff",
   ],
 } as const;
 
@@ -88,9 +87,10 @@ function yearlyPlan(input: {
   description: string;
   features: string[];
   highlighted?: boolean;
+  freeMonthsLabel?: string;
 }): PricingPlan {
   const monthlyEquivalent = Math.round(input.yearlyPrice / 12);
-  const saveAmount = input.yearlyList - input.yearlyPrice;
+  const saveAmount = Math.max(0, input.yearlyList - input.yearlyPrice);
   return {
     id: `${input.id}-yearly`,
     name: input.name,
@@ -102,12 +102,13 @@ function yearlyPlan(input: {
     features: [...input.features],
     highlighted: input.highlighted,
     billing: "yearly",
-    listPrice: input.yearlyList,
-    listPriceLabel: inr(input.yearlyList),
+    listPrice: saveAmount > 0 ? input.yearlyList : undefined,
+    listPriceLabel: saveAmount > 0 ? inr(input.yearlyList) : undefined,
     monthlyEquivalent,
     monthlyEquivalentLabel: inr(monthlyEquivalent),
-    saveAmount,
-    saveLabel: inr(saveAmount),
+    saveAmount: saveAmount > 0 ? saveAmount : undefined,
+    saveLabel: saveAmount > 0 ? inr(saveAmount) : undefined,
+    freeMonthsLabel: input.freeMonthsLabel ?? "2 Months Free",
   };
 }
 
@@ -139,8 +140,9 @@ const STARTER_META = {
   name: "Starter",
   product: "loyalty" as const,
   monthlyPrice: 299,
-  yearlyPrice: 2999,
+  yearlyPrice: 3299,
   yearlyList: 3588,
+  freeMonthsLabel: "1 Month Free",
   description: "For single location shops launching loyalty today.",
   features: [...LOYALTY_FEATURES.starter],
 };
@@ -150,8 +152,9 @@ const GROWTH_META = {
   name: "Growth",
   product: "loyalty" as const,
   monthlyPrice: 699,
-  yearlyPrice: 6999,
+  yearlyPrice: 7349,
   yearlyList: 8388,
+  freeMonthsLabel: "1.5 Months Free",
   description: "For busy stores that want insights and faster ops.",
   features: [...LOYALTY_FEATURES.growth],
   highlighted: true,
@@ -164,6 +167,7 @@ const PRO_META = {
   monthlyPrice: 1499,
   yearlyPrice: 14999,
   yearlyList: 17988,
+  freeMonthsLabel: "2 Months Free",
   description: "For brands managing loyalty across many locations.",
   features: [...LOYALTY_FEATURES.pro],
 };
@@ -187,7 +191,7 @@ const QUEUE_FEATURES = {
     "1 Branch",
     "2,000 Queue Tickets / Month",
     "Unlimited Staff Accounts",
-    "Digital Queue Management",
+    "Digital Smart Queue",
     "QR Queue Join",
     "WhatsApp Notifications",
     "Live Queue Display",
@@ -200,7 +204,7 @@ const QUEUE_FEATURES = {
     "3 Branches",
     "5,000 Queue Tickets / Month",
     "Unlimited Staff Accounts",
-    "Digital Queue Management",
+    "Digital Smart Queue",
     "QR Queue Join",
     "WhatsApp Notifications",
     "Live Queue Display",
@@ -213,7 +217,7 @@ const QUEUE_FEATURES = {
     "10 Branches",
     "20,000 Queue Tickets / Month",
     "Unlimited Staff Accounts",
-    "Digital Queue Management",
+    "Digital Smart Queue",
     "QR Queue Join",
     "WhatsApp Notifications",
     "Live Queue Display",
@@ -229,8 +233,9 @@ const QUEUE_STARTER_META = {
   name: "Starter",
   product: "queue" as const,
   monthlyPrice: 799,
-  yearlyPrice: 7999,
+  yearlyPrice: 8799,
   yearlyList: 9588,
+  freeMonthsLabel: "1 Month Free",
   description: "For a single location running a digital waitlist.",
   features: [...QUEUE_FEATURES.starter],
 };
@@ -240,8 +245,9 @@ const QUEUE_GROWTH_META = {
   name: "Growth",
   product: "queue" as const,
   monthlyPrice: 1499,
-  yearlyPrice: 14999,
+  yearlyPrice: 15799,
   yearlyList: 17988,
+  freeMonthsLabel: "1.5 Months Free",
   description: "For busy venues with more tickets and locations.",
   features: [...QUEUE_FEATURES.growth],
   highlighted: true,
@@ -254,6 +260,7 @@ const QUEUE_PRO_META = {
   monthlyPrice: 3999,
   yearlyPrice: 39999,
   yearlyList: 47988,
+  freeMonthsLabel: "2 Months Free",
   description: "For multi-branch brands with high queue volume.",
   features: [...QUEUE_FEATURES.pro],
 };
@@ -265,7 +272,7 @@ export const QUEUE_PLANS: PricingPlan[] = [
   monthlyPlan(QUEUE_PRO_META),
 ];
 
-/** Yearly Queue Management variants (same features, 2 months free). */
+/** Yearly Queue Management variants (same features; free months vary by tier). */
 export const YEARLY_QUEUE_PLANS: PricingPlan[] = [
   yearlyPlan(QUEUE_STARTER_META),
   yearlyPlan(QUEUE_GROWTH_META),
@@ -275,36 +282,39 @@ export const YEARLY_QUEUE_PLANS: PricingPlan[] = [
 const RESERVATION_FEATURES = {
   starter: [
     "1 Branch",
-    "Unlimited Booking Requests",
+    "500 Reservations / Month",
     "QR & Link Reservations",
     "WhatsApp Confirmations",
     "Automatic Reminders",
+    "Suggest Another Time",
     "No-Show Tracking",
     "Reservation Analytics",
-    "Cloud Hosting & Automatic Updates",
-    "Email Support",
+    "Multi-Branch Dashboard",
+    "Email & Chat Support",
   ],
   growth: [
     "3 Branches",
-    "Unlimited Booking Requests",
+    "2,000 Reservations / Month",
     "QR & Link Reservations",
     "WhatsApp Confirmations",
     "Automatic Reminders",
     "Suggest Another Time",
     "No-Show Tracking",
     "Reservation Analytics",
-    "Priority Support",
+    "Multi-Branch Dashboard",
+    "Email & Chat Support",
   ],
   pro: [
     "10 Branches",
-    "Unlimited Booking Requests",
+    "10,000 Reservations / Month",
     "QR & Link Reservations",
     "WhatsApp Confirmations",
     "Automatic Reminders",
     "Suggest Another Time",
     "No-Show Tracking",
+    "Reservation Analytics",
     "Multi-Branch Dashboard",
-    "Premium Support",
+    "Email & Chat Support",
   ],
 } as const;
 
@@ -312,9 +322,9 @@ const RESERVATION_STARTER_META = {
   id: "reservation-starter",
   name: "Starter",
   product: "reservation" as const,
-  monthlyPrice: 499,
-  yearlyPrice: 4999,
-  yearlyList: 5988,
+  monthlyPrice: 299,
+  yearlyPrice: 2999,
+  yearlyList: 3588,
   description: "For a single restaurant taking bookings on WhatsApp today.",
   features: [...RESERVATION_FEATURES.starter],
 };
@@ -323,9 +333,9 @@ const RESERVATION_GROWTH_META = {
   id: "reservation-growth",
   name: "Growth",
   product: "reservation" as const,
-  monthlyPrice: 999,
-  yearlyPrice: 9999,
-  yearlyList: 11988,
+  monthlyPrice: 699,
+  yearlyPrice: 6999,
+  yearlyList: 8388,
   description: "For busy dining rooms juggling requests across locations.",
   features: [...RESERVATION_FEATURES.growth],
   highlighted: true,
@@ -335,9 +345,9 @@ const RESERVATION_PRO_META = {
   id: "reservation-pro",
   name: "Pro",
   product: "reservation" as const,
-  monthlyPrice: 2499,
-  yearlyPrice: 24999,
-  yearlyList: 29988,
+  monthlyPrice: 1499,
+  yearlyPrice: 14999,
+  yearlyList: 17988,
   description: "For multi-branch brands with high booking volume.",
   features: [...RESERVATION_FEATURES.pro],
 };
@@ -354,6 +364,93 @@ export const YEARLY_RESERVATION_PLANS: PricingPlan[] = [
   yearlyPlan(RESERVATION_STARTER_META),
   yearlyPlan(RESERVATION_GROWTH_META),
   yearlyPlan(RESERVATION_PRO_META),
+];
+
+const MENU_FEATURES = {
+  starter: [
+    "1 Branch",
+    "5,000 AI Credits / month",
+    "Unlimited Menu Items",
+    "Unlimited QR Scans",
+    "Unlimited Customers",
+    "Unlimited Languages",
+    "Menu Analytics",
+    "AI Insights",
+    "Email Support",
+  ],
+  growth: [
+    "3 Branches",
+    "20,000 AI Credits / month",
+    "Unlimited Menu Items",
+    "Unlimited QR Scans",
+    "Unlimited Customers",
+    "Unlimited Languages",
+    "Menu Analytics",
+    "AI Insights",
+    "Priority Support",
+  ],
+  pro: [
+    "10 Branches",
+    "100,000 AI Credits / month",
+    "Unlimited Menu Items",
+    "Unlimited QR Scans",
+    "Unlimited Customers",
+    "Unlimited Languages",
+    "Menu Analytics",
+    "AI Insights",
+    "Priority Support",
+  ],
+} as const;
+
+const MENU_STARTER_META = {
+  id: "menu-starter",
+  name: "Starter",
+  product: "menu" as const,
+  monthlyPrice: 699,
+  yearlyPrice: 7699,
+  yearlyList: 8388,
+  freeMonthsLabel: "1 Month Free",
+  description: "For a single restaurant putting its menu behind a QR.",
+  features: [...MENU_FEATURES.starter],
+};
+
+const MENU_GROWTH_META = {
+  id: "menu-growth",
+  name: "Growth",
+  product: "menu" as const,
+  monthlyPrice: 1299,
+  yearlyPrice: 13699,
+  yearlyList: 15588,
+  freeMonthsLabel: "1.5 Months Free",
+  description: "For busy kitchens with a bigger menu and more guests asking.",
+  features: [...MENU_FEATURES.growth],
+  highlighted: true,
+};
+
+const MENU_PRO_META = {
+  id: "menu-pro",
+  name: "Pro",
+  product: "menu" as const,
+  monthlyPrice: 2599,
+  yearlyPrice: 25999,
+  yearlyList: 31188,
+  freeMonthsLabel: "2 Months Free",
+  description: "For multi-branch brands running a large AI menu.",
+  features: [...MENU_FEATURES.pro],
+};
+
+/** Monthly AI Menu plans (billed separately from the other products). */
+export const MENU_PLANS: PricingPlan[] = [
+  monthlyPlan(MENU_STARTER_META),
+  monthlyPlan(MENU_GROWTH_META),
+  monthlyPlan(MENU_PRO_META),
+];
+
+/** Yearly AI Menu variants (same features; free months vary by tier). */
+export const YEARLY_MENU_PLANS: PricingPlan[] = [
+  yearlyPlan(MENU_STARTER_META),
+  yearlyPlan(MENU_GROWTH_META),
+  yearlyPlan(MENU_PRO_META),
 ];
 
 /** Free tier after a paid period ends (post-cancellation). */
@@ -382,6 +479,8 @@ export const ALL_PLANS: PricingPlan[] = [
   ...YEARLY_QUEUE_PLANS,
   ...RESERVATION_PLANS,
   ...YEARLY_RESERVATION_PLANS,
+  ...MENU_PLANS,
+  ...YEARLY_MENU_PLANS,
 ];
 
 export function getPlanById(id: string) {
@@ -389,6 +488,7 @@ export function getPlanById(id: string) {
   // Legacy single-tier product checkout links still land on Growth.
   if (id === "queue") return QUEUE_PLANS[1];
   if (id === "reservation") return RESERVATION_PLANS[1];
+  if (id === "menu") return MENU_PLANS[1];
   return ALL_PLANS.find((plan) => plan.id === id) ?? PRICING_PLANS[1];
 }
 
@@ -411,6 +511,9 @@ export function plansForProduct(
   if (product === "reservation") {
     return billing === "yearly" ? YEARLY_RESERVATION_PLANS : RESERVATION_PLANS;
   }
+  if (product === "menu") {
+    return billing === "yearly" ? YEARLY_MENU_PLANS : MENU_PLANS;
+  }
   return billing === "yearly" ? YEARLY_PRICING_PLANS : PRICING_PLANS;
 }
 
@@ -418,6 +521,7 @@ export function plansForProduct(
 export function getDefaultPlanForProduct(product: MerchantProduct): PricingPlan {
   if (product === "queue") return QUEUE_PLANS[1];
   if (product === "reservation") return RESERVATION_PLANS[1];
+  if (product === "menu") return MENU_PLANS[1];
   return PRICING_PLANS[1];
 }
 

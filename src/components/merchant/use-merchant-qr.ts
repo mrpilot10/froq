@@ -31,10 +31,15 @@ function merchantQrOrigin(): string {
   return "https://froq.io";
 }
 
-/** Absolute join URL encoded into the QR (and used by Open / Copy). */
-export function joinUrlFor(
+/**
+ * What a printed QR can point at: a single product, or `"hub"` — the landing
+ * page that lists every product the merchant has switched on.
+ */
+export type QrTarget = MerchantProduct | "hub";
+
+function joinPathFor(
   profile: MerchantProfile,
-  product: MerchantProduct = "loyalty",
+  product: QrTarget = "loyalty",
   branchSlug?: string | null,
 ) {
   const slug = profile.slug || slugify(profile.businessName) || "shop";
@@ -43,9 +48,22 @@ export function joinUrlFor(
       ? `/queue/${slug}`
       : product === "reservation"
         ? `/r/${slug}`
-        : `/join/${slug}`;
+        : product === "menu"
+          ? `/menu/${slug}`
+          : product === "hub"
+            ? `/b/${slug}`
+            : `/join/${slug}`;
   const query = branchSlug ? `?b=${encodeURIComponent(branchSlug)}` : "";
-  return `${merchantQrOrigin()}${path}${query}`;
+  return `${path}${query}`;
+}
+
+/** Absolute join URL encoded into the QR (and used by Open / Copy). */
+export function joinUrlFor(
+  profile: MerchantProfile,
+  product: QrTarget = "loyalty",
+  branchSlug?: string | null,
+) {
+  return `${merchantQrOrigin()}${joinPathFor(profile, product, branchSlug)}`;
 }
 
 /** Merchant-facing chip text: `froq.io/join/meer-s-cafe` (no scheme). */
@@ -55,12 +73,28 @@ export function displayJoinUrl(absoluteUrl: string): string {
 
 export function useMerchantQr(
   profile: MerchantProfile,
-  product: MerchantProduct = "loyalty",
+  product: QrTarget = "loyalty",
   branchSlug?: string | null,
 ) {
   const [qrUrl, setQrUrl] = useState<string | null>(null);
+  const pathWithQuery = joinPathFor(profile, product, branchSlug);
+  // Printed QRs always encode the public origin. In local dev, Open/Copy use
+  // this machine so merchants can test without leaving localhost.
   const joinUrl = joinUrlFor(profile, product, branchSlug);
-  const displayUrl = displayJoinUrl(joinUrl);
+  const [openUrl, setOpenUrl] = useState(joinUrl);
+  const displayUrl = displayJoinUrl(openUrl);
+
+  useEffect(() => {
+    if (
+      process.env.NODE_ENV === "development" &&
+      typeof window !== "undefined" &&
+      /localhost|127\.0\.0\.1/i.test(window.location.hostname)
+    ) {
+      setOpenUrl(`${window.location.origin}${pathWithQuery}`);
+    } else {
+      setOpenUrl(joinUrl);
+    }
+  }, [joinUrl, pathWithQuery]);
 
   useEffect(() => {
     let active = true;
@@ -85,7 +119,11 @@ export function useMerchantQr(
       ? "queue-qr"
       : product === "reservation"
         ? "reservation-qr"
-        : "loyalty-qr"
+        : product === "menu"
+          ? "menu-qr"
+          : product === "hub"
+            ? "qr"
+            : "loyalty-qr"
   }`;
 
   const download = useCallback(() => {
@@ -150,5 +188,5 @@ export function useMerchantQr(
     }, 250);
   }, [qrUrl, profile.businessName, displayUrl]);
 
-  return { qrUrl, joinUrl, displayUrl, download, print };
+  return { qrUrl, joinUrl: openUrl, displayUrl, download, print };
 }

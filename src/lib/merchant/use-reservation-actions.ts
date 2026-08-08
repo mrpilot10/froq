@@ -41,7 +41,7 @@ export interface ReservationActions {
   runAction: (
     reservation: Reservation,
     action: ReservationActionId,
-    input?: { reason?: string },
+    input?: { reason?: string; tableId?: string | null },
   ) => Promise<boolean>;
   suggest: (
     reservation: Reservation,
@@ -65,7 +65,7 @@ export function useReservationActions(
     async (
       reservation: Reservation,
       action: ReservationActionId,
-      input?: { reason?: string },
+      input?: { reason?: string; tableId?: string | null },
     ): Promise<boolean> => {
       // "suggest" needs a date and time, so it goes through suggest() instead.
       if (action === "suggest") return false;
@@ -75,6 +75,7 @@ export function useReservationActions(
           reservationId: reservation.id,
           action: ACTION_TO_SERVER[action],
           reason: input?.reason,
+          tableId: input?.tableId,
         });
         if (!result.ok || !result.reservation) {
           toast.error(result.error ?? "Couldn't update the reservation.");
@@ -82,7 +83,13 @@ export function useReservationActions(
         }
         applyUpdated(result.reservation);
         await reload();
-        toast.success(successMessage(action, reservation.customerName));
+        const tableBit =
+          action === "confirm" && result.reservation.tableNumber != null
+            ? ` · Table ${result.reservation.tableNumber}`
+            : "";
+        toast.success(
+          `${successMessage(action, reservation.customerName)}${tableBit}`,
+        );
         return true;
       } finally {
         setBusyId(null);

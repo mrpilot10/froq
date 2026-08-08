@@ -1,12 +1,25 @@
-import { ChevronRight, Link2, LogOut, MapPin, Settings, Store, Users } from "lucide-react";
+import { ChevronRight, LogOut, MapPin, Settings, Store, Users } from "lucide-react";
 import Image from "next/image";
-import type { MemberRole, MerchantEditSection, MerchantProfile } from "@/lib/merchant/types";
+import type {
+  Branch,
+  MemberRole,
+  MerchantEditSection,
+  MerchantProfile,
+} from "@/lib/merchant/types";
+import {
+  canManageTeam,
+  canViewBusinessSettings,
+} from "@/lib/merchant/roles";
+import { formatHoursSummary } from "@/lib/merchant/queue-hours";
+import { hoursFromBranch } from "./queue/queue-hours-fields";
 
 interface MerchantProfileScreenProps {
   profile: MerchantProfile;
   role: MemberRole;
   branchCount: number;
   memberCount: number;
+  /** Branch whose contact details the branch-scoped rows will open. */
+  editBranch?: Branch | null;
   onEditSection: (section: MerchantEditSection) => void;
   onManageBranches: () => void;
   onManageTeam: () => void;
@@ -14,37 +27,51 @@ interface MerchantProfileScreenProps {
   onDeleteAccount?: () => void;
 }
 
-const SETTINGS_GROUPS: Array<{
-  title: string;
-  items: Array<{
-    id: MerchantEditSection;
-    label: string;
-    value: string | ((profile: MerchantProfile) => string);
-    Icon: typeof Store;
-  }>;
-}> = [
+type SettingsRow = {
+  id: MerchantEditSection;
+  label: string;
+  value: string | ((branch: Branch | null) => string);
+  Icon: typeof Store;
+};
+
+const STORE_ROWS: SettingsRow[] = [
+  { id: "business", label: "Store details", value: "Logo, brand color & name", Icon: Store },
+];
+
+/** Writes to a single branch — a chain publishes different details per location. */
+const BRANCH_ROWS: SettingsRow[] = [
   {
-    title: "Store",
-    items: [
-      { id: "business", label: "Store details", value: "Logo, color, name & address", Icon: Store },
-      {
-        id: "google",
-        label: "Google Business",
-        value: (profile) =>
-          profile.googlePlaceId || profile.googleMapsUrl
-            ? profile.businessName || "Linked"
-            : "Find your business on Google",
-        Icon: MapPin,
-      },
-      { id: "links", label: "Links & social", value: "Website & socials", Icon: Link2 },
-    ],
+    id: "branch",
+    label: "Branch details",
+    value: branchSummary,
+    Icon: MapPin,
   },
-  {
-    title: "Account",
-    items: [
-      { id: "account", label: "Account settings", value: "Email, phone, security", Icon: Settings },
-    ],
-  },
+];
+
+function branchSummary(branch: Branch | null): string {
+  if (!branch) return "Add a branch to publish details";
+  const hours = formatHoursSummary({
+    ...hoursFromBranch(branch),
+    autoStart: false,
+    autoClose: false,
+  });
+  const filled = [
+    branch.address,
+    branch.phone,
+    branch.email,
+    branch.websiteUrl,
+    branch.instagramUrl,
+    branch.facebookUrl,
+    branch.xUrl,
+    branch.googleBusinessUrl,
+  ].filter((v) => v?.trim()).length;
+  if (filled === 0) return hours;
+  const listing = branch.googlePlaceId?.trim() || branch.googleMapsUrl?.trim();
+  return `${hours} · ${filled} detail${filled === 1 ? "" : "s"}${listing ? " · Google" : ""}`;
+}
+
+const ACCOUNT_ROWS: SettingsRow[] = [
+  { id: "account", label: "Account settings", value: "Email, phone, security", Icon: Settings },
 ];
 
 export function MerchantProfileScreen({
@@ -52,6 +79,7 @@ export function MerchantProfileScreen({
   role,
   branchCount,
   memberCount,
+  editBranch = null,
   onEditSection,
   onManageBranches,
   onManageTeam,
@@ -59,7 +87,8 @@ export function MerchantProfileScreen({
   onDeleteAccount,
 }: MerchantProfileScreenProps) {
   const canManageBranches = role === "owner";
-  const canManageTeam = role === "owner";
+  const showTeam = canManageTeam(role);
+  const showStoreDetails = canViewBusinessSettings(role);
   const initials = profile.businessName
     .split(/\s+/)
     .map((w) => w[0])
@@ -67,11 +96,24 @@ export function MerchantProfileScreen({
     .slice(0, 2)
     .toUpperCase();
 
+  const settingsGroups = [
+    ...(showStoreDetails ? [{ title: "Store", rows: STORE_ROWS }] : []),
+    {
+      title: editBranch ? `Branch · ${editBranch.name}` : "Branch",
+      rows: BRANCH_ROWS,
+    },
+    { title: "Account", rows: ACCOUNT_ROWS },
+  ];
+
   return (
     <div className="tab-screen">
       <div className="tab-head">
         <h2 className="tab-title">Business settings</h2>
-        <p className="tab-sub">Manage your store identity and account</p>
+        <p className="tab-sub">
+          {showStoreDetails
+            ? "Manage your store identity and account"
+            : "Manage your branch details and account"}
+        </p>
       </div>
 
       <div className="panel-card profile-panel merchant-identity-card">
@@ -99,17 +141,14 @@ export function MerchantProfileScreen({
           </div>
           <div>
             <h3 className="profile-name">{profile.businessName}</h3>
-            {(profile.ownerFirstName || profile.ownerLastName) && (
-              <p className="profile-meta">
-                {`${profile.ownerFirstName} ${profile.ownerLastName}`.trim()}
-              </p>
-            )}
-            <p className="profile-meta">{profile.address || "Add your store address"}</p>
+            <p className="profile-meta">
+              {editBranch?.address?.trim() || "Add your store address"}
+            </p>
           </div>
         </div>
       </div>
 
-      {(canManageBranches || canManageTeam) && (
+      {(canManageBranches || showTeam) && (
         <div className="merchant-settings-group">
           <h3 className="merchant-settings-title">Workspace</h3>
           <div className="panel-card merchant-settings-panel">
@@ -127,7 +166,7 @@ export function MerchantProfileScreen({
                 <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />
               </button>
             )}
-            {canManageTeam && (
+            {showTeam && (
               <button type="button" className="merchant-settings-row" onClick={onManageTeam}>
                 <div className="profile-row-icon">
                   <Users size={18} strokeWidth={2.2} />
@@ -145,11 +184,11 @@ export function MerchantProfileScreen({
         </div>
       )}
 
-      {SETTINGS_GROUPS.map((group) => (
+      {settingsGroups.map((group) => (
         <div key={group.title} className="merchant-settings-group">
           <h3 className="merchant-settings-title">{group.title}</h3>
           <div className="panel-card merchant-settings-panel">
-            {group.items.map(({ id, label, value, Icon }) => (
+            {group.rows.map(({ id, label, value, Icon }) => (
               <button
                 key={id}
                 type="button"
@@ -162,7 +201,7 @@ export function MerchantProfileScreen({
                 <div className="profile-row-copy">
                   <div className="profile-row-label">{label}</div>
                   <div className="profile-row-value profile-row-value--soft">
-                    {typeof value === "function" ? value(profile) : value}
+                    {typeof value === "function" ? value(editBranch) : value}
                   </div>
                 </div>
                 <ChevronRight size={16} strokeWidth={2.2} className="profile-row-arrow" />

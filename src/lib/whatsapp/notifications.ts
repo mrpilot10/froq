@@ -15,11 +15,11 @@ import {
   buildQueueCustomerCalledTemplate,
   buildQueueCustomerSeatedTemplate,
   buildQueueCustomerSkippedTemplate,
-  buildQueueJoinedTemplate,
   buildQueueJoinedMenuTemplate,
+  buildQueueJoinedTemplate,
   buildSeatedMenuTemplate,
-  canonicalQueueTemplateName,
   buildBirthdayBonusStampsTemplate,
+  canonicalQueueTemplateName,
   requireNonEmptyString,
   requireNumberAsString,
   WhatsAppTemplateValidationError,
@@ -27,6 +27,7 @@ import {
   type QueuePartyTemplateInput,
   type WhatsAppTemplatePayload,
 } from "@/lib/whatsapp/templates";
+import { persistWhatsAppMessage } from "@/lib/whatsapp/message-log";
 
 const APITXT_SEND_WA_URL = "https://apitxt.com/api/sendWA";
 
@@ -48,6 +49,8 @@ export interface SendWhatsAppTemplateInput {
    * with `publicToken` — reservation messages link to the booking, not the card.
    */
   reservationToken?: string;
+  /** Optional merchant attribution for cost rollups. */
+  merchantId?: string | null;
 }
 
 export interface ApitxtSendWaResponse {
@@ -270,6 +273,14 @@ export async function sendWhatsAppTemplate(
       mobile: maskPhone(mobile),
       reason,
     });
+    void persistWhatsAppMessage({
+      templateName,
+      status: "failed",
+      mobile,
+      merchantId: input.merchantId,
+      providerMessage: reason,
+      source: "sendWA",
+    });
     throw new Error(`WhatsApp send failed: ${reason}`);
   }
 
@@ -283,6 +294,15 @@ export async function sendWhatsAppTemplate(
       httpStatus: res.status,
       body: raw.slice(0, 500),
     });
+    void persistWhatsAppMessage({
+      templateName,
+      status: "failed",
+      mobile,
+      merchantId: input.merchantId,
+      providerStatus: res.status,
+      providerMessage: "unexpected response",
+      source: "sendWA",
+    });
     throw new Error(`WhatsApp send failed: unexpected response (${res.status}).`);
   }
 
@@ -294,6 +314,16 @@ export async function sendWhatsAppTemplate(
       providerStatus: parsed.status,
       providerMessage: parsed.message,
       body: parsed,
+    });
+    void persistWhatsAppMessage({
+      templateName,
+      status: "failed",
+      mobile,
+      merchantId: input.merchantId,
+      providerStatus: parsed.status ?? res.status,
+      providerMessage:
+        typeof parsed.message === "string" ? parsed.message : `HTTP ${res.status}`,
+      source: "sendWA",
     });
     throw new Error(
       `WhatsApp send failed (${res.status}): ${
@@ -326,17 +356,51 @@ export async function sendWhatsAppTemplate(
       providerMessage,
     );
 
-  if (providerFailed) {
+  // Even when top-level status looks OK, APITxT may report per-contact failure.
+  const details = Array.isArray(parsed.details) ? parsed.details : [];
+  const detailFailed = details.some((d) => {
+    if (!d || typeof d !== "object") return false;
+    const status = String((d as { status?: unknown }).status ?? "").toLowerCase();
+    const err = (d as { error?: unknown }).error;
+    return status === "failed" || (typeof err === "string" && err.trim().length > 0);
+  });
+  const sentCount = typeof parsed.sent === "number" ? parsed.sent : undefined;
+  const failedCount = typeof parsed.failed === "number" ? parsed.failed : undefined;
+  const countsFailed =
+    (typeof failedCount === "number" && failedCount > 0) ||
+    (typeof sentCount === "number" && sentCount === 0 && details.length > 0);
+
+  if (providerFailed || detailFailed || countsFailed) {
+    const detailError = details
+      .map((d) =>
+        d && typeof d === "object" && typeof (d as { error?: unknown }).error === "string"
+          ? ((d as { error: string }).error as string)
+          : null,
+      )
+      .find((e) => e && e.trim());
     waLog("error", "send_wa_provider_error", {
       templateName,
       mobile: maskPhone(mobile),
       httpStatus: res.status,
       providerStatus,
       providerMessage,
+      sent: sentCount ?? null,
+      failed: failedCount ?? null,
+      detailError: detailError ?? null,
       body: parsed,
     });
+    void persistWhatsAppMessage({
+      templateName,
+      status: "failed",
+      mobile,
+      merchantId: input.merchantId,
+      providerStatus,
+      providerMessage: detailError || providerMessage || "provider rejected",
+      source: "sendWA",
+    });
     throw new Error(
-      providerMessage ||
+      detailError ||
+        providerMessage ||
         `WhatsApp template "${templateName}" was not accepted by the provider.`,
     );
   }
@@ -347,6 +411,20 @@ export async function sendWhatsAppTemplate(
     urlButton0: publicToken,
     providerStatus: parsed.status,
     providerMessage: parsed.message,
+  });
+
+  void persistWhatsAppMessage({
+    templateName,
+    status: "sent",
+    mobile,
+    merchantId: input.merchantId,
+    providerStatus: parsed.status,
+    providerMessage: typeof parsed.message === "string" ? parsed.message : null,
+    requestId:
+      typeof (parsed as { request_id?: unknown }).request_id === "string"
+        ? ((parsed as { request_id: string }).request_id as string)
+        : null,
+    source: "sendWA",
   });
 
   return parsed;
@@ -664,7 +742,7 @@ export async function sendQueueCustomerCalledReminder2(
   );
 }
 
-/** queue_reminder_3 — third call follow-up. */
+/** queue_3_reminder — third call follow-up. */
 export async function sendQueueCustomerCalledReminder3(
   input: SendQueuePartyInput,
 ): Promise<ApitxtSendWaResponse> {

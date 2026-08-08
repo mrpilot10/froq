@@ -43,18 +43,17 @@ export function NewReservationSheet({ open, onClose, onSaved }: NewReservationSh
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Slots come from the merchant's booking window, which they can change in
-  // settings, so they're read each time the sheet opens rather than once.
+  // Slots follow branch store timings + reservation interval.
   useEffect(() => {
     if (!open) return;
-    void fetchReservationFormConfig().then((config) => {
+    void fetchReservationFormConfig({ branchId: activeBranchId }).then((config) => {
       if (!config.ok) return;
       setSlots(config.slots ?? []);
       if (config.maxPartySize) setMaxPartySize(config.maxPartySize);
       setAllowNotes(config.allowNotes !== false);
       setTime((prev) => prev || config.slots?.[0] || "");
     });
-  }, [open]);
+  }, [open, activeBranchId]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();

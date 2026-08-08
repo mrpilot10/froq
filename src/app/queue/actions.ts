@@ -6,7 +6,13 @@ import { toCanonicalPhone, toSupabaseAuthPhone } from "@/lib/auth/otp/phone";
 import { isValidPhone } from "@/lib/auth/format";
 import { callAcceptDeadlineMs } from "@/lib/merchant/queue-settings";
 import { checkQueueCapacity } from "@/lib/queue/capacity";
-import { getOpenQueueSession } from "@/lib/queue/live-board";
+import {
+  getOpenQueueSession,
+  liveQueuePosition,
+  resolveJoinBranchId,
+  sessionTicketNumber,
+} from "@/lib/queue/live-board";
+import { resolveGuestSocialLinks } from "@/lib/merchant/guest-social-links";
 import { verifyTurnstileToken } from "@/lib/turnstile/verify";
 
 export type PublicQueueTicketStatus = "waiting" | "called" | "seated" | "left";
@@ -16,9 +22,18 @@ export type PublicQueueTicket = {
   status: PublicQueueTicketStatus;
   name: string;
   partySize: number;
-  /** Display number only (e.g. "3") — UI prefixes with #. */
+  /**
+   * Stable session ticket # (join order among all entries this session).
+   * Not place-in-line — seated/left guests ahead still bump this.
+   */
   tokenLabel: string;
+  /**
+   * Live rank among held + waiting + called (recalculated on seat/leave).
+   * Guest “#N in queue” / est. wait must use this, not tokenLabel.
+   */
   queuePosition: number;
+  /** Customer public token for AI Menu CTA when Queue integration is on. */
+  publicToken?: string;
   calledAtMs?: number;
   acceptByMs?: number;
 };
@@ -78,24 +93,20 @@ export async function joinLiveQueue(input: {
       .maybeSingle();
     if (!merchant?.id) return { ok: false, error: "Shop not found." };
 
-    let branchId: string | null = null;
-    if (input.branchSlug?.trim()) {
-      const { data: branch } = await admin
-        .from("branches")
-        .select("id")
-        .eq("merchant_id", merchant.id)
-        .eq("slug", input.branchSlug.trim())
-        .maybeSingle();
-      branchId = branch?.id ?? null;
-    }
+    let branchId = await resolveJoinBranchId(
+      merchant.id,
+      input.branchSlug,
+    );
 
     const open = await getOpenQueueSession(merchant.id, branchId);
     if (!open) {
       return {
         ok: false,
-        error: "This queue isn't live right now. Ask the restaurant to start it.",
+        error: "This queue isn't open right now. Please check with the restaurant.",
       };
     }
+    // Prefer the session's branch so entries stay aligned with the live board.
+    if (open.branch_id) branchId = open.branch_id;
     if (open.status === "paused") {
       return {
         ok: false,
@@ -118,7 +129,7 @@ export async function joinLiveQueue(input: {
     const { data: existing } = await admin
       .from("customers")
       .select(
-        "id, name, phone, public_token, whatsapp_available, preferred_notification_channel",
+        "id, name, phone, email, public_token, whatsapp_available, preferred_notification_channel",
       )
       .eq("merchant_id", merchant.id)
       .in("phone", variants)
@@ -137,7 +148,7 @@ export async function joinLiveQueue(input: {
           email,
         })
         .select(
-          "id, name, phone, public_token, whatsapp_available, preferred_notification_channel",
+          "id, name, phone, email, public_token, whatsapp_available, preferred_notification_channel",
         )
         .single();
       if (error || !inserted?.public_token) {
@@ -162,13 +173,13 @@ export async function joinLiveQueue(input: {
       await admin.from("customers").update({ name }).eq("id", customer.id);
     }
 
-    // Prevent duplicate active waiting/called for same phone in this session.
+    // Prevent duplicate active waiting/called/held for same phone in this session.
     const { data: alreadyIn } = await admin
       .from("queue_entries")
       .select("id, status")
       .eq("session_id", open.id)
       .eq("phone", customer.phone)
-      .in("status", ["waiting", "called"])
+      .in("status", ["held", "waiting", "called"])
       .limit(1)
       .maybeSingle();
     if (alreadyIn) {
@@ -202,14 +213,11 @@ export async function joinLiveQueue(input: {
       return { ok: false, error: "Couldn't join the queue. Try again." };
     }
 
-    const { data: waitingRows } = await admin
-      .from("queue_entries")
-      .select("id")
-      .eq("session_id", open.id)
-      .eq("status", "waiting")
-      .lte("joined_at", entry.joined_at);
-
-    const queuePosition = waitingRows?.length ?? 1;
+    // tokenLabel = session join #; queuePosition = live rank (held+waiting+called).
+    const [tokenNumber, queuePosition] = await Promise.all([
+      sessionTicketNumber(open.id, entry.joined_at),
+      liveQueuePosition(open.id, entry.joined_at),
+    ]);
     const estimatedWaitMinutes = queuePosition * 8;
     const businessName =
       (merchant.business_name ?? "the store").trim() || "the store";
@@ -218,6 +226,7 @@ export async function joinLiveQueue(input: {
     const notifyCustomer = {
       phone: customer.phone,
       name,
+      email: (customer.email as string | null) ?? null,
       publicToken: customer.public_token as string,
       whatsappAvailable: true as const,
       preferredNotificationChannel: "whatsapp" as const,
@@ -231,7 +240,7 @@ export async function joinLiveQueue(input: {
     const entryId = entry.id;
 
     // Resolve the template before `after()` — same pattern as merchant
-    // queue-actions — so the AI Menu gate isn't re-run in a detached context.
+    // queue-actions — so the AI Menu gate isn't re-run in a detatched context.
     const { queueJoinNotifyTemplate } = await import("@/lib/queue/ai-menu");
     const joinTemplate = await queueJoinNotifyTemplate(merchant.id);
 
@@ -284,7 +293,7 @@ export async function joinLiveQueue(input: {
       publicToken: customer.public_token,
       queuePosition,
       estimatedWaitMinutes,
-      tokenLabel: String(queuePosition),
+      tokenLabel: String(tokenNumber),
     };
   } catch (error) {
     console.error("joinLiveQueue exception", error);
@@ -319,13 +328,25 @@ export async function getLiveQueueTicket(input: {
 
     const { data: entry } = await admin
       .from("queue_entries")
-      .select("id, status, name, party_size, joined_at, called_at, session_id")
+      .select("id, status, name, party_size, joined_at, called_at, session_id, customer_id")
       .eq("id", entryId)
       .eq("merchant_id", merchant.id)
       .maybeSingle();
     if (!entry) return { ok: false, error: "Ticket not found." };
 
-    const status = entry.status as PublicQueueTicketStatus;
+    let publicToken: string | undefined;
+    if (entry.customer_id) {
+      const { data: customer } = await admin
+        .from("customers")
+        .select("public_token")
+        .eq("id", entry.customer_id)
+        .maybeSingle();
+      if (customer?.public_token) publicToken = customer.public_token;
+    }
+
+    const status = (
+      entry.status === "held" ? "waiting" : entry.status
+    ) as PublicQueueTicketStatus;
     const calledAtMs = entry.called_at
       ? new Date(entry.called_at).getTime()
       : undefined;
@@ -334,24 +355,18 @@ export async function getLiveQueueTicket(input: {
         ? callAcceptDeadlineMs(calledAtMs)
         : undefined;
 
-    // Stable session number by join order (does not shrink when others leave).
-    const { count: joinOrder } = await admin
-      .from("queue_entries")
-      .select("id", { count: "exact", head: true })
-      .eq("session_id", entry.session_id)
-      .lte("joined_at", entry.joined_at);
-    const tokenNumber = Math.max(1, joinOrder ?? 1);
+    const tokenNumber = await sessionTicketNumber(
+      entry.session_id,
+      entry.joined_at,
+    );
 
-    let queuePosition = tokenNumber;
-    if (status === "waiting") {
-      const { count } = await admin
-        .from("queue_entries")
-        .select("id", { count: "exact", head: true })
-        .eq("session_id", entry.session_id)
-        .eq("status", "waiting")
-        .lte("joined_at", entry.joined_at);
-      queuePosition = Math.max(1, count ?? 1);
-    }
+    // Live place-in-line while still on the board (held + waiting + called).
+    const queuePosition =
+      entry.status === "waiting" ||
+      entry.status === "called" ||
+      entry.status === "held"
+        ? await liveQueuePosition(entry.session_id, entry.joined_at)
+        : tokenNumber;
 
     return {
       ok: true,
@@ -362,6 +377,7 @@ export async function getLiveQueueTicket(input: {
         partySize: entry.party_size,
         tokenLabel: String(tokenNumber),
         queuePosition,
+        publicToken,
         calledAtMs: Number.isFinite(calledAtMs) ? calledAtMs : undefined,
         acceptByMs,
       },
@@ -374,6 +390,17 @@ export async function getLiveQueueTicket(input: {
   }
 }
 
+export type QueuePageSocialLinks = {
+  instagram?: string;
+  whatsapp?: string;
+  facebook?: string;
+  website?: string;
+  googleReviews?: string;
+};
+
+/** Whether new guests can join — drives dedicated closed/paused chrome. */
+export type QueueJoinGate = "open" | "closed" | "paused" | "unavailable";
+
 export type QueuePageMerchant = {
   slug: string;
   businessName: string;
@@ -381,14 +408,123 @@ export type QueuePageMerchant = {
   logoUrl: string | null;
   banner: string;
   bannerLink: string;
-  /** Queue ↔ AI Menu — waitlist shows View our AI menu. */
+  /** Store phone for tel: contact icon (optional). */
+  phone?: string;
+  address?: string;
+  googleMapsUrl?: string;
+  socialLinks: QueuePageSocialLinks;
+  joinGate: QueueJoinGate;
+  /** Queue ↔ AI Menu integration — waitlist shows "View our AI menu". */
   aiMenuEnabled: boolean;
 };
 
+const QUEUE_MERCHANT_SELECT =
+  "id, slug, business_name, brand_color, logo_url, queue_banner, queue_banner_link, phone, address, google_maps_url, website_url, instagram_url, facebook_url, google_business_url, google_place_id";
+
+const QUEUE_BRANCH_CONTACT_SELECT =
+  "phone, address, google_maps_url, website_url, instagram_url, facebook_url, google_business_url, google_place_id";
+
+type QueueMerchantRow = {
+  id: string;
+  slug: string;
+  business_name: string;
+  brand_color: string;
+  logo_url: string | null;
+  queue_banner: string | null;
+  queue_banner_link: string | null;
+  phone: string | null;
+  address: string | null;
+  google_maps_url: string | null;
+  website_url: string | null;
+  instagram_url: string | null;
+  facebook_url: string | null;
+  google_business_url: string | null;
+  google_place_id: string | null;
+};
+
+type QueueBranchContact = {
+  phone: string | null;
+  address: string | null;
+  google_maps_url: string | null;
+  website_url: string | null;
+  instagram_url: string | null;
+  facebook_url: string | null;
+  google_business_url: string | null;
+  google_place_id: string | null;
+};
+
+/**
+ * Prefer the open queue session’s branch (when set), else the merchant default.
+ * Guests on a branch-scoped session should see that branch’s socials/contact.
+ */
+async function loadQueueBranchContact(
+  admin: ReturnType<typeof createAdminClient>,
+  merchantId: string,
+  branchId?: string | null,
+): Promise<QueueBranchContact | null> {
+  if (branchId) {
+    const { data } = await admin
+      .from("branches")
+      .select(QUEUE_BRANCH_CONTACT_SELECT)
+      .eq("id", branchId)
+      .eq("merchant_id", merchantId)
+      .maybeSingle();
+    if (data) return data as QueueBranchContact;
+  }
+  const { data } = await admin
+    .from("branches")
+    .select(QUEUE_BRANCH_CONTACT_SELECT)
+    .eq("merchant_id", merchantId)
+    .eq("is_default", true)
+    .maybeSingle();
+  return (data as QueueBranchContact | null) ?? null;
+}
+
+async function resolveJoinGate(
+  merchantId: string,
+  branchId?: string | null,
+): Promise<QueueJoinGate> {
+  const open = await getOpenQueueSession(merchantId, branchId);
+  if (!open) return "closed";
+  if (open.status === "paused") return "paused";
+  const capacity = await checkQueueCapacity(merchantId);
+  if (!capacity.ok) return "unavailable";
+  return "open";
+}
+
+/** Branch contact wins; merchant row is the fallback (same as loyalty). */
+function toQueuePageMerchant(
+  row: QueueMerchantRow,
+  branch: QueueBranchContact | null | undefined,
+  joinGate: QueueJoinGate,
+  aiMenuEnabled: boolean,
+): QueuePageMerchant {
+  const pick = (branchValue: string | null | undefined, merchantValue: string | null | undefined) =>
+    branchValue?.trim() || merchantValue?.trim() || undefined;
+
+  return {
+    slug: row.slug,
+    businessName: row.business_name,
+    brandColor: row.brand_color,
+    logoUrl: row.logo_url,
+    banner: row.queue_banner ?? "",
+    bannerLink: row.queue_banner_link ?? "",
+    phone: pick(branch?.phone, row.phone),
+    address: pick(branch?.address, row.address) ?? "",
+    googleMapsUrl: pick(branch?.google_maps_url, row.google_maps_url),
+    socialLinks: resolveGuestSocialLinks(branch, row),
+    joinGate,
+    aiMenuEnabled,
+  };
+}
+
 export type QueuePageInitialTicket = {
   entryId: string;
+  /** Live place in line — shown as #N on the guest ticket. */
   token: string;
-  /** Customer public token for AI Menu deep links. */
+  /** Stable session ticket # (join order); optional for older clients. */
+  ticketNumber?: string;
+  /** Customer public token for AI Menu deep links when integration is on. */
   publicToken?: string;
   name: string;
   phone: string;
@@ -402,9 +538,12 @@ export type QueuePageInitialTicket = {
 
 /**
  * Resolve /queue/{slug} (merchant join QR) or /queue/{frq_…} (WhatsApp deep link).
+ * Optional `branchSlug` (`?b=`) scopes the join gate and contact to that branch;
+ * otherwise the merchant default branch is used.
  */
 export async function resolveQueuePage(
   slugOrToken: string,
+  branchSlug?: string | null,
 ): Promise<
   | { ok: true; merchant: QueuePageMerchant; initialTicket?: QueuePageInitialTicket }
   | { ok: false }
@@ -425,24 +564,30 @@ export async function resolveQueuePage(
 
       const { data: merchantRow } = await admin
         .from("merchants")
-        .select(
-          "slug, business_name, brand_color, logo_url, queue_banner, queue_banner_link",
-        )
+        .select(QUEUE_MERCHANT_SELECT)
         .eq("id", customer.merchant_id)
         .maybeSingle();
       if (!merchantRow?.slug) return { ok: false };
 
+      const branchId = await resolveJoinBranchId(
+        customer.merchant_id,
+        branchSlug,
+      );
+      const open = await getOpenQueueSession(customer.merchant_id, branchId);
+      const branch = await loadQueueBranchContact(
+        admin,
+        customer.merchant_id,
+        open?.branch_id ?? branchId,
+      );
+      const joinGate = await resolveJoinGate(customer.merchant_id, branchId);
       const { isQueueAiMenuEnabled } = await import("@/lib/queue/ai-menu");
       const aiMenuEnabled = await isQueueAiMenuEnabled(customer.merchant_id);
-      const merchant: QueuePageMerchant = {
-        slug: merchantRow.slug,
-        businessName: merchantRow.business_name,
-        brandColor: merchantRow.brand_color,
-        logoUrl: merchantRow.logo_url,
-        banner: merchantRow.queue_banner ?? "",
-        bannerLink: merchantRow.queue_banner_link ?? "",
+      const merchant = toQueuePageMerchant(
+        merchantRow as QueueMerchantRow,
+        branch,
+        joinGate,
         aiMenuEnabled,
-      };
+      );
 
       const { data: entry } = await admin
         .from("queue_entries")
@@ -476,8 +621,10 @@ export async function resolveQueuePage(
         merchant,
         initialTicket: {
           entryId: remote.entryId,
-          token: remote.tokenLabel,
-          publicToken: raw,
+          // Place in line (not session ticket #) — see PublicQueueTicket docs.
+          token: String(remote.queuePosition),
+          ticketNumber: remote.tokenLabel,
+          publicToken: remote.publicToken || raw,
           name: remote.name,
           phone: customer.phone ?? "",
           party: remote.partySize,
@@ -492,27 +639,26 @@ export async function resolveQueuePage(
 
     const { data: merchantRow } = await admin
       .from("merchants")
-      .select(
-        "id, slug, business_name, brand_color, logo_url, queue_banner, queue_banner_link",
-      )
+      .select(QUEUE_MERCHANT_SELECT)
       .eq("slug", raw)
       .maybeSingle();
     if (!merchantRow?.slug) return { ok: false };
 
+    const row = merchantRow as QueueMerchantRow;
+    const branchId = await resolveJoinBranchId(row.id, branchSlug);
+    const open = await getOpenQueueSession(row.id, branchId);
+    const branch = await loadQueueBranchContact(
+      admin,
+      row.id,
+      open?.branch_id ?? branchId,
+    );
+    const joinGate = await resolveJoinGate(row.id, branchId);
     const { isQueueAiMenuEnabled } = await import("@/lib/queue/ai-menu");
-    const aiMenuEnabled = await isQueueAiMenuEnabled(merchantRow.id);
+    const aiMenuEnabled = await isQueueAiMenuEnabled(row.id);
 
     return {
       ok: true,
-      merchant: {
-        slug: merchantRow.slug,
-        businessName: merchantRow.business_name,
-        brandColor: merchantRow.brand_color,
-        logoUrl: merchantRow.logo_url,
-        banner: merchantRow.queue_banner ?? "",
-        bannerLink: merchantRow.queue_banner_link ?? "",
-        aiMenuEnabled,
-      },
+      merchant: toQueuePageMerchant(row, branch, joinGate, aiMenuEnabled),
     };
   } catch {
     return { ok: false };

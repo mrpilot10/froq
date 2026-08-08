@@ -64,10 +64,10 @@ export function LoyaltyAnalyticsView({ stats, sort, loading }: LoyaltyAnalyticsV
     return (
       <div className="panel-card merchant-empty merchant-analytics-empty">
         <p className="merchant-empty-title">
-          Analytics will appear once customers start collecting stamps
+          Analytics will appear once customers join your loyalty program
         </p>
         <p className="merchant-empty-sub">
-          Complete your first loyalty transaction to unlock insights.
+          Share your stamp card QR code to sign up your first customer.
         </p>
       </div>
     );

@@ -8,7 +8,7 @@ import { DeleteAccountDrawer } from "@/components/shared/delete-account-drawer";
 import { FroqFooter } from "@/components/shared/froq-footer";
 import { cooldownUnlockCopy } from "@/lib/loyalty/rules";
 import type { BusinessInfo, HistoryEntry, NavTab, RewardCardGroup } from "@/lib/loyalty/types";
-import { useBrandTheme } from "@/lib/loyalty/use-brand-theme";
+import { BrandTheme } from "@/lib/loyalty/use-brand-theme";
 import { useRealtime } from "@/lib/supabase/use-realtime";
 import { BusinessHeader } from "./business-header";
 import { ClaimedCelebration } from "./claimed-celebration";
@@ -64,8 +64,6 @@ export function LoyaltyExperience({
   const [submitting, setSubmitting] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [showClaimed, setShowClaimed] = useState(false);
-
-  useBrandTheme(business.brandColor);
 
   const initials = getInitials(customerName);
   const isRewardReady = card.status === "reward_ready";
@@ -149,7 +147,7 @@ export function LoyaltyExperience({
   }, [activeTab]);
 
   const handleCollect = useCallback(async () => {
-    if (isRewardReady || isLocked || card.pending || submitting) return;
+    if (card.banned || isRewardReady || isLocked || card.pending || submitting) return;
     setSubmitting(true);
     const res = await requestStamp(card.customerId);
     setSubmitting(false);
@@ -159,16 +157,16 @@ export function LoyaltyExperience({
     }
     setScreen("success");
     await onRefresh();
-  }, [isRewardReady, isLocked, card.pending, card.customerId, submitting, onRefresh]);
+  }, [card.banned, isRewardReady, isLocked, card.pending, card.customerId, submitting, onRefresh]);
 
   const handlePrimaryAction = useCallback(() => {
-    if (card.pending || submitting || isLocked) return;
+    if (card.banned || card.pending || submitting || isLocked) return;
     if (isRewardReady) {
       setRewardSheetOpen(true);
       return;
     }
     void handleCollect();
-  }, [card.pending, submitting, isLocked, isRewardReady, handleCollect]);
+  }, [card.banned, card.pending, submitting, isLocked, isRewardReady, handleCollect]);
 
   const handleTabChange = useCallback(
     (tab: NavTab) => {
@@ -181,16 +179,19 @@ export function LoyaltyExperience({
     [activeTab, handlePrimaryAction],
   );
 
-  const ctaLabel = card.pending
-    ? "Awaiting approval…"
-    : isRewardReady
-      ? "Show reward to staff"
-      : isLocked
-        ? lockMessage || "Card locked"
-        : "Collect Stamp";
+  const ctaLabel = card.banned
+    ? "Unavailable"
+    : card.pending
+      ? "Awaiting approval…"
+      : isRewardReady
+        ? "Show reward to staff"
+        : isLocked
+          ? lockMessage || "Card locked"
+          : "Collect Stamp";
 
   return (
     <>
+      <BrandTheme color={business.brandColor} />
       <div className={`loyalty-page${activeTab === "collect" ? " loyalty-page--collect" : ""}`}>
         <div className={`loyalty-screen${activeTab === "collect" ? " loyalty-screen--collect" : ""}`}>
           {activeTab === "collect" && (
@@ -210,13 +211,18 @@ export function LoyaltyExperience({
               </div>
 
               <div className="cta-block">
+                {card.banned ? (
+                  <div className="loyalty-ban-notice" role="alert">
+                    You have been banned. Please contact the restaurant directly.
+                  </div>
+                ) : null}
                 <button
                   type="button"
-                  className="cta-btn"
-                  disabled={card.pending || submitting || (isLocked && !isRewardReady)}
+                  className={`cta-btn${card.banned ? " cta-btn--banned" : ""}`}
+                  disabled={card.banned || card.pending || submitting || (isLocked && !isRewardReady)}
                   onClick={handlePrimaryAction}
                 >
-                  {isRewardReady ? (
+                  {card.banned ? null : isRewardReady ? (
                     <Gift size={17} strokeWidth={2.2} color="#fff" />
                   ) : (
                     <Plus size={17} strokeWidth={2.2} color="#fff" />
@@ -224,13 +230,15 @@ export function LoyaltyExperience({
                   {ctaLabel}
                 </button>
                 <div className="cta-note">
-                  {card.pending
-                    ? "Staff will approve your stamp shortly"
-                    : isRewardReady
-                      ? "Show your reward QR to staff"
-                      : isLocked
-                        ? lockMessage
-                        : "Show this screen to staff at checkout"}
+                  {card.banned
+                    ? "Stamp collection is unavailable on this card"
+                    : card.pending
+                      ? "Staff will approve your stamp shortly"
+                      : isRewardReady
+                        ? "Show your reward QR to staff"
+                        : isLocked
+                          ? lockMessage
+                          : "Show this screen to staff at checkout"}
                 </div>
               </div>
 

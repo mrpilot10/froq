@@ -4,7 +4,15 @@ import type {
   MerchantMemberRow,
   MerchantRow,
 } from "@/lib/supabase/database.types";
-import type { Branch, MerchantCustomer, MerchantMember, MerchantProfile } from "./types";
+import type {
+  Branch,
+  BranchContact,
+  MerchantCustomer,
+  MerchantMember,
+  MerchantProfile,
+} from "./types";
+import { DEFAULT_MENU_TAX_RATES, normalizeTaxPercent } from "@/lib/menu/tax";
+import { normalizeMemberProductIds } from "./product-access";
 import {
   DEFAULT_QUEUE_STORE_HOURS,
   formatTimeForInput,
@@ -69,8 +77,8 @@ export function toMerchantProfile(row: MerchantProfileSource): MerchantProfile {
     queueCloseTime: formatTimeForInput(row.queue_close_time),
     queueHoursTimezone: row.queue_hours_timezone || QUEUE_HOURS_TIMEZONE,
     queueOpenDays: normalizeOpenDays(row.queue_open_days),
-    queueAutoStart: row.queue_auto_start === true || row.queue_auto_close === true,
-    queueAutoClose: row.queue_auto_start === true || row.queue_auto_close === true,
+    queueAutoStart: row.queue_auto_start === true,
+    queueAutoClose: row.queue_auto_close === true,
     reservationDescription: row.reservation_description ?? "",
     reservationMaxPartySize:
       row.reservation_max_party_size ?? DEFAULT_RESERVATION_SETTINGS.maxPartySize,
@@ -86,8 +94,35 @@ export function toMerchantProfile(row: MerchantProfileSource): MerchantProfile {
     reservationAllowNotes: row.reservation_allow_notes !== false,
     reservationAutoDeclineHours: row.reservation_auto_decline_hours ?? 0,
     reservationWhatsappEnabled: row.reservation_whatsapp_enabled !== false,
+    reservationGraceMinutes:
+      typeof row.reservation_grace_minutes === "number"
+        ? Math.min(120, Math.max(0, Math.round(row.reservation_grace_minutes)))
+        : 15,
+    // Opt-out: missing / null column means on (auto-assign is the default).
+    reservationAutoAssignTables: row.reservation_auto_assign_tables !== false,
     reservationPaused: row.reservation_paused === true,
+    // Opt-out: missing columns keep ordering + staff pings on.
+    menuTableOrdering: row.menu_table_ordering !== false,
+    menuServerNotify: row.menu_server_notify !== false,
+    // Opt-out: missing column keeps the stamp card on the guest menu.
+    menuShowLoyaltyStamps: row.menu_show_loyalty_stamps !== false,
+    // Opt-in: missing column keeps Queue ↔ AI Menu off.
     queueAiMenuEnabled: row.queue_ai_menu_enabled === true,
+    // A missing column means the migration has not landed, so fall back to the
+    // rates the cart charged before they were editable. A present 0 is a real
+    // choice — the merchant removed that row — and must survive.
+    menuCgstPercent:
+      row.menu_cgst_percent == null
+        ? DEFAULT_MENU_TAX_RATES.cgstPercent
+        : normalizeTaxPercent(row.menu_cgst_percent),
+    menuSgstPercent:
+      row.menu_sgst_percent == null
+        ? DEFAULT_MENU_TAX_RATES.sgstPercent
+        : normalizeTaxPercent(row.menu_sgst_percent),
+    menuServiceChargePercent:
+      row.menu_service_charge_percent == null
+        ? DEFAULT_MENU_TAX_RATES.serviceChargePercent
+        : normalizeTaxPercent(row.menu_service_charge_percent),
   };
 }
 
@@ -176,10 +211,29 @@ export function toMerchantRowPatch(patch: Partial<MerchantProfile>): Partial<Mer
     );
   if (patch.reservationWhatsappEnabled !== undefined)
     row.reservation_whatsapp_enabled = patch.reservationWhatsappEnabled;
+  if (patch.reservationGraceMinutes !== undefined)
+    row.reservation_grace_minutes = Math.min(
+      120,
+      Math.max(0, Math.floor(patch.reservationGraceMinutes) || 0),
+    );
+  if (patch.reservationAutoAssignTables !== undefined) {
+    row.reservation_auto_assign_tables = patch.reservationAutoAssignTables;
+  }
   if (patch.reservationPaused !== undefined) row.reservation_paused = patch.reservationPaused;
+  if (patch.menuTableOrdering !== undefined) row.menu_table_ordering = patch.menuTableOrdering;
+  if (patch.menuServerNotify !== undefined) row.menu_server_notify = patch.menuServerNotify;
+  if (patch.menuShowLoyaltyStamps !== undefined) {
+    row.menu_show_loyalty_stamps = patch.menuShowLoyaltyStamps;
+  }
   if (patch.queueAiMenuEnabled !== undefined) {
     row.queue_ai_menu_enabled = patch.queueAiMenuEnabled;
   }
+  if (patch.menuCgstPercent !== undefined)
+    row.menu_cgst_percent = normalizeTaxPercent(patch.menuCgstPercent);
+  if (patch.menuSgstPercent !== undefined)
+    row.menu_sgst_percent = normalizeTaxPercent(patch.menuSgstPercent);
+  if (patch.menuServiceChargePercent !== undefined)
+    row.menu_service_charge_percent = normalizeTaxPercent(patch.menuServiceChargePercent);
   return row;
 }
 
@@ -202,16 +256,48 @@ export function toBranch(row: BranchRow): Branch {
     id: row.id,
     name: row.name,
     slug: row.slug,
-    address: row.address ?? "",
     isDefault: row.is_default,
+    address: row.address ?? "",
+    phone: row.phone ?? "",
+    email: row.email ?? "",
+    websiteUrl: row.website_url ?? "",
+    instagramUrl: row.instagram_url ?? "",
+    facebookUrl: row.facebook_url ?? "",
+    xUrl: row.x_url ?? "",
+    googleBusinessUrl: row.google_business_url ?? "",
+    googlePlaceId: row.google_place_id ?? "",
+    googleMapsUrl: row.google_maps_url ?? "",
+    queueOpenTime: formatTimeForInput(row.queue_open_time),
+    queueCloseTime: formatTimeForInput(row.queue_close_time),
+    queueHoursTimezone: row.queue_hours_timezone || QUEUE_HOURS_TIMEZONE,
+    queueOpenDays: normalizeOpenDays(row.queue_open_days),
+    queueAutoStart: row.queue_auto_start === true,
+    queueAutoClose: row.queue_auto_close !== false,
+    estimatedWaitMinutes: normalizeEstimatedWaitMinutes(row.estimated_wait_minutes),
   };
 }
 
-const MEMBER_PRODUCTS = new Set(["loyalty", "queue", "reservation"]);
+function normalizeEstimatedWaitMinutes(value: number | null | undefined): number {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n) || n < 1 || n > 120) return 10;
+  return n;
+}
 
-function toMemberProductIds(ids: MerchantMemberRow["product_ids"]): MerchantMember["productIds"] {
-  if (!ids || ids.length === 0) return [];
-  return ids.filter((id): id is MerchantMember["productIds"][number] => MEMBER_PRODUCTS.has(id));
+/** Maps a branch contact patch back to db column names. Empty string clears. */
+export function toBranchRowPatch(patch: Partial<BranchContact>): Partial<BranchRow> {
+  const row: Partial<BranchRow> = {};
+  if (patch.address !== undefined) row.address = patch.address.trim() || null;
+  if (patch.phone !== undefined) row.phone = patch.phone.trim() || null;
+  if (patch.email !== undefined) row.email = patch.email.trim() || null;
+  if (patch.websiteUrl !== undefined) row.website_url = patch.websiteUrl.trim() || null;
+  if (patch.instagramUrl !== undefined) row.instagram_url = patch.instagramUrl.trim() || null;
+  if (patch.facebookUrl !== undefined) row.facebook_url = patch.facebookUrl.trim() || null;
+  if (patch.xUrl !== undefined) row.x_url = patch.xUrl.trim() || null;
+  if (patch.googleBusinessUrl !== undefined)
+    row.google_business_url = patch.googleBusinessUrl.trim() || null;
+  if (patch.googlePlaceId !== undefined) row.google_place_id = patch.googlePlaceId.trim() || null;
+  if (patch.googleMapsUrl !== undefined) row.google_maps_url = patch.googleMapsUrl.trim() || null;
+  return row;
 }
 
 export function toMember(row: MerchantMemberRow): MerchantMember {
@@ -232,7 +318,7 @@ export function toMember(row: MerchantMemberRow): MerchantMember {
         : row.branch_id
           ? [row.branch_id]
           : [],
-    productIds: toMemberProductIds(row.product_ids),
+    productIds: normalizeMemberProductIds(row.product_ids),
     joined: row.accepted_at !== null,
   };
 }
