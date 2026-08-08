@@ -1,7 +1,7 @@
 import { loyaltyCardUrl } from "@/lib/whatsapp/templates/names";
 import { requireCustomerPublicToken } from "@/lib/customer/hub";
 import { reservationUrl } from "@/lib/reservations/link";
-import { customerMenuUrl } from "@/lib/app-url";
+import { customerMenuUrl, merchantMenuUrl } from "@/lib/app-url";
 import { formatBookingSize, formatEstimatedWaitTime } from "@/lib/queue/format";
 
 /** Notification templates routed by sendCustomerNotification. */
@@ -134,6 +134,11 @@ export type QueuePartyData = {
 export type QueueJoinedData = QueuePartyData & {
   queuePosition: number | string;
   estimatedWaitMinutes: number;
+  /**
+   * Merchant slug for `queue_first_notify_menu` Meta CTA:
+   * https://froq.io/menu/{{1}}. Required when that template is selected.
+   */
+  menuSlug?: string;
 };
 
 export type BirthdayBonusStampsData = {
@@ -297,7 +302,11 @@ export function buildSmsBody(
       const d = data as QueueJoinedData;
       const size = formatBookingSize(d.bookingSize);
       const wait = formatEstimatedWaitTime(d.estimatedWaitMinutes);
-      return `Hi ${name}, you're #${d.queuePosition} at ${d.businessName} (${size}). Est. wait ${wait}. Details: ${hub}`;
+      const link =
+        template === "queue_first_notify_menu" && d.menuSlug?.trim()
+          ? merchantMenuUrl(d.menuSlug.trim(), customer.publicToken)
+          : hub;
+      return `Hi ${name}, you're #${d.queuePosition} at ${d.businessName} (${size}). Est. wait ${wait}. Details: ${link}`;
     }
     case "queue_call_now":
     case "queue_reminders_1":

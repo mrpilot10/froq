@@ -5,7 +5,12 @@ import {
   type QueueJoinedWhatsAppVarInput,
   type QueuePartyWhatsAppVarInput,
 } from "./queue-vars";
-import { buildUrlButton, type WhatsAppTemplatePayload } from "./types";
+import {
+  buildUrlButton,
+  requireNonEmptyString,
+  type WhatsAppTemplatePayload,
+} from "./types";
+import { buildMenuGuestUrlSuffix } from "./menu-url";
 
 export type QueueJoinedTemplateInput = QueueJoinedWhatsAppVarInput;
 export type QueuePartyTemplateInput = QueuePartyWhatsAppVarInput;
@@ -49,17 +54,22 @@ export function buildQueueJoinedTemplate(
 }
 
 /**
- * queue_first_notify_menu — same body as join, Menu CTA.
- * URL button {{1}} = publicToken → https://froq.io/m/{{1}}.
+ * queue_first_notify_menu — same body as join; two Meta URL buttons:
+ *   Button 0 → https://froq.io/queue/{{1}}  (publicToken)
+ *   Button 1 → https://froq.io/menu/{{1}}   (merchant slug, optional ?guest=)
  */
 export function buildQueueJoinedMenuTemplate(
-  input: QueueJoinedTemplateInput,
+  input: QueueJoinedTemplateInput & { merchantSlug: string },
 ): WhatsAppTemplatePayload {
   const vars = buildQueueJoinedWhatsAppVars(input);
+  const merchantSlug = requireNonEmptyString(input.merchantSlug, "merchantSlug");
   return {
     templateName: WhatsAppTemplateName.QueueFirstNotifyMenu,
     body: [...vars.body],
-    buttons: [buildUrlButton([vars.publicToken])],
+    buttons: [
+      buildUrlButton([vars.publicToken]),
+      buildUrlButton([buildMenuGuestUrlSuffix(merchantSlug, vars.publicToken)]),
+    ],
   };
 }
 

@@ -63,7 +63,9 @@ export const WhatsAppTemplateName = {
   QueueFirstNotify: "queue_first_notify",
   /**
    * Guest joined — AI Menu CTA variant.
-   * Same body as queue_first_notify; URL button → https://froq.io/m/{{1}}.
+   * Same body as queue_first_notify; two URL buttons:
+   *   {{1}} queue → https://froq.io/queue/{{1}} (publicToken)
+   *   {{1}} menu  → https://froq.io/menu/{{1}}  ({slug}?guest={publicToken})
    */
   QueueFirstNotifyMenu: "queue_first_notify_menu",
   /** Merchant called this party. */

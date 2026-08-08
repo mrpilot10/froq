@@ -35,6 +35,8 @@ export type {
   WhatsAppUrlButton,
 } from "./types";
 
+export { buildMenuGuestUrlSuffix } from "./menu-url";
+
 export { buildStampEarnedTemplate } from "./stamp-earned";
 export type { StampEarnedTemplateInput } from "./stamp-earned";
 

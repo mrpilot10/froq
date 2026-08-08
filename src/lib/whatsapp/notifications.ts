@@ -1,7 +1,7 @@
 import "server-only";
 
 import { requireCustomerPublicToken } from "@/lib/customer/hub";
-import { customerHubUrl } from "@/lib/app-url";
+import { customerHubUrl, getAppOrigin } from "@/lib/app-url";
 import {
   requireReservationPublicToken,
   reservationUrl,
@@ -49,6 +49,20 @@ export interface SendWhatsAppTemplateInput {
    * with `publicToken` — reservation messages link to the booking, not the card.
    */
   reservationToken?: string;
+  /**
+   * Raw Meta URL-button suffix (no token format check). Used when the approved
+   * path is not `/c/` or `/r/` — e.g. queue_first_notify_menu →
+   * https://froq.io/menu/{{1}} with `{slug}?guest={frq_…}`. Takes precedence
+   * over `publicToken` when both are set; `reservationToken` still wins for a
+   * single-button send unless `urlButtons` is provided.
+   */
+  urlButtonSuffix?: string;
+  /**
+   * Multiple dynamic URL buttons (Meta numbers each button's {{1}} separately).
+   * Keys are zero-based button indexes as APITxT expects ("0", "1", …).
+   * When set, overrides reservationToken / urlButtonSuffix / publicToken.
+   */
+  urlButtons?: Record<string, string>;
   /** Optional merchant attribution for cost rollups. */
   merchantId?: string | null;
 }
@@ -215,6 +229,26 @@ export async function sendWhatsAppTemplate(
     }
   }
 
+  let urlButtonSuffix: string | undefined;
+  if (input.urlButtonSuffix != null && input.urlButtonSuffix.trim()) {
+    urlButtonSuffix = requireNonEmptyString(input.urlButtonSuffix, "urlButtonSuffix");
+  }
+
+  let explicitUrlButtons: Record<string, string> | undefined;
+  if (input.urlButtons && Object.keys(input.urlButtons).length > 0) {
+    explicitUrlButtons = {};
+    for (const [key, value] of Object.entries(input.urlButtons)) {
+      const trimmed = typeof value === "string" ? value.trim() : "";
+      if (!trimmed) {
+        throw new WhatsAppTemplateValidationError(
+          `urlButtons["${key}"] must be a non-empty string.`,
+          "urlButtons",
+        );
+      }
+      explicitUrlButtons[key] = trimmed;
+    }
+  }
+
   const mobile = toCanonicalPhone(input.mobile);
   if (!mobile) {
     throw new WhatsAppTemplateValidationError("Enter a valid mobile number.", "mobile");
@@ -230,9 +264,14 @@ export async function sendWhatsAppTemplate(
   }
 
   const bodyParams = input.bodyParams.map((p) => p.trim());
-  // Reservation templates register /r/{{1}}; everything else /c/{{1}}.
-  const urlButtonParam = reservationToken ?? publicToken;
-  const urlButtons = urlButtonParam ? { "0": urlButtonParam } : undefined;
+  // Explicit multi-button map wins; else reservation / menu-suffix / hub token.
+  const urlButtons =
+    explicitUrlButtons ??
+    (() => {
+      const single = reservationToken ?? urlButtonSuffix ?? publicToken;
+      return single ? { "0": single } : undefined;
+    })();
+  const urlButtonParam = urlButtons?.["0"];
   const body: Record<string, unknown> = {
     authkey,
     template_name: templateName,
@@ -255,9 +294,12 @@ export async function sendWhatsAppTemplate(
     urlButtons: urlButtons ?? null,
     resolvedUrl: reservationToken
       ? reservationUrl(reservationToken)
-      : publicToken
-        ? customerHubUrl(publicToken)
-        : null,
+      : urlButtonSuffix
+        ? // Suffix may already include ?guest=… — don't encode the whole path.
+          `${getAppOrigin()}/menu/${urlButtonSuffix}`
+        : publicToken
+          ? customerHubUrl(publicToken)
+          : null,
   });
 
   let res: Response;
@@ -684,6 +726,10 @@ type QueueSendBase = {
 };
 
 export type SendQueueJoinedInput = QueueSendBase & QueueJoinedTemplateInput;
+export type SendQueueJoinedMenuInput = SendQueueJoinedInput & {
+  /** Merchant slug for Meta URL https://froq.io/menu/{{1}}. */
+  merchantSlug: string;
+};
 export type SendQueuePartyInput = QueueSendBase & QueuePartyTemplateInput;
 
 async function sendFromQueuePayload(
@@ -712,11 +758,28 @@ export async function sendQueueJoined(
   return sendFromQueuePayload(input.mobile, buildQueueJoinedTemplate(input));
 }
 
-/** queue_first_notify_menu — join notice with AI Menu CTA. */
+/** queue_first_notify_menu — join notice with AI Menu CTA → /menu/{slug}. */
 export async function sendQueueJoinedMenu(
-  input: SendQueueJoinedInput,
+  input: SendQueueJoinedMenuInput,
 ): Promise<ApitxtSendWaResponse> {
-  return sendFromQueuePayload(input.mobile, buildQueueJoinedMenuTemplate(input));
+  const payload = buildQueueJoinedMenuTemplate(input);
+  const queueSuffix = payload.buttons?.[0]?.parameters[0];
+  const menuSuffix = payload.buttons?.[1]?.parameters[0];
+  if (!queueSuffix || !menuSuffix) {
+    throw new WhatsAppTemplateValidationError(
+      "queue_first_notify_menu requires queue + menu URL buttons.",
+      "buttons",
+    );
+  }
+  return sendWhatsAppTemplate({
+    templateName: payload.templateName,
+    mobile: input.mobile,
+    bodyParams: payload.body,
+    urlButtons: {
+      "0": queueSuffix,
+      "1": menuSuffix,
+    },
+  });
 }
 
 /** @deprecated Prefer sendQueueJoined — same Meta template queue_first_notify. */

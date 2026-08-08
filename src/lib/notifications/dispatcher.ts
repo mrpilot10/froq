@@ -197,6 +197,12 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
     }
     case "queue_first_notify_menu": {
       const d = data as CustomerNotificationDataMap["queue_first_notify_menu"];
+      const menuSlug = d.menuSlug?.trim();
+      if (!menuSlug) {
+        throw new Error(
+          "queue_first_notify_menu requires menuSlug for Meta URL /menu/{{1}}.",
+        );
+      }
       await sendQueueJoinedMenu({
         mobile: customer.phone,
         customerName: customer.name,
@@ -205,6 +211,7 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
         queuePosition: d.queuePosition,
         estimatedWaitMinutes: d.estimatedWaitMinutes,
         publicToken: customer.publicToken,
+        merchantSlug: menuSlug,
       });
       return;
     }

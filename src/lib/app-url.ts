@@ -98,6 +98,14 @@ export function customerHubUrl(publicToken: string): string {
   return `${getAppOrigin()}/c/${encodeURIComponent(token)}`;
 }
 
+/** Absolute public menu page — Meta: https://froq.io/menu/{{1}}. */
+export function merchantMenuUrl(slug: string, guestPublicToken?: string): string {
+  const base = `${getAppOrigin()}/menu/${encodeURIComponent(slug.trim())}`;
+  const token = guestPublicToken?.trim();
+  if (!token) return base;
+  return `${base}?guest=${encodeURIComponent(token)}`;
+}
+
 /** Absolute AI Menu deep link — Meta: https://froq.io/m/{{1}}. */
 export function customerMenuUrl(publicToken: string): string {
   const token = publicToken.trim();

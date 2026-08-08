@@ -236,6 +236,7 @@ export async function joinLiveQueue(input: {
       bookingSize: partySize,
       queuePosition,
       estimatedWaitMinutes,
+      menuSlug: slug,
     };
     const entryId = entry.id;
 

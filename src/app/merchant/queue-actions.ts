@@ -279,11 +279,12 @@ export async function registerQueueJoin(input: {
     const supabase = await createClient();
     const { data: merchant } = await supabase
       .from("merchants")
-      .select("business_name")
+      .select("business_name, slug")
       .eq("id", ctx.merchantId)
       .maybeSingle();
     const businessName =
       (merchant?.business_name ?? "the store").trim() || "the store";
+    const menuSlug = merchant?.slug?.trim() || undefined;
 
     scheduleQueueNotifyAfter({
       customer,
@@ -293,6 +294,7 @@ export async function registerQueueJoin(input: {
         bookingSize: partySize,
         queuePosition,
         estimatedWaitMinutes,
+        ...(menuSlug ? { menuSlug } : {}),
       },
     });
 
@@ -489,6 +491,22 @@ async function businessNameFor(merchantId: string): Promise<string> {
     .eq("id", merchantId)
     .maybeSingle();
   return (data?.business_name ?? "the store").trim() || "the store";
+}
+
+async function merchantNotifyFields(merchantId: string): Promise<{
+  businessName: string;
+  menuSlug: string | null;
+}> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("merchants")
+    .select("business_name, slug")
+    .eq("id", merchantId)
+    .maybeSingle();
+  return {
+    businessName: (data?.business_name ?? "the store").trim() || "the store",
+    menuSlug: data?.slug?.trim() || null,
+  };
 }
 
 /** Load the open session + entries for the merchant live board. */
@@ -819,7 +837,7 @@ export async function addLiveQueueEntry(input: {
     }
 
     const queuePosition = await liveQueuePosition(open.id, entry.joined_at);
-    const businessName = await businessNameFor(ctx.merchantId);
+    const { businessName, menuSlug } = await merchantNotifyFields(ctx.merchantId);
 
     // Held upcoming reservations don't get a waitlist joined WhatsApp —
     // they already have reservation confirmation / reminders.
@@ -832,6 +850,7 @@ export async function addLiveQueueEntry(input: {
           bookingSize: partySize,
           queuePosition,
           estimatedWaitMinutes: Math.max(0, Math.round(input.estimatedWaitMinutes)),
+          ...(menuSlug ? { menuSlug } : {}),
         },
         markJoinedEntryId: entry.id,
       });

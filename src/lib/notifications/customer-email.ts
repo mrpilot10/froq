@@ -10,6 +10,7 @@ import { formatBookingSize, formatEstimatedWaitTime } from "@/lib/queue/format";
 import {
   customerMenuUrl,
   getPublicAppOrigin,
+  merchantMenuUrl,
   toPublicEmailUrl,
 } from "@/lib/app-url";
 import type {
@@ -551,7 +552,13 @@ export function buildCustomerNotificationEmail<
       const wait = formatEstimatedWaitTime(d.estimatedWaitMinutes);
       const subject = `🎟️ You're #${d.queuePosition} at ${d.businessName}`;
       const menuCta = template === "queue_first_notify_menu";
-      const ctaUrl = menuCta ? menuLink : hub;
+      const ctaUrl = menuCta
+        ? toPublicEmailUrl(
+            d.menuSlug?.trim()
+              ? merchantMenuUrl(d.menuSlug.trim(), customer.publicToken)
+              : customerMenuUrl(customer.publicToken),
+          )
+        : hub;
       return {
         subject,
         html: brandedEmailHtml({
