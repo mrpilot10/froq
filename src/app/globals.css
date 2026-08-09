@@ -20632,10 +20632,10 @@ body {
 
 .am-tile-title {
   margin: 0;
-  font-size: 17px;
+  font-size: 20px;
   font-weight: 800;
-  letter-spacing: -0.022em;
-  line-height: 1.25;
+  letter-spacing: -0.026em;
+  line-height: 1.22;
   color: var(--brand-deep);
 }
 
@@ -20813,6 +20813,15 @@ body {
   .am-tile--img,
   .am-tile--offer {
     padding: 30px 28px;
+  }
+
+  /* The wide tiles carry the section, so their headings lead. */
+  .am-tile--ask .am-tile-title,
+  .am-tile--img .am-tile-title,
+  .am-tile--offer .am-tile-title {
+    font-size: 27px;
+    letter-spacing: -0.03em;
+    line-height: 1.16;
   }
 
   .am-tile--ask .am-tile-desc,
