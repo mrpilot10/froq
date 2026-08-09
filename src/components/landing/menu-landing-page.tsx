@@ -151,7 +151,9 @@ export function MenuLandingPage() {
               <Sparkles size={13} strokeWidth={2.4} />
               AI Powered Digital Menu
             </span>
-            <h1 className="lp-hero-title">Turn Your Menu Into an AI That Answers Questions, Recommends Dishes, and Drives More Orders.</h1>
+            <h1 className="lp-hero-title">
+              Turn Your Menu Into an AI That Answers Questions and Drives More Orders.
+            </h1>
             <p className="am-hero-sub">
               Let guests chat or talk to your menu in their own language and get personalised recommendations while they order.
             </p>
@@ -180,8 +182,8 @@ export function MenuLandingPage() {
             <span className="lp-kicker">Try it yourself</span>
             <h2 className="lp-h2">This is a real Froq menu</h2>
             <p className="lp-section-lead">
-              Browse it, ask it what to eat, add something to the cart — exactly what your guests
-              see after they scan the QR at the table.
+              Hit play to open the real thing — browse it, ask it what to eat, add something to
+              the cart. Exactly what your guests see after they scan the QR at the table.
             </p>
           </Reveal>
           <Reveal delay={60}>

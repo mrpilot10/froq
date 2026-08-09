@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowRight,
   BadgePercent,
   ImagePlus,
   Languages,
@@ -40,6 +41,10 @@ export function MenuAskSpotlight() {
           <li>Only your real dishes, prices and descriptions — never invented</li>
           <li>Suggests the pairing your best server would have recommended</li>
         </ul>
+        <a href="#pricing" className="lp-btn lp-btn--accent am-ask-cta">
+          Get started free for 7 days
+          <ArrowRight size={17} strokeWidth={2.4} />
+        </a>
       </div>
 
       <div className="am-ask-chat">
@@ -48,11 +53,6 @@ export function MenuAskSpotlight() {
             {q}
           </p>
         ))}
-        <span className="am-ask-typing" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
       </div>
     </div>
   );
