@@ -9959,10 +9959,33 @@ body {
   cursor: progress;
 }
 
-/* Sits under the pass (after # / guest row), same CTA as queue waitlist. */
+/* Inside the pass, just under the # / guest row. */
 .rpass-ai-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
   margin-top: 14px;
-  margin-bottom: 2px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1.5px solid color-mix(in srgb, var(--on-card) 22%, transparent);
+  background: color-mix(in srgb, var(--on-card) 12%, transparent);
+  color: var(--on-card);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 750;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.rpass-ai-menu:active {
+  transform: scale(0.98);
+}
+
+.rpass-ai-menu svg {
+  flex: none;
+  color: var(--on-card);
 }
 
 /* ---- Dining table layout (shared Waitlist + Reservations) --------------- */
@@ -18933,6 +18956,12 @@ body {
   }
 }
 
+@media (min-width: 1100px) {
+  .lp-picker-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 /* ── Main shell ──────────────────────────────────────────────────────────── */
 .lp-main {
   max-width: var(--lp-max);
@@ -19411,6 +19440,693 @@ body {
   .lp-float-a { top: 8%; left: -10%; bottom: auto; }
   .lp-float-b { top: 50%; right: -12%; bottom: auto; }
   .lp-float-c { bottom: 8%; left: -8%; animation-delay: 1.4s; }
+}
+
+/* ── AI Digital Menu phone mockup ────────────────────────────────────────── */
+.lpm-phone--menu .lpm-phone-screen {
+  background:
+    radial-gradient(120% 60% at 50% -8%, color-mix(in srgb, var(--accent) 18%, var(--paper)) 0%, var(--bg) 52%);
+}
+
+.lpm-menu-screen {
+  height: 100%;
+  padding: 44px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lpm-menu-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lpm-menu-brand {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--brand-deep);
+}
+
+.lpm-menu-lang {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--lp-ink-soft);
+  background: color-mix(in srgb, var(--accent) 16%, #fff);
+  padding: 3px 7px;
+  border-radius: 999px;
+}
+
+.lpm-menu-ask {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 11px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 10%, transparent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--brand-deep);
+  box-shadow: 0 10px 22px -18px rgba(3, 12, 16, 0.45);
+}
+
+.lpm-menu-ask-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.lpm-menu-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lpm-menu-chips span {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--brand-deep);
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, #fff);
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+}
+
+.lpm-menu-dish {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 9px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+}
+
+.lpm-menu-dish-photo {
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 55%, #f6e7c8), #d9a86a 55%, #8b5a2b);
+}
+
+.lpm-menu-dish-photo--b {
+  background:
+    linear-gradient(145deg, #f2d9a6, #c48a3a 48%, #6b4226);
+}
+
+.lpm-menu-dish-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lpm-menu-dish-copy strong {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: var(--brand-deep);
+  letter-spacing: -0.01em;
+}
+
+.lpm-menu-dish-copy em {
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--lp-ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lpm-menu-dish-copy b {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--brand);
+}
+
+.lpm-menu-insight {
+  margin-top: auto;
+  padding: 9px 11px;
+  border-radius: 12px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--brand-deep);
+  background: color-mix(in srgb, var(--accent) 22%, #fff);
+  border: 1px dashed color-mix(in srgb, var(--brand) 28%, transparent);
+}
+
+/* ── Testimonials ────────────────────────────────────────────────────────── */
+.lp-section--testimonials {
+  padding-bottom: 8px;
+}
+
+.lp-quotes {
+  display: grid;
+  gap: 14px;
+  margin-top: 28px;
+}
+
+.lp-quote {
+  padding: 22px 20px 18px;
+  border-radius: 22px;
+  background: #fff;
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 9%, transparent);
+  box-shadow: 0 18px 40px -30px rgba(3, 12, 16, 0.45);
+}
+
+.lp-quote-text {
+  margin: 0 0 16px;
+  font-size: 15px;
+  line-height: 1.55;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--brand-deep);
+}
+
+.lp-quote-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lp-quote-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--brand-deep);
+}
+
+.lp-quote-role {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lp-ink-soft);
+}
+
+@media (min-width: 900px) {
+  .lp-quotes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AI DIGITAL MENU (.am-) — page-scoped layer over the shared .lp system.
+   One card surface, one accent, one contrast moment. No competing tones.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Hero ────────────────────────────────────────────────────────────────── */
+/* No illustration here — the live embed below carries the product visual, so the
+   hero runs full width and centred. Two classes to beat the shared .lp-hero row. */
+.lp-hero.am-hero {
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0;
+  padding: 56px 0 12px;
+}
+
+.am-hero .lp-hero-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 820px;
+}
+
+.am-hero .lp-hero-title {
+  max-width: 15ch;
+  font-size: clamp(36px, 8.4vw, 62px);
+}
+
+.am-hero-sub {
+  margin: 22px 0 0;
+  max-width: 34em;
+  font-size: 17px;
+  line-height: 1.6;
+  letter-spacing: -0.011em;
+  color: var(--lp-ink-soft);
+}
+
+.am-hero-desc {
+  margin: 16px 0 0;
+  max-width: 34em;
+  font-size: 15px;
+  line-height: 1.62;
+  letter-spacing: -0.005em;
+  color: var(--lp-ink-muted);
+}
+
+.am-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin: 32px 0 24px;
+}
+
+.am-btn-ghost {
+  background: transparent;
+  color: var(--brand-deep);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--brand-deep) 16%, transparent);
+}
+
+.am-btn-ghost:hover {
+  background: color-mix(in srgb, var(--brand-deep) 5%, transparent);
+  transform: translateY(-2px);
+}
+
+.am-hero-proof {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--lp-ink-muted);
+}
+
+.am-hero-proof li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.am-hero-proof li + li::before {
+  content: "";
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--brand-deep) 30%, transparent);
+}
+
+/* On narrow screens the buttons end up ragged and the proof row wraps with a
+   separator dangling at the start of the second line. */
+@media (max-width: 599px) {
+  .am-hero-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .am-hero-actions .lp-btn {
+    width: 100%;
+  }
+
+  .am-hero-proof {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .am-hero-proof li {
+    gap: 9px;
+  }
+
+  .am-hero-proof li::before {
+    content: "";
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+}
+
+/* ── Try it yourself — the real published menu, in a phone ───────────────── */
+.am-try-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  margin-top: 34px;
+}
+
+.am-try-glow {
+  position: absolute;
+  inset: -4% 0 26%;
+  background:
+    radial-gradient(46% 42% at 50% 42%, color-mix(in srgb, var(--accent) 34%, transparent), transparent 72%);
+  filter: blur(24px);
+  z-index: 0;
+}
+
+.am-try-live {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 15px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 10%, transparent);
+  box-shadow: var(--lp-shadow-sm);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--brand-deep);
+}
+
+.am-try-live i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* Real iPhone geometry (375 x 667pt — iPhone SE / 8), sized so the whole
+   device always fits one screen. The width is capped three ways: the handset
+   size, the page gutter, and the viewport height via the 375:667 ratio. No
+   transform is used — scaling an ancestor of a cross-origin iframe risks it
+   not painting at all. */
+.am-try-device {
+  --am-screen-w: min(375px, calc(100vw - 48px), calc((100svh - 230px) * 0.5622));
+  --am-bezel: clamp(8px, calc(var(--am-screen-w) * 0.035), 13px);
+  position: relative;
+  z-index: 1;
+}
+
+.am-try-phone {
+  position: relative;
+  width: calc(var(--am-screen-w) + var(--am-bezel) * 2);
+  padding: var(--am-bezel);
+  border-radius: calc(var(--am-screen-w) * 0.15);
+  background: linear-gradient(155deg, #2b3a40 0%, #0c1418 60%);
+  box-shadow:
+    0 2px 3px rgba(255, 255, 255, 0.18) inset,
+    0 0 0 2px #05090b,
+    0 60px 100px -44px rgba(3, 12, 16, 0.7);
+}
+
+.am-try-btn {
+  position: absolute;
+  width: 3px;
+  border-radius: 3px;
+  background: #111c20;
+}
+
+.am-try-btn--power {
+  right: -3px;
+  top: 23%;
+  height: 10%;
+}
+
+.am-try-btn--vol {
+  left: -3px;
+  top: 17%;
+  height: 6.5%;
+}
+
+.am-try-btn--vol2 {
+  left: -3px;
+  top: 25.5%;
+  height: 6.5%;
+}
+
+.am-try-screen {
+  position: relative;
+  width: var(--am-screen-w);
+  aspect-ratio: 375 / 667;
+  border-radius: calc(var(--am-screen-w) * 0.118);
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.am-try-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.am-try-open {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--brand-deep);
+  text-decoration: none;
+  border-bottom: 1.5px solid color-mix(in srgb, var(--brand-deep) 22%, transparent);
+  padding-bottom: 2px;
+  transition: border-color 0.16s ease;
+}
+
+.am-try-open:hover {
+  border-bottom-color: var(--accent);
+}
+
+.am-try-open svg {
+  transition: transform 0.16s ease;
+}
+
+.am-try-open:hover svg {
+  transform: translate(2px, -2px);
+}
+
+/* ── Ask spotlight ───────────────────────────────────────────────────────── */
+.am-ask {
+  display: grid;
+  gap: 24px;
+  padding: 24px;
+  border-radius: var(--lp-radius);
+  background: var(--lp-card);
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+  box-shadow: var(--lp-shadow);
+}
+
+.am-label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--brand);
+}
+
+.am-ask-title {
+  margin: 14px 0 0;
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 800;
+  letter-spacing: -0.028em;
+  line-height: 1.18;
+  color: var(--brand-deep);
+}
+
+.am-ask-lead {
+  margin: 14px 0 0;
+  font-size: 15.5px;
+  line-height: 1.62;
+  color: var(--lp-ink-muted);
+}
+
+.am-ask-points {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.am-ask-points li {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  color: var(--lp-ink-soft);
+}
+
+.am-ask-points li::before {
+  content: "";
+  flex-shrink: 0;
+  margin-top: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* The questions, as the guest would actually type them. */
+.am-ask-chat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 24px 20px;
+  border-radius: 22px;
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--brand) 26%, var(--brand-deep)), var(--brand-deep) 62%);
+  box-shadow: 0 28px 60px -34px rgba(3, 12, 16, 0.7);
+}
+
+.am-ask-bubble {
+  margin: 0;
+  max-width: 92%;
+  padding: 12px 15px;
+  border-radius: 18px 18px 6px 18px;
+  background: #fff;
+  color: var(--brand-deep);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.42;
+  letter-spacing: -0.01em;
+  box-shadow: 0 10px 24px -18px rgba(3, 12, 16, 0.6);
+}
+
+.am-ask-typing {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+  padding: 14px 16px;
+  border-radius: 18px 18px 18px 6px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.am-ask-typing i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: amTyping 1.4s ease-in-out infinite;
+}
+
+.am-ask-typing i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.am-ask-typing i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes amTyping {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .am-ask-typing i {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+@media (min-width: 900px) {
+  .am-ask {
+    grid-template-columns: 1fr 1fr;
+    gap: 48px;
+    padding: 40px;
+    align-items: center;
+  }
+
+  .am-ask-chat {
+    padding: 28px 24px;
+  }
+}
+
+/* ── Capability grid ─────────────────────────────────────────────────────── */
+.am-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 30px;
+  grid-template-columns: 1fr;
+}
+
+.am-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 26px 24px;
+  border-radius: var(--lp-radius-sm);
+  background: var(--lp-card);
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+  box-shadow: var(--lp-shadow-sm);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.am-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: var(--lp-shadow);
+}
+
+.am-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--accent) 22%, #fff);
+  color: var(--brand-deep);
+}
+
+.am-card-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.022em;
+  line-height: 1.25;
+  color: var(--brand-deep);
+}
+
+.am-card-desc {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.58;
+  color: var(--lp-ink-muted);
+}
+
+@media (min-width: 640px) {
+  .am-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 980px) {
+  .am-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+}
+
+/* ── FAQ: two columns on desktop so the section reads at a glance ────────── */
+@media (min-width: 900px) {
+  .lp-faq.am-faq {
+    max-width: none;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 12px;
+  }
 }
 
 /* ── How it works ────────────────────────────────────────────────────────── */
