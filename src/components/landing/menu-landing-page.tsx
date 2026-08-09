@@ -17,6 +17,7 @@ import { Reveal } from "./reveal";
 import { useInView } from "./use-in-view";
 import { MenuAskSpotlight, MenuCapabilities } from "./menu-capabilities";
 import { MenuLiveEmbed } from "./menu-live-embed";
+import { MenuTrustBar } from "./menu-trust-bar";
 
 const HOW_STEPS: { Icon: LucideIcon; title: string; desc: string }[] = [
   {
@@ -46,19 +47,25 @@ const TESTIMONIALS = [
     quote:
       "Guests ask the menu in Marathi and Hindi now. Our staff spend less time explaining every dish.",
     name: "Ananya Desai",
-    role: "Owner, Coast & Crumb · Mumbai",
+    initials: "AD",
+    role: "Owner, Coast & Crumb",
+    place: "Mumbai",
   },
   {
     quote:
       "We uploaded our old printed menu and had descriptions and AI images ready the same afternoon.",
     name: "Rahul Mehra",
-    role: "Ops Lead, Oven Theory · Pune",
+    initials: "RM",
+    role: "Ops Lead, Oven Theory",
+    place: "Pune",
   },
   {
     quote:
       "The cart suggestions show pairings we used to miss. Our average ticket improved without constantly pushing discounts.",
     name: "Karthik Iyer",
-    role: "Founder, Green Bowl · Bengaluru",
+    initials: "KI",
+    role: "Founder, Green Bowl",
+    place: "Bengaluru",
   },
 ];
 
@@ -161,29 +168,29 @@ export function MenuLandingPage() {
               Guests can ask questions, discover dishes, and get AI powered suggestions without waiting for your staff. AI insights inside the cart help guests make better choices, while live order totals make it easy to see exactly what they are spending.
             </p>
             <div className="am-hero-actions">
-              <a href="#pricing" className="lp-btn lp-btn--accent lp-btn--lg">
+              <a href="#pricing" className="lp-btn lp-btn--accent lp-btn--lg am-hero-cta">
                 Get started
+                <span className="am-hero-cta-price">₹699/mo</span>
                 <ArrowRight size={18} strokeWidth={2.4} />
               </a>
               <a href="#try" className="lp-btn am-btn-ghost lp-btn--lg">
                 Try a live menu
               </a>
             </div>
-            <ul className="am-hero-proof">
-              <li>No app for guests</li>
-              <li>Works from your PDF menu</li>
-              <li>7-day money back</li>
-            </ul>
           </div>
         </section>
 
+        <Reveal className="am-trust-wrap">
+          <MenuTrustBar />
+        </Reveal>
+
         <section className="lp-section am-try" id="try">
           <Reveal className="lp-section-head">
-            <span className="lp-kicker">Try it yourself</span>
-            <h2 className="lp-h2">This is a real Froq menu</h2>
+            <span className="lp-kicker">Live demo</span>
+            <h2 className="lp-h2">Go ahead. Try the menu.</h2>
             <p className="lp-section-lead">
-              Hit play to open the real thing — browse it, ask it what to eat, add something to
-              the cart. Exactly what your guests see after they scan the QR at the table.
+              Explore a real Froq menu, ask the AI what to eat, and add something to your cart.
+              It’s the same experience your guests get at the table.
             </p>
           </Reveal>
           <Reveal delay={60}>
@@ -232,13 +239,23 @@ export function MenuLandingPage() {
             <span className="lp-kicker">Testimonials</span>
             <h2 className="lp-h2">Restaurants are already letting guests ask</h2>
           </Reveal>
-          <div className="lp-quotes">
+          <div className="am-quotes">
             {TESTIMONIALS.map((t, i) => (
-              <Reveal key={t.name} className="lp-quote" delay={i * 70}>
-                <p className="lp-quote-text">&ldquo;{t.quote}&rdquo;</p>
-                <div className="lp-quote-meta">
-                  <span className="lp-quote-name">{t.name}</span>
-                  <span className="lp-quote-role">{t.role}</span>
+              <Reveal key={t.name} className="am-quote" delay={i * 70}>
+                <span className="am-quote-mark" aria-hidden="true">
+                  &rdquo;
+                </span>
+                <p className="am-quote-text">{t.quote}</p>
+                <div className="am-quote-meta">
+                  <span className="am-quote-avatar" aria-hidden="true">
+                    {t.initials}
+                  </span>
+                  <span className="am-quote-who">
+                    <strong>{t.name}</strong>
+                    <em>
+                      {t.role} · {t.place}
+                    </em>
+                  </span>
                 </div>
               </Reveal>
             ))}

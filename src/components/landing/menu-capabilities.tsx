@@ -3,10 +3,12 @@
 import {
   ArrowRight,
   BadgePercent,
+  Check,
   ImagePlus,
   Languages,
   MessageSquareText,
   ShoppingCart,
+  Sparkles,
   Upload,
   type LucideIcon,
 } from "lucide-react";
@@ -61,49 +63,130 @@ export function MenuAskSpotlight() {
 /* ─────────────────────────────────────────────────────────────────────────
    Capabilities — one uniform card system, no competing tones or CTAs.
    ───────────────────────────────────────────────────────────────────────── */
-const CAPABILITIES: { Icon: LucideIcon; title: string; desc: string }[] = [
+type Tone = "deep" | "accent" | "plain";
+
+const CAPABILITIES: {
+  id: string;
+  tone: Tone;
+  Icon: LucideIcon;
+  title: string;
+  desc: string;
+}[] = [
   {
+    id: "ask",
+    tone: "deep",
     Icon: MessageSquareText,
     title: "Guests can just ask",
     desc: "No scrolling through forty dishes. Guests describe what they feel like eating and Froq recommends from your menu.",
   },
   {
+    id: "pdf",
+    tone: "plain",
     Icon: Upload,
     title: "Start from your PDF",
     desc: "Upload your existing menu or photos of it. AI reads it into a structured catalogue — names, prices, categories.",
   },
   {
+    id: "img",
+    tone: "plain",
     Icon: ImagePlus,
-    title: "Descriptions and images",
-    desc: "Generate dish copy, dietary tags and menu imagery in the editor. Nothing goes live until you approve it.",
+    title: "One click fills in every detail",
+    desc: "Give AI a dish name and it writes the description and generates the photo, calories, spice level, cooking time and allergens. Nothing publishes until you approve it.",
   },
   {
+    id: "lang",
+    tone: "plain",
     Icon: Languages,
     title: "In their language",
-    desc: "English, Hindi, Marathi, Tamil and more, so guests never have to translate a menu before they can order.",
+    desc: "English, Hindi, Marathi, Tamil and more, so guests never translate a menu before they order.",
   },
   {
+    id: "pair",
+    tone: "plain",
     Icon: ShoppingCart,
     title: "Pairings that fit",
-    desc: "Suggest relevant sides and add-ons based on what is already in the cart — at the moment it is useful.",
+    desc: "Suggest relevant sides and add-ons based on what is already in the cart.",
   },
   {
+    id: "offer",
+    tone: "accent",
     Icon: BadgePercent,
     title: "Offers and Loyalty Stamps",
     desc: "Show live offers while guests browse and connect the visit to Froq Loyalty Stamps. One QR, one journey.",
   },
 ];
 
+/** Everything one AI pass fills in — each maps to a real field on a menu item. */
+const GENERATED_FIELDS = [
+  "Photo",
+  "Description",
+  "Calories",
+  "Spice level",
+  "Cooking time",
+  "Allergens",
+];
+
+/** The feature tiles carry a small visual; the rest stay icon-and-copy. */
+function TileVisual({ id }: { id: string }) {
+  if (id === "img") {
+    return (
+      <div className="am-tile-gen" aria-hidden="true">
+        <span className="am-tile-gen-btn">
+          <Sparkles size={13} strokeWidth={2.5} />
+          Generate with AI
+        </span>
+        <span className="am-tile-gen-chips">
+          {GENERATED_FIELDS.map((field) => (
+            <i key={field}>
+              <Check size={11} strokeWidth={3} />
+              {field}
+            </i>
+          ))}
+        </span>
+      </div>
+    );
+  }
+  if (id === "ask") {
+    return (
+      <div className="am-tile-chat" aria-hidden="true">
+        <span className="am-tile-chat-guest">Something mild, under ₹200?</span>
+        <span className="am-tile-chat-reply">
+          <b>Paneer Slider</b>
+          <i>₹189</i>
+        </span>
+      </div>
+    );
+  }
+  if (id === "offer") {
+    return (
+      <div className="am-tile-stamps" aria-hidden="true">
+        <span className="am-tile-stamp-row">
+          {Array.from({ length: 6 }, (_, i) => (
+            <i key={i} className={i < 4 ? "is-filled" : undefined} />
+          ))}
+        </span>
+        <span className="am-tile-stamp-note">4 of 6 · free coffee at 6</span>
+      </div>
+    );
+  }
+  return null;
+}
+
 export function MenuCapabilities() {
   return (
-    <div className="am-grid">
-      {CAPABILITIES.map(({ Icon, title, desc }, i) => (
-        <Reveal key={title} className="am-card" delay={i * 50}>
-          <span className="am-card-icon" aria-hidden="true">
+    <div className="am-bento">
+      {CAPABILITIES.map(({ id, tone, Icon, title, desc }, i) => (
+        <Reveal
+          key={id}
+          className={`am-tile am-tile--${tone} am-tile--${id}`}
+          delay={i * 50}
+        >
+          <span className="am-tile-icon" aria-hidden="true">
             <Icon size={19} strokeWidth={2.1} />
           </span>
-          <h3 className="am-card-title">{title}</h3>
-          <p className="am-card-desc">{desc}</p>
+          <h3 className="am-tile-title">{title}</h3>
+          <p className="am-tile-desc">{desc}</p>
+          <TileVisual id={id} />
         </Reveal>
       ))}
     </div>
