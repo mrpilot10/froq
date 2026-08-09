@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { LandingPage } from "@/components/landing/landing-page";
+import { LoyaltyLandingPage } from "@/components/landing/loyalty-landing-page";
 
 export const metadata: Metadata = {
   title: "Loyalty Stamps — Froq",
   description:
-    "Run digital stamps and rewards from one dashboard. Built for shops, cafés, and local brands.",
+    "Digital stamp cards guests collect with a QR scan — no app to download. Rewards that bring customers back, from one dashboard.",
 };
 
 export default function LoyaltyStampsPage() {
-  return <LandingPage />;
+  return <LoyaltyLandingPage />;
 }

@@ -8,17 +8,9 @@ import { Smartphone, Star, Zap, type LucideIcon } from "lucide-react";
  */
 const PARTNER_RESTAURANTS = "5,140+";
 
-const POINTS: { Icon: LucideIcon; title: string; note: string }[] = [
-  {
-    Icon: Zap,
-    title: "Live in minutes",
-    note: "Import your PDF menu",
-  },
-  {
-    Icon: Smartphone,
-    title: "No app for guests",
-    note: "They just scan a QR",
-  },
+const POINTS: { Icon: LucideIcon; title: string }[] = [
+  { Icon: Zap, title: "Live in minutes" },
+  { Icon: Smartphone, title: "No app for guests" },
 ];
 
 const AVATARS = ["AD", "RM", "KI"];
@@ -32,31 +24,26 @@ export function MenuTrustBar() {
             <i key={initials}>{initials}</i>
           ))}
           <i className="am-trust-avatars-star">
-            <Star size={14} strokeWidth={2.6} fill="currentColor" />
+            <Star size={11} strokeWidth={2.6} fill="currentColor" />
           </i>
         </span>
 
         <span className="am-trust-stat">
-          <span className="am-trust-stat-top">
-            <strong>{PARTNER_RESTAURANTS}</strong>
-            <span className="am-trust-live">
-              <i aria-hidden="true" />
-              Partner Restaurants
-            </span>
+          <strong>{PARTNER_RESTAURANTS}</strong>
+          <span className="am-trust-live">
+            <i aria-hidden="true" />
+            Partners
           </span>
         </span>
       </div>
 
       <div className="am-trust-points">
-        {POINTS.map(({ Icon, title, note }) => (
+        {POINTS.map(({ Icon, title }) => (
           <div key={title} className="am-trust-point">
             <span className="am-trust-point-icon" aria-hidden="true">
-              <Icon size={17} strokeWidth={2.2} />
+              <Icon size={14} strokeWidth={2.3} />
             </span>
-            <span className="am-trust-point-copy">
-              <strong>{title}</strong>
-              <em>{note}</em>
-            </span>
+            <strong>{title}</strong>
           </div>
         ))}
       </div>

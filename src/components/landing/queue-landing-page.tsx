@@ -3,79 +3,50 @@
 import { useState, type CSSProperties } from "react";
 import {
   ArrowRight,
+  Bell,
   Plus,
   ShieldCheck,
-  Sparkles,
+  Users,
 } from "lucide-react";
 import { SiteShell } from "./site-shell";
 import { PricingTable } from "./pricing-table";
 import { Reveal } from "./reveal";
 import { useInView } from "./use-in-view";
-import { MenuHeroVisual } from "./product-mockups";
-import { MenuAskSpotlight, MenuCapabilities, MenuImportSpotlight } from "./menu-capabilities";
-import { MenuLiveEmbed } from "./menu-live-embed";
+import { QueueHeroVisual } from "./product-mockups";
+import {
+  QueueCapabilities,
+  QueueGuestSpotlight,
+  QueueOpsSpotlight,
+} from "./queue-capabilities";
+import { QueueTryComposer } from "./queue-try-composer";
 import { MenuTrustBar } from "./menu-trust-bar";
 import { MenuVenues } from "./menu-venues";
 
 const HOW_STEPS = [
   {
-    id: "import",
-    title: "Import",
-    desc: "Drop in your PDF or dish photos. Froq reads your existing menu into a structured catalogue.",
+    id: "qr",
+    title: "Place a QR",
+    desc: "Put your waitlist QR at the door. Guests scan once — no app install.",
   },
   {
-    id: "generate",
-    title: "Generate",
-    desc: "Fill in descriptions, dietary tags and imagery with AI. Review everything before it goes live.",
+    id: "join",
+    title: "Guests join",
+    desc: "They pick a party size, grab a ticket, and leave the entrance free.",
   },
   {
-    id: "live",
-    title: "Go live",
-    desc: "Put a QR on every table. Guests scan and browse — no app, no download, no waiting.",
+    id: "wait",
+    title: "They wait free",
+    desc: "Live position and estimated wait stay on their phone while they roam.",
   },
   {
-    id: "grow",
-    title: "Grow",
-    desc: "Turn interest into orders with recommendations, offers and Loyalty Stamps.",
+    id: "call",
+    title: "You call",
+    desc: "Tap to call — WhatsApp tells them the table is ready so they head back.",
   },
 ] as const;
 
 function HowStepVisual({ id }: { id: (typeof HOW_STEPS)[number]["id"] }) {
-  if (id === "import") {
-    return (
-      <div className="am-how-illu am-how-illu--import" aria-hidden="true">
-        <span className="am-how-doc">
-          <i />
-          <i />
-          <i />
-          <i />
-        </span>
-        <span className="am-how-badge">PDF</span>
-      </div>
-    );
-  }
-  if (id === "generate") {
-    return (
-      <div className="am-how-illu am-how-illu--generate" aria-hidden="true">
-        <span className="am-how-card am-how-card--a">
-          <b />
-          <em />
-          <Sparkles size={12} strokeWidth={2.5} />
-        </span>
-        <span className="am-how-card am-how-card--b">
-          <b />
-          <em />
-          <Sparkles size={12} strokeWidth={2.5} />
-        </span>
-        <span className="am-how-card am-how-card--c">
-          <b />
-          <em />
-          <Sparkles size={12} strokeWidth={2.5} />
-        </span>
-      </div>
-    );
-  }
-  if (id === "live") {
+  if (id === "qr") {
     return (
       <div className="am-how-illu am-how-illu--live" aria-hidden="true">
         <span className="am-how-qr">
@@ -88,22 +59,35 @@ function HowStepVisual({ id }: { id: (typeof HOW_STEPS)[number]["id"] }) {
       </div>
     );
   }
+  if (id === "join") {
+    return (
+      <div className="am-how-illu qs-how-illu--join" aria-hidden="true">
+        <span className="qs-how-token">#08</span>
+        <span className="qs-how-chip">Joined</span>
+      </div>
+    );
+  }
+  if (id === "wait") {
+    return (
+      <div className="am-how-illu qs-how-illu--wait" aria-hidden="true">
+        <span className="qs-how-wait">
+          <Users size={20} strokeWidth={2.2} />
+          ~22m
+        </span>
+      </div>
+    );
+  }
   return (
-    <div className="am-how-illu am-how-illu--grow" aria-hidden="true">
-      <span className="am-how-stamps">
-        <i className="is-on" />
-        <i className="is-on" />
-        <i className="is-on" />
-        <i className="is-on" />
-        <i />
-        <i />
+    <div className="am-how-illu qs-how-illu--call" aria-hidden="true">
+      <span className="qs-how-bell">
+        <Bell size={22} strokeWidth={2.2} />
       </span>
-      <span className="am-how-grow-chip">+₹120</span>
+      <span className="am-how-grow-chip">Ready</span>
     </div>
   );
 }
 
-function MenuHowItWorks() {
+function QueueHowItWorks() {
   const { ref, inView } = useInView<HTMLOListElement>({ threshold: 0.15 });
   return (
     <ol ref={ref} className={`am-how${inView ? " is-in" : ""}`}>
@@ -129,15 +113,7 @@ function MenuHowItWorks() {
 const TESTIMONIALS = [
   {
     quote:
-      "Guests ask the menu in Marathi and Hindi now. Our staff spend less time explaining every dish.",
-    name: "Ananya Desai",
-    initials: "AD",
-    role: "Owner, Coast & Crumb",
-    place: "Mumbai",
-  },
-  {
-    quote:
-      "We uploaded our old printed menu and had descriptions and AI images ready the same afternoon.",
+      "The entrance stays clear now. Guests wander, get a WhatsApp when ready, and we seat without shouting names.",
     name: "Rahul Mehra",
     initials: "RM",
     role: "Ops Lead, Oven Theory",
@@ -145,7 +121,15 @@ const TESTIMONIALS = [
   },
   {
     quote:
-      "The cart suggestions show pairings we used to miss. Our average ticket improved without constantly pushing discounts.",
+      "Party size on every ticket changed how we match tables. Less guesswork during the Friday rush.",
+    name: "Ananya Desai",
+    initials: "AD",
+    role: "Owner, Coast & Crumb",
+    place: "Mumbai",
+  },
+  {
+    quote:
+      "Hosts run the door from one list. Call, seat, done — paper clipboards are gone for good.",
     name: "Karthik Iyer",
     initials: "KI",
     role: "Founder, Green Bowl",
@@ -155,20 +139,20 @@ const TESTIMONIALS = [
 
 const FAQS = [
   {
-    q: "Do customers need an app?",
-    a: "No. Guests scan your QR code and open the menu directly in their phone browser. Nothing to download.",
+    q: "Do guests need an app?",
+    a: "No. They scan your QR and join in the phone browser. WhatsApp alerts arrive when you call their party.",
   },
   {
-    q: "Can we use our existing PDF menu?",
-    a: "Yes. Upload your PDF or menu photos and Froq uses AI to turn them into a structured digital catalogue. You review the content before publishing.",
+    q: "How do WhatsApp alerts work?",
+    a: "When a host marks a party as ready, Froq sends a WhatsApp notification so guests know to return to the restaurant.",
   },
   {
-    q: "Which languages are supported?",
-    a: "Froq supports English, Hindi, Marathi, Tamil and more. Guests can browse and interact with the menu in supported languages.",
+    q: "Can hosts still add walk-ins manually?",
+    a: "Yes. Guests can self-join by QR, and your team can add parties from the live waitlist board when needed.",
   },
   {
-    q: "Can it work with Loyalty Stamps?",
-    a: "Yes. Your AI Menu and Froq Loyalty Stamps can work together, giving guests one connected experience from discovery to reward.",
+    q: "Does it work with AI Digital Menu?",
+    a: "Yes. While guests wait, you can invite them to browse your Froq AI Menu — one connected experience from queue to table.",
   },
   {
     q: "Is there a contract?",
@@ -180,7 +164,7 @@ const FAQS = [
   },
 ];
 
-function MenuFaq() {
+function QueueFaq() {
   const [open, setOpen] = useState<number | null>(0);
   return (
     <div className="lp-faq am-faq">
@@ -209,38 +193,40 @@ function MenuFaq() {
   );
 }
 
-export function MenuLandingPage() {
+export function QueueLandingPage() {
   return (
     <SiteShell>
-      <div className="am-landing">
+      <div className="am-landing qs-landing">
         <section className="lp-hero am-hero">
           <div className="lp-hero-copy">
             <span className="lp-eyebrow">
-              <Sparkles size={13} strokeWidth={2.4} />
-              AI Powered Digital Menu
+              <Users size={13} strokeWidth={2.4} />
+              Smart Queue
             </span>
             <h1 className="lp-hero-title">
-              Turn Your Menu Into an AI That Answers Questions and Drives More Orders.
+              Clear the Doorway. Call Guests When the Table Is Ready.
             </h1>
             <p className="am-hero-sub">
-              Let guests chat or talk to your menu in their own language and get personalised recommendations while they order.
+              Guests scan to join your live waitlist, wait wherever they like, and get a WhatsApp
+              alert the moment you seat them.
             </p>
             <p className="am-hero-desc">
-              Guests can ask questions, discover dishes, and get AI powered suggestions without waiting for your staff. AI insights inside the cart help guests make better choices, while live order totals make it easy to see exactly what they are spending.
+              Froq replaces paper clipboards and shouted names with a door QR, a phone ticket, and a
+              host board your team can actually run through the rush.
             </p>
             <div className="am-hero-actions">
               <a href="#pricing" className="lp-btn lp-btn--accent lp-btn--lg am-hero-cta">
                 Get started
-                <span className="am-hero-cta-price">₹699/mo</span>
+                <span className="am-hero-cta-price">₹799/mo</span>
                 <ArrowRight size={20} strokeWidth={2.4} />
               </a>
               <a href="#try" className="lp-btn am-btn-ghost lp-btn--lg">
-                Try a live menu
+                See how it works
               </a>
             </div>
           </div>
 
-          <MenuHeroVisual />
+          <QueueHeroVisual />
         </section>
 
         <Reveal className="am-trust-wrap">
@@ -251,69 +237,68 @@ export function MenuLandingPage() {
           <Reveal className="lp-section-head">
             <span className="lp-kicker am-try-kicker">
               <i aria-hidden="true" />
-              Live demo
+              Guest ticket
             </span>
-            <h2 className="lp-h2">Go ahead. Try the menu.</h2>
+            <h2 className="lp-h2">A live ticket that walks with them.</h2>
             <p className="lp-section-lead">
-              Explore a real Froq menu, ask the AI what to eat, and add something to your cart.
-              It’s the same experience your guests get at the table.
+              Position, party size, and estimated wait on one screen — plus a WhatsApp ping when
+              you call.
             </p>
           </Reveal>
           <Reveal delay={60}>
-            <MenuLiveEmbed />
+            <QueueTryComposer />
           </Reveal>
         </section>
 
-        <section className="lp-section" id="understand">
+        <section className="lp-section" id="guest">
           <Reveal className="lp-section-head">
             <span className="lp-kicker">Guest experience</span>
-            <h2 className="lp-h2">A menu that understands what guests mean</h2>
+            <h2 className="lp-h2">Waiting without occupying your entrance</h2>
           </Reveal>
           <Reveal delay={60}>
-            <MenuAskSpotlight />
+            <QueueGuestSpotlight />
           </Reveal>
         </section>
 
-        <section className="lp-section" id="import">
+        <section className="lp-section" id="ops">
           <Reveal className="lp-section-head">
-            <span className="lp-kicker">Menu setup</span>
-            <h2 className="lp-h2">Import once. AI fills in the rest.</h2>
+            <span className="lp-kicker">Host tools</span>
+            <h2 className="lp-h2">One list. Call, seat, clear.</h2>
           </Reveal>
           <Reveal delay={60}>
-            <MenuImportSpotlight />
+            <QueueOpsSpotlight />
           </Reveal>
         </section>
 
         <section className="lp-section" id="how">
           <Reveal className="lp-section-head">
             <span className="lp-kicker">How it works</span>
-            <h2 className="lp-h2">From your existing menu to an AI menu</h2>
+            <h2 className="lp-h2">From door QR to seated party</h2>
             <p className="lp-section-lead">
-              You don&apos;t rebuild anything. Import what you already have and give every table a
-              menu that can answer back.
+              Guests self-join, wait free of the doorway, and return when WhatsApp says it&apos;s
+              time.
             </p>
           </Reveal>
           <Reveal delay={80}>
-            <MenuHowItWorks />
+            <QueueHowItWorks />
           </Reveal>
         </section>
 
         <section className="lp-section" id="features">
           <Reveal className="lp-section-head">
             <span className="lp-kicker">Capabilities</span>
-            <h2 className="lp-h2">Built for discovery, ordering and return visits</h2>
+            <h2 className="lp-h2">Built for join, wait, and seat</h2>
             <p className="lp-section-lead">
-              Everything that turns a printed menu into a guest experience you can actually
-              improve.
+              Everything that turns a chaotic entrance into a calm, trackable waitlist.
             </p>
           </Reveal>
-          <MenuCapabilities />
+          <QueueCapabilities />
         </section>
 
         <section className="lp-section lp-section--testimonials" id="stories">
           <Reveal className="lp-section-head">
             <span className="lp-kicker">Testimonials</span>
-            <h2 className="lp-h2">Restaurants are already letting guests ask</h2>
+            <h2 className="lp-h2">Restaurants are already clearing the door</h2>
           </Reveal>
           <div className="am-quotes">
             {TESTIMONIALS.map((t, i) => (
@@ -340,9 +325,9 @@ export function MenuLandingPage() {
 
         <section className="lp-section lp-pricing-wrap" id="pricing">
           <PricingTable
-            product="menu"
+            product="queue"
             title="Simple pricing. No surprises."
-            subtitle="Start small. Grow when you need to."
+            subtitle="Start with a 7-day free trial. No credit card required. Cancel anytime."
           />
           <p className="am-pricing-guarantee">
             <ShieldCheck size={16} strokeWidth={2.3} aria-hidden="true" />
@@ -354,7 +339,10 @@ export function MenuLandingPage() {
         </section>
 
         <section className="lp-section" id="venues">
-          <MenuVenues />
+          <MenuVenues
+            kicker="Works for"
+            title="Built for every restaurant that runs a wait."
+          />
         </section>
 
         <section className="lp-section">
@@ -363,17 +351,17 @@ export function MenuLandingPage() {
             <h2 className="lp-h2">Questions, answered</h2>
           </Reveal>
           <Reveal delay={60}>
-            <MenuFaq />
+            <QueueFaq />
           </Reveal>
         </section>
 
         <section className="lp-section lp-section--final">
           <Reveal className="lp-final">
             <div className="lp-final-glow" aria-hidden="true" />
-            <h2 className="lp-final-title">Your menu should answer back.</h2>
+            <h2 className="lp-final-title">Your doorway shouldn&apos;t be the waiting room.</h2>
             <p className="lp-final-sub">
-              Give every table a QR that does more than display dishes — let guests ask, discover
-              and order with confidence.
+              Give guests a QR that joins the line — and a WhatsApp that brings them back when
+              you’re ready.
             </p>
             <a href="#pricing" className="lp-btn lp-btn--accent lp-btn--lg">
               Get started

@@ -6,13 +6,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FROQ_LOGO_SRC } from "@/lib/brand";
 import { createClient } from "@/lib/supabase/client";
-import { FroqFooter } from "@/components/shared/froq-footer";
+import { SiteFooter } from "./site-footer";
 
 /** Shared across homepage, product landings, and /help. */
 const SITE_NAV = [
   { label: "Home", href: "/" },
   { label: "Loyalty Stamps", href: "/loyalty-stamps" },
   { label: "Smart Queue", href: "/queue-management" },
+  { label: "AI Digital Menu", href: "/ai-digital-menu" },
   { label: "Help", href: "/help" },
 ] as const;
 
@@ -163,10 +164,8 @@ export function SiteShell({ children }: SiteShellProps) {
   return (
     <div className="lp merchant-theme">
       <SiteHeader />
-      <main className="lp-main">
-        {children}
-        <FroqFooter className="lp-footer" />
-      </main>
+      <main className="lp-main">{children}</main>
+      <SiteFooter />
     </div>
   );
 }

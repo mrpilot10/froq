@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Sparkles, Stamp, Users } from "lucide-react";
+import { ArrowRight, Sparkles, Stamp, UtensilsCrossed, Users } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { SiteShell } from "./site-shell";
 
@@ -34,6 +34,16 @@ const PRODUCT_CARDS: ProductCard[] = [
     points: ["Self-serve join by QR", "WhatsApp ready-to-serve alerts", "Wait-time analytics"],
     href: "/queue-management",
   },
+  {
+    id: "menu",
+    Icon: UtensilsCrossed,
+    name: "AI Digital Menu",
+    tagline: "Menus that answer back",
+    description:
+      "Import from PDF or photos, generate dish details and images with AI, and let guests talk to the menu in local languages — with offers, cart insights, and loyalty.",
+    points: ["Talk to the menu", "Local languages + voice", "Offers, cart insights, customer data"],
+    href: "/ai-digital-menu",
+  },
 ];
 
 export function ProductPicker() {
@@ -42,12 +52,12 @@ export function ProductPicker() {
       <section className="lp-picker">
         <span className="lp-eyebrow">
           <Sparkles size={13} strokeWidth={2.4} />
-          Two products, one dashboard
+          Products, one dashboard
         </span>
         <h1 className="lp-picker-title">Everything your counter needs</h1>
         <p className="lp-picker-sub">
-          Froq gives local businesses the tools to fill the room and keep people coming back.
-          Pick the one you want to start with — they run side by side.
+          Froq gives local businesses the tools to fill the room, serve the table, and keep people
+          coming back. Pick the one you want to start with — they run side by side.
         </p>
 
         <div className="lp-picker-grid">
