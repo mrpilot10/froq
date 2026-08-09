@@ -4,9 +4,11 @@ import {
   ArrowRight,
   BadgePercent,
   Check,
+  FileText,
   ImagePlus,
   Languages,
   MessageSquareText,
+  Mic,
   ShoppingCart,
   Sparkles,
   Upload,
@@ -76,15 +78,15 @@ const CAPABILITIES: {
     id: "ask",
     tone: "deep",
     Icon: MessageSquareText,
-    title: "Guests can just ask",
-    desc: "No scrolling through forty dishes. Guests describe what they feel like eating and Froq recommends from your menu.",
+    title: "Chat or talk to the menu in local languages",
+    desc: "Guests type a question or just speak it — in Hindi, Marathi, Tamil or English — and get a recommendation back from your menu in the same language.",
   },
   {
     id: "pdf",
     tone: "plain",
     Icon: Upload,
-    title: "Start from your PDF",
-    desc: "Upload your existing menu or photos of it. AI reads it into a structured catalogue — names, prices, categories.",
+    title: "Upload. We’ll build your menu.",
+    desc: "Drop in your PDF or menu photos and get a ready to use digital menu in seconds.",
   },
   {
     id: "img",
@@ -97,8 +99,8 @@ const CAPABILITIES: {
     id: "lang",
     tone: "plain",
     Icon: Languages,
-    title: "In their language",
-    desc: "English, Hindi, Marathi, Tamil and more, so guests never translate a menu before they order.",
+    title: "The whole menu, translated",
+    desc: "Not just the chat — dish names, descriptions and tags all render in the language the guest picked.",
   },
   {
     id: "pair",
@@ -128,6 +130,24 @@ const GENERATED_FIELDS = [
 
 /** The feature tiles carry a small visual; the rest stay icon-and-copy. */
 function TileVisual({ id }: { id: string }) {
+  if (id === "pdf") {
+    return (
+      <div className="am-tile-upload" aria-hidden="true">
+        <div className="am-tile-upload-file">
+          <span className="am-tile-upload-ico">
+            <FileText size={16} strokeWidth={2.2} />
+          </span>
+          <span className="am-tile-upload-meta">
+            <strong>dinner-menu.pdf</strong>
+            <em>Reading · 24 dishes found</em>
+          </span>
+        </div>
+        <span className="am-tile-upload-bar">
+          <i />
+        </span>
+      </div>
+    );
+  }
   if (id === "img") {
     return (
       <div className="am-tile-gen" aria-hidden="true">
@@ -149,9 +169,12 @@ function TileVisual({ id }: { id: string }) {
   if (id === "ask") {
     return (
       <div className="am-tile-chat" aria-hidden="true">
-        <span className="am-tile-chat-guest">Something mild, under ₹200?</span>
+        <span className="am-tile-chat-guest">
+          <Mic size={13} strokeWidth={2.5} />
+          कुछ हल्का और वेज बताओ?
+        </span>
         <span className="am-tile-chat-reply">
-          <b>Paneer Slider</b>
+          <b>पनीर स्लाइडर</b>
           <i>₹189</i>
         </span>
       </div>

@@ -20670,6 +20670,9 @@ body {
 
 .am-tile-chat-guest {
   align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   max-width: 88%;
   padding: 10px 13px;
   border-radius: 14px 14px 4px 14px;
@@ -20701,6 +20704,73 @@ body {
   font-size: 12.5px;
   font-weight: 800;
   color: var(--brand);
+}
+
+.am-tile-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  margin-top: auto;
+  padding-top: 20px;
+}
+
+.am-tile-upload-file {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--brand) 6%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--brand-deep) 8%, transparent);
+}
+
+.am-tile-upload-ico {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--brand-deep);
+  background: color-mix(in srgb, var(--accent) 26%, #fff);
+}
+
+.am-tile-upload-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.am-tile-upload-meta strong {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--brand-deep);
+}
+
+.am-tile-upload-meta em {
+  font-style: normal;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--lp-ink-muted);
+}
+
+.am-tile-upload-bar {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--brand-deep) 8%, transparent);
+}
+
+.am-tile-upload-bar i {
+  display: block;
+  width: 68%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand);
 }
 
 .am-tile-gen {
@@ -20813,6 +20883,31 @@ body {
   .am-tile--img,
   .am-tile--offer {
     padding: 30px 28px;
+  }
+
+  /* Copy on the left, the thread on the right. */
+  .am-tile--ask {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.82fr);
+    grid-template-rows: auto auto 1fr;
+    grid-template-areas:
+      "icon  vis"
+      "title vis"
+      "desc  vis";
+    column-gap: 32px;
+    row-gap: 12px;
+    align-items: start;
+  }
+
+  .am-tile--ask .am-tile-icon { grid-area: icon; }
+  .am-tile--ask .am-tile-title { grid-area: title; }
+  .am-tile--ask .am-tile-desc { grid-area: desc; }
+
+  .am-tile--ask .am-tile-chat {
+    grid-area: vis;
+    align-self: center;
+    margin-top: 0;
+    padding-top: 0;
   }
 
   /* The wide tiles carry the section, so their headings lead. */
