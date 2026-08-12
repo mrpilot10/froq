@@ -305,7 +305,23 @@ export function toBranchRowPatch(patch: Partial<BranchContact>): Partial<BranchR
   return row;
 }
 
-export function toMember(row: MerchantMemberRow): MerchantMember {
+/** Fields needed to map a team row. Omits invite_token — that column is revoked for PostgREST. */
+export type MemberMapSource = Pick<
+  MerchantMemberRow,
+  | "id"
+  | "user_id"
+  | "name"
+  | "first_name"
+  | "last_name"
+  | "email"
+  | "role"
+  | "branch_id"
+  | "branch_ids"
+  | "product_ids"
+  | "accepted_at"
+>;
+
+export function toMember(row: MemberMapSource): MerchantMember {
   const firstName = row.first_name?.trim() || "";
   const lastName = row.last_name?.trim() || "";
   const combined = [firstName, lastName].filter(Boolean).join(" ");
