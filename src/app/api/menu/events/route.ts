@@ -1,5 +1,6 @@
 import { readMenuEvents, recordMenuEvents, resolveMenuEventTarget } from "@/lib/menu/events";
-import { callerKey, EVENTS_LIMIT, throttle } from "@/lib/menu/guest-throttle";
+import { EVENTS_LIMIT } from "@/lib/menu/guest-throttle";
+import { consumePublicRateLimit } from "@/lib/menu/public-rate-limit";
 
 /**
  * Analytics beacon for the guest menu.
@@ -38,7 +39,13 @@ export async function POST(request: Request) {
   const events = readMenuEvents(body.events);
   if (!events.length) return noContent();
 
-  if (!throttle(callerKey(request, "menu-events"), EVENTS_LIMIT).ok) return noContent();
+  const limited = await consumePublicRateLimit({
+    request,
+    slug,
+    scope: "menu-events",
+    rule: EVENTS_LIMIT,
+  });
+  if (!limited.ok) return noContent();
 
   const target = await resolveMenuEventTarget(slug, branch);
   if (!target) return noContent();

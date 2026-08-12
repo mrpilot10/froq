@@ -59,8 +59,22 @@ export async function POST(request: Request) {
     }
 
     if (!verifyOtpHash(parsed.otp, phone, record.otp_hash)) {
-      await incrementAttempts(record.id, record.attempts);
-      otpLog.warn("otp_mismatch", { phone: maskPhone(phone), attempts: record.attempts + 1 });
+      const attempt = await incrementAttempts(record.id, record.attempts, phone);
+      otpLog.warn("otp_mismatch", {
+        phone: maskPhone(phone),
+        attempts: record.attempts + 1,
+        result: attempt,
+      });
+      if (attempt === "unavailable") {
+        return json({ ok: false, message: "Something went wrong. Please try again." }, 503);
+      }
+      if (attempt === "exhausted") {
+        otpLog.warn("attempts_exceeded", { phone: maskPhone(phone) });
+        return json(
+          { ok: false, message: "Too many incorrect attempts. Please request a new code." },
+          429,
+        );
+      }
       return json({ ok: false, message: "That code is incorrect. Please try again." }, 401);
     }
 

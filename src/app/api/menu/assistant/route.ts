@@ -11,6 +11,8 @@ import {
   recordSuccessfulAiReply,
 } from "@/lib/menu/ai-replies";
 import { recordMenuEvents, type MenuEventInput } from "@/lib/menu/events";
+import { ASSISTANT_LIMIT } from "@/lib/menu/guest-throttle";
+import { consumePublicRateLimit } from "@/lib/menu/public-rate-limit";
 
 /**
  * Answers a guest's question about the menu they are looking at.
@@ -73,6 +75,20 @@ export async function POST(request: Request) {
   if (!slug || !question) return json({ ok: false, error: "Bad request." }, 400);
   if (question.length > QUESTION_MAX) {
     return json({ ok: false, error: "That question is a bit long for me." }, 400);
+  }
+
+  const limited = await consumePublicRateLimit({
+    request,
+    slug,
+    scope: "menu-assistant",
+    rule: ASSISTANT_LIMIT,
+  });
+  if (!limited.ok) {
+    return json(
+      { ok: false, error: "Too many questions — please wait a moment and try again." },
+      429,
+      { "retry-after": String(limited.retryAfter) },
+    );
   }
 
   const cart = Array.isArray(body.cart)

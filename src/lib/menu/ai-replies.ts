@@ -9,7 +9,6 @@ import {
   type ProductEntitlement,
 } from "@/lib/merchant/entitlements";
 import { menuPlanLimits } from "@/lib/merchant/plan-limits";
-import { throttle } from "@/lib/menu/guest-throttle";
 import type { ProductStatus } from "@/lib/supabase/database.types";
 
 /** Hidden fair-use caps — not shown on pricing. */
@@ -221,14 +220,8 @@ export async function checkAiReplyGates(input: {
     };
   };
 
-  // Per-guest rate limit (in-memory).
-  const rate = throttle(`menu-ai-guest:${guestId}`, {
-    limit: AI_REPLY_LIMITS.perMinutePerGuest,
-    windowMs: 60_000,
-  });
-  if (!rate.ok) {
-    return await fail("rate", AI_REPLY_MESSAGES.rate, 429);
-  }
+  // Per-IP × slug ceiling lives in consumePublicRateLimit on the route
+  // (cluster-wide). Do not re-check here with an in-memory map.
 
   // Merchant monthly pool → unified AI Credits.
   const { checkAiCredits } = await import("@/lib/ai/credits");

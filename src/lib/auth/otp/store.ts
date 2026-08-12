@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { OTP_TTL_MS, RATE_WINDOW_MS } from "./config";
+import { MAX_VERIFY_ATTEMPTS, OTP_TTL_MS, RATE_WINDOW_MS } from "./config";
 
 const TABLE = "otp_codes";
 
@@ -191,12 +191,30 @@ export async function findActiveOtp(phone: string): Promise<OtpRecord | null> {
   }
 }
 
-export async function incrementAttempts(id: string, current: number): Promise<void> {
+export type OtpAttemptResult = "retry" | "exhausted" | "unavailable";
+
+/**
+ * Records a failed guess. Invalidates the code once it hits MAX_VERIFY_ATTEMPTS.
+ * Fail closed if the counter cannot be written — otherwise a DB blip would
+ * reset the attacker to unlimited guesses.
+ */
+export async function incrementAttempts(
+  id: string,
+  current: number,
+  phone?: string,
+): Promise<OtpAttemptResult> {
   try {
     const admin = createAdminClient();
-    await admin.from(TABLE).update({ attempts: current + 1 }).eq("id", id);
+    const next = current + 1;
+    const { error } = await admin.from(TABLE).update({ attempts: next }).eq("id", id);
+    if (error) return "unavailable";
+    if (next >= MAX_VERIFY_ATTEMPTS) {
+      if (phone) await clearOtps(phone);
+      return "exhausted";
+    }
+    return "retry";
   } catch {
-    // Best-effort.
+    return "unavailable";
   }
 }
 

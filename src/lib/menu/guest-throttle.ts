@@ -4,9 +4,8 @@
  * per-caller ceilings instead — enough to stop a script hammering the
  * assistant (which costs money per call) without getting in a real diner's way.
  *
- * The window lives in memory, so on serverless it is per-instance rather than
- * global. That still blunts a single abusive client, but it is a ceiling and
- * not a guarantee — move this to a table if the menu ever draws real traffic.
+ * In-memory only. Guest assistant + events use consumePublicRateLimit
+ * (Postgres, ip+slug). Keep this for OTP special-offers and cart-insights.
  */
 
 const MAX_KEYS = 5_000;

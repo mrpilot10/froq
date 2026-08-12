@@ -152,8 +152,31 @@ function resolveCycle(product: MenuProductRow): {
 }
 
 /**
+ * Purchased credit balance from the merchant's latest prior billing period.
+ * Monthly unused credits do not roll over; purchased credits do (no balance cap).
+ */
+async function loadCarriedPurchasedCredits(
+  merchantId: string,
+  currentBillingPeriod: string,
+): Promise<number> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("merchant_ai_usage")
+    .select("purchased_credits_remaining, billing_period, cycle_ends_at")
+    .eq("merchant_id", merchantId)
+    .neq("billing_period", currentBillingPeriod)
+    .order("billing_period", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!data) return 0;
+  return Math.max(0, Number(data.purchased_credits_remaining) || 0);
+}
+
+/**
  * Load or create the wallet row for the merchant's current Menu billing cycle.
- * Syncs monthly_credits_total to the current plan allotment (does not reset used).
+ * New periods start with a fresh monthly allotment (unused monthly does not roll over)
+ * and carry forward any remaining purchased credits (no expiry / no balance cap).
  */
 export async function ensureAiCreditPeriod(
   merchantId: string,
@@ -173,6 +196,10 @@ export async function ensureAiCreditPeriod(
     .maybeSingle();
 
   if (!existing) {
+    const carriedPurchased = await loadCarriedPurchasedCredits(
+      merchantId,
+      billingPeriod,
+    );
     const { data: inserted, error } = await admin
       .from("merchant_ai_usage")
       .insert({
@@ -180,7 +207,7 @@ export async function ensureAiCreditPeriod(
         billing_period: billingPeriod,
         monthly_credits_total: monthlyTotal,
         monthly_credits_used: 0,
-        purchased_credits_remaining: 0,
+        purchased_credits_remaining: carriedPurchased,
         cycle_ends_at: cycleEndsAt,
         updated_at: new Date().toISOString(),
       })
@@ -342,7 +369,8 @@ export async function loadAiCreditDashboard(merchantId: string): Promise<{
 }> {
   const balance = await ensureAiCreditPeriod(merchantId);
   const usedDisplay = balance.monthlyUsed;
-  const limitDisplay = balance.monthlyTotal;
+  // Show the usable pool: monthly allotment + leftover purchased top-ups.
+  const limitDisplay = balance.monthlyTotal + balance.purchasedRemaining;
 
   const admin = createAdminClient();
   const since = balance.cycleEndsAt
@@ -403,7 +431,7 @@ export async function loadAiCreditHistory(
     .from("ai_usage_log")
     .select("id, feature, credits_used, created_at")
     .eq("merchant_id", merchantId)
-    .gt("credits_used", 0)
+    .neq("credits_used", 0)
     .not("feature", "like", "abuse_%")
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -419,7 +447,8 @@ export async function loadAiCreditHistory(
 
 /**
  * Add purchased pack credits to the current billing-period wallet.
- * Purchased credits roll over (not reset with the monthly pool).
+ * Purchased credits have no balance limit and roll across months (monthly unused does not).
+ * Idempotent when `paymentId` is provided (retries won't double-credit).
  */
 export async function addPurchasedAiCredits(input: {
   merchantId: string;
@@ -430,42 +459,53 @@ export async function addPurchasedAiCredits(input: {
   if (input.credits <= 0) {
     throw new Error("Credits must be positive.");
   }
-  const balance = await ensureAiCreditPeriod(input.merchantId);
   const admin = createAdminClient();
-  const nextPurchased = balance.purchasedRemaining + input.credits;
+  const paymentId = input.paymentId?.trim() || null;
+  if (!paymentId) {
+    throw new Error("A Razorpay payment id is required to credit a pack.");
+  }
 
-  await admin
-    .from("merchant_ai_usage")
-    .update({
-      purchased_credits_remaining: nextPurchased,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("merchant_id", input.merchantId)
-    .eq("billing_period", balance.billingPeriod);
+  await ensureAiCreditPeriod(input.merchantId);
 
-  await admin.from("ai_usage_log").insert({
+  const { data: applied, error: applyError } = await admin.rpc(
+    "apply_purchased_ai_credit_pack",
+    {
+      p_merchant_id: input.merchantId,
+      p_credits: input.credits,
+      p_pack_id: input.packId,
+      p_payment_id: paymentId,
+    },
+  );
+  if (applyError) {
+    throw new Error(
+      applyError.message ||
+        "Could not update your AI credit balance. Please contact support with your payment ID.",
+    );
+  }
+
+  // Unique payment_id already recorded — same captured payment, no extra credits.
+  if (applied === false) {
+    return ensureAiCreditPeriod(input.merchantId);
+  }
+
+  const next = await ensureAiCreditPeriod(input.merchantId);
+
+  const { error: logError } = await admin.from("ai_usage_log").insert({
     merchant_id: input.merchantId,
     customer_id: null,
     feature: "credit_pack_purchase",
-    credits_used: 0,
-    model: input.packId,
-    prompt_tokens: null,
+    // Negative = credits added (history renders as +N).
+    credits_used: -input.credits,
+    model: paymentId,
+    prompt_tokens: input.credits,
     completion_tokens: null,
     thoughts_tokens: null,
     estimated_cost_usd: null,
     response_ms: null,
   });
+  if (logError) {
+    console.error("ai_usage_log purchase insert failed", logError.message);
+  }
 
-  await admin.from("menu_ai_credit_grants").insert({
-    merchant_id: input.merchantId,
-    credits: input.credits,
-    reason: `purchase:${input.packId}${input.paymentId ? `:${input.paymentId}` : ""}`,
-    plan_id: balance.planId,
-  });
-
-  return {
-    ...balance,
-    purchasedRemaining: nextPurchased,
-    available: balance.available + input.credits,
-  };
+  return next;
 }
