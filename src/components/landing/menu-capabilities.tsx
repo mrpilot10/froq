@@ -49,7 +49,7 @@ export function MenuAskSpotlight() {
           <li>Recommends dishes based on what guests want</li>
         </ul>
         <a href="#pricing" className="lp-btn lp-btn--accent am-ask-cta">
-          Try Froq free for 7 days
+          Get started
           <ArrowRight size={17} strokeWidth={2.4} />
         </a>
       </div>
@@ -96,7 +96,7 @@ export function MenuImportSpotlight() {
           <li>Allergens, cooking time and spice ready for every dish</li>
         </ul>
         <a href="#pricing" className="lp-btn lp-btn--accent am-ask-cta">
-          Try Froq free for 7 days
+          Get started
           <ArrowRight size={17} strokeWidth={2.4} />
         </a>
       </div>
@@ -415,7 +415,7 @@ function TileVisual({ id }: { id: string }) {
 
 export function MenuCapabilities() {
   return (
-    <div className="am-bento">
+    <div className="am-bento am-bento--menu">
       {CAPABILITIES.map(({ id, tone, Icon, title, desc, cta }, i) => (
         <Reveal
           key={id}

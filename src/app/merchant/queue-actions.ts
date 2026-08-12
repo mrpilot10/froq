@@ -1113,7 +1113,7 @@ export async function updateLiveQueueEntryStatus(input: {
       phone: updated.phone,
     });
     if (customer) {
-      const businessName = await businessNameFor(ctx.merchantId);
+      const { businessName, menuSlug } = await merchantNotifyFields(ctx.merchantId);
       scheduleQueueNotifyAfter({
         customer,
         template:
@@ -1123,6 +1123,7 @@ export async function updateLiveQueueEntryStatus(input: {
         data: {
           businessName,
           bookingSize: updated.party_size,
+          ...(menuSlug ? { menuSlug } : {}),
         },
       });
     }

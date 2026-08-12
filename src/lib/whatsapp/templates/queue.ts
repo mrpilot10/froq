@@ -118,9 +118,17 @@ export function buildQueueCustomerSeatedTemplate(
   return withPartyButton(WhatsAppTemplateName.QueueSeated, input);
 }
 
-/** seated_menu — party seated with AI Menu CTA → /m/{{1}}. */
+/** seated_menu — party seated; Menu CTA → https://froq.io/menu/{{1}}. */
 export function buildSeatedMenuTemplate(
-  input: QueuePartyTemplateInput,
+  input: QueuePartyTemplateInput & { merchantSlug: string },
 ): WhatsAppTemplatePayload {
-  return withPartyButton(WhatsAppTemplateName.SeatedMenu, input);
+  const vars = buildQueuePartyWhatsAppVars(input);
+  const merchantSlug = requireNonEmptyString(input.merchantSlug, "merchantSlug");
+  return {
+    templateName: WhatsAppTemplateName.SeatedMenu,
+    body: [...vars.body],
+    buttons: [
+      buildUrlButton([buildMenuGuestUrlSuffix(merchantSlug, vars.publicToken)]),
+    ],
+  };
 }

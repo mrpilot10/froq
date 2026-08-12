@@ -1,15 +1,9 @@
 import { NextResponse } from "next/server";
+import { isAuthorizedCron } from "@/lib/cron/authorize";
 import { processQueueAutoSessions } from "@/lib/queue/auto-sessions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function isAuthorizedCron(request: Request): boolean {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return false;
-  const auth = request.headers.get("authorization");
-  return auth === `Bearer ${secret}`;
-}
 
 /**
  * GET /api/cron/queue-auto-sessions
@@ -33,6 +27,6 @@ export async function GET(request: Request) {
         at: new Date().toISOString(),
       }),
     );
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "Cron job failed." }, { status: 500 });
   }
 }

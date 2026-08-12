@@ -137,37 +137,33 @@ export function AiCreditsSkeleton() {
       <div className="ai-credits-card panel-card">
         <header className="ai-credits-head">
           <div className="ai-credits-brand">
-            <span className="sk" style={{ width: 40, height: 40, borderRadius: 12, flex: "none" }} />
+            <span className="sk" style={{ width: 42, height: 42, borderRadius: 999, flex: "none" }} />
             <div>
-              <div className="sk sk-line" style={{ width: 96, height: 15 }} />
+              <div className="sk sk-line" style={{ width: 84, height: 15 }} />
               <div className="sk sk-line" style={{ width: 132, height: 11, marginTop: 6 }} />
             </div>
           </div>
-          <div className="sk" style={{ width: 128, height: 32, borderRadius: 999 }} />
         </header>
 
-        <div className="ai-credits-section">
-          <div className="sk sk-line" style={{ width: 48, height: 10 }} />
-          <div className="ai-credits-used">
-            <div className="ai-credits-used-main">
-              <div className="sk sk-line" style={{ width: 72, height: 11 }} />
-              <div className="sk sk-line" style={{ width: 148, height: 24, marginTop: 8 }} />
-              <div className="sk sk-line" style={{ width: 110, height: 11, marginTop: 8 }} />
+        <div className="ai-credits-body">
+          <div className="ai-credits-monthly">
+            <div className="sk" style={{ width: 118, height: 22, borderRadius: 8 }} />
+            <div className="ai-credits-monthly-main">
+              <div className="ai-credits-monthly-copy" style={{ flex: 1 }}>
+                <div className="sk sk-line" style={{ width: 150, height: 11 }} />
+                <div className="sk sk-line" style={{ width: 180, height: 28, marginTop: 10 }} />
+                <div className="sk" style={{ width: "100%", height: 10, borderRadius: 999, marginTop: 12 }} />
+              </div>
+              <span className="sk" style={{ width: 88, height: 88, borderRadius: 999, flex: "none" }} />
             </div>
-            <div className="ai-credits-used-side">
-              <div className="sk sk-line" style={{ width: 88, height: 11, marginLeft: "auto" }} />
-              <div className="sk sk-line" style={{ width: 64, height: 11, marginTop: 8, marginLeft: "auto" }} />
+            <div className="ai-credits-monthly-meta">
+              <div className="sk sk-line" style={{ width: 120, height: 12 }} />
+              <span className="ai-credits-monthly-meta-divider" aria-hidden />
+              <div className="sk sk-line" style={{ width: 150, height: 12 }} />
             </div>
           </div>
-          <div className="sk" style={{ width: "100%", height: 10, borderRadius: 999 }} />
-          <div className="ai-credits-legend" aria-hidden>
-            {[72, 64, 88, 70].map((width, index) => (
-              <span key={index} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span className="sk" style={{ width: 8, height: 8, borderRadius: 999, flex: "none" }} />
-                <span className="sk sk-line" style={{ width, height: 10 }} />
-              </span>
-            ))}
-          </div>
+          <div className="sk" style={{ width: "100%", height: 72, borderRadius: 16 }} />
+          <div className="sk" style={{ width: "100%", height: 40, borderRadius: 12 }} />
         </div>
 
         <div className="ai-credits-section">
@@ -184,13 +180,6 @@ export function AiCreditsSkeleton() {
               </li>
             ))}
           </ul>
-        </div>
-
-        <div className="ai-credits-section ai-credits-section--actions" aria-hidden>
-          <div className="ai-credits-actions">
-            <div className="sk" style={{ height: 44, borderRadius: 14 }} />
-            <div className="sk" style={{ height: 44, borderRadius: 14 }} />
-          </div>
         </div>
       </div>
     </section>

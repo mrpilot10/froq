@@ -368,12 +368,6 @@ function MenuCustomerSheetBody({
           <span className="qcust-stat-label">Last party</span>
         </div>
         <div className="qcust-stat">
-          <span className="qcust-stat-value">
-            {customer.lastTable != null ? customer.lastTable : "—"}
-          </span>
-          <span className="qcust-stat-label">Last table</span>
-        </div>
-        <div className="qcust-stat">
           <span className="qcust-stat-value">{activity.length || "—"}</span>
           <span className="qcust-stat-label">Sessions</span>
         </div>

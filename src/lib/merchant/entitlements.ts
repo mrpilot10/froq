@@ -30,7 +30,7 @@ export const EMPTY_ENTITLEMENTS: Entitlements = {
   menu: null,
 };
 
-/** Length of the free trial offered on the product paywall. */
+/** Legacy constant — free trials are discontinued; kept for meter/email helpers. */
 export const TRIAL_DAYS = 7;
 
 const DAY_MS = 86_400_000;
@@ -90,6 +90,8 @@ export function isProductEnabled(
   const entitlement = entitlements[product];
   if (!entitlement || entitlement.status !== "active") return false;
   if (isTrialRow(entitlement)) return isTrialActive(entitlement);
+  // Active + no plan_id + no trial is an unpaid seed row, not an entitlement.
+  if (!entitlement.planId) return false;
   return true;
 }
 

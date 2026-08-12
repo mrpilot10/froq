@@ -34,7 +34,7 @@ export function QueueGuestSpotlight() {
           <li>WhatsApp alert the moment they&apos;re up</li>
         </ul>
         <a href="#pricing" className="lp-btn lp-btn--accent am-ask-cta">
-          Try Froq free for 7 days
+          Get started — 7-day money-back
           <ArrowRight size={17} strokeWidth={2.4} />
         </a>
       </div>
@@ -65,7 +65,7 @@ export function QueueOpsSpotlight() {
           <li>Analytics on waits and seating rates</li>
         </ul>
         <a href="#pricing" className="lp-btn lp-btn--accent am-ask-cta">
-          Try Froq free for 7 days
+          Get started — 7-day money-back
           <ArrowRight size={17} strokeWidth={2.4} />
         </a>
       </div>

@@ -49,7 +49,8 @@ export const WhatsAppTemplateName = {
   ReservationConfirmed: "reservation_confirmed",
   /**
    * Confirmed booking — AI Menu CTA variant.
-   * Same body as reservation_confirmed; URL button → https://froq.io/m/{{1}}.
+   * Same body as reservation_confirmed; URL button → https://froq.io/menu/{{1}}
+   * where {{1}} = `{merchantSlug}?guest={publicToken}`.
    */
   ReservationConfirmedMenu: "reservation_confirmed_menu",
   ReservationDeclined: "reservation_declined",
@@ -89,7 +90,8 @@ export const WhatsAppTemplateName = {
   QueueCustomerSeated: "queue_seated",
   /**
    * Party seated — AI Menu CTA variant.
-   * Same body as queue_seated; URL button → https://froq.io/m/{{1}}.
+   * Same body as queue_seated; URL button → https://froq.io/menu/{{1}}
+   * where {{1}} = `{merchantSlug}?guest={publicToken}`.
    */
   SeatedMenu: "seated_menu",
 } as const;

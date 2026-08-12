@@ -5,11 +5,15 @@ import {
   ArrowUpRight,
   BookOpen,
   CalendarDays,
+  ChevronRight,
   ImageIcon,
+  Info,
   Languages,
   LayoutGrid,
   QrCode,
+  ShoppingBag,
   Sparkles,
+  TrendingUp,
   Type,
   Users,
   UtensilsCrossed,
@@ -23,15 +27,6 @@ import { BuyAiCreditsDrawer } from "./buy-ai-credits-drawer";
 import { AiCreditsSkeleton } from "./menu-skeletons";
 import { MenuSetupCard } from "./menu-setup-card";
 import { useMenuSetup } from "./use-menu-setup";
-
-const BREAKDOWN_COLORS: Record<string, string> = {
-  menu_descriptions: "#00c96b",
-  menu_images: "#f59e0b",
-  menu_imports: "#ef4444",
-  customer_chat: "#0ea5e9",
-  marketing: "#8b5cf6",
-  other: "#64748b",
-};
 
 function historyIcon(feature: string) {
   if (feature.includes("image")) return ImageIcon;
@@ -67,11 +62,9 @@ export function MenuHomeScreen() {
   const [planUsageLoading, setPlanUsageLoading] = useState(true);
   const [planUsage, setPlanUsage] = useState<{
     used: number;
-    limit: number;
-    available: number;
+    monthlyTotal: number;
     purchasedRemaining: number;
     cycleEndsAt: string | null;
-    breakdown: Array<{ bucket: string; label: string; credits: number }>;
     history: Array<{
       id: string;
       feature: string;
@@ -95,11 +88,9 @@ export function MenuHomeScreen() {
       }
       setPlanUsage({
         used: result.conversations,
-        limit: result.maxConversations,
-        available: result.available,
+        monthlyTotal: result.monthlyTotal,
         purchasedRemaining: result.purchasedRemaining,
         cycleEndsAt: result.cycleEndsAt,
-        breakdown: result.breakdown,
         history: result.history,
       });
     } finally {
@@ -149,17 +140,45 @@ export function MenuHomeScreen() {
   ] as const;
 
   const fmt = (n: number) => n.toLocaleString("en-IN");
-  const usagePct = (used: number, max: number) =>
-    max > 0 ? Math.min(100, (used / max) * 100) : 0;
 
-  const creditsPct = planUsage ? usagePct(planUsage.used, planUsage.limit) : 0;
-  const resetLabel = planUsage?.cycleEndsAt
-    ? new Date(planUsage.cycleEndsAt).toLocaleDateString("en-IN", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      })
-    : null;
+  const creditStats = useMemo(() => {
+    if (!planUsage) return null;
+    const monthlyTotal = Math.max(0, planUsage.monthlyTotal);
+    const monthlyUsed = Math.max(0, planUsage.used);
+    const monthlyRemaining = Math.max(0, monthlyTotal - monthlyUsed);
+    const remainingPct =
+      monthlyTotal > 0
+        ? Math.round((monthlyRemaining / monthlyTotal) * 100)
+        : 0;
+    const resetDate = planUsage.cycleEndsAt
+      ? new Date(planUsage.cycleEndsAt)
+      : null;
+    const daysUntilReset =
+      resetDate != null
+        ? Math.max(
+            0,
+            Math.ceil(
+              (resetDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24),
+            ),
+          )
+        : null;
+    const resetLabel = resetDate
+      ? resetDate.toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+      : null;
+    return {
+      monthlyTotal,
+      monthlyUsed,
+      monthlyRemaining,
+      remainingPct,
+      daysUntilReset,
+      resetLabel,
+      purchasedRemaining: Math.max(0, planUsage.purchasedRemaining),
+    };
+  }, [planUsage]);
 
   const formatWhen = (iso: string) => {
     const d = new Date(iso);
@@ -176,42 +195,11 @@ export function MenuHomeScreen() {
     };
   };
 
-  const segmentBar = useMemo(() => {
-    if (!planUsage || planUsage.limit <= 0) {
-      return {
-        segments: [] as Array<{
-          key: string;
-          label: string;
-          credits: number;
-          pct: number;
-          color: string;
-        }>,
-        availablePct: 100,
-      };
-    }
-    const segments = planUsage.breakdown
-      .filter((row) => row.credits > 0)
-      .map((row) => ({
-        key: row.bucket,
-        label: row.label,
-        credits: row.credits,
-        pct: (row.credits / planUsage.limit) * 100,
-        color: BREAKDOWN_COLORS[row.bucket] ?? BREAKDOWN_COLORS.other,
-      }));
-    const usedKnown = segments.reduce((sum, row) => sum + row.credits, 0);
-    const remainderUsed = Math.max(0, planUsage.used - usedKnown);
-    if (remainderUsed > 0) {
-      segments.push({
-        key: "other",
-        label: "Other",
-        credits: remainderUsed,
-        pct: (remainderUsed / planUsage.limit) * 100,
-        color: BREAKDOWN_COLORS.other,
-      });
-    }
-    const usedPct = Math.min(100, (planUsage.used / planUsage.limit) * 100);
-    return { segments, availablePct: Math.max(0, 100 - usedPct) };
-  }, [planUsage]);
+  const ringRadius = 36;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const ringOffset = creditStats
+    ? ringCircumference * (1 - creditStats.remainingPct / 100)
+    : ringCircumference;
 
   return (
     <div className="tab-screen merchant-dashboard menu-home">
@@ -288,95 +276,180 @@ export function MenuHomeScreen() {
 
       {planUsageLoading ? (
         <AiCreditsSkeleton />
-      ) : planUsage ? (
+      ) : planUsage && creditStats ? (
         <section className="merchant-section" aria-label="AI Credits">
           <div className="ai-credits-card panel-card">
             <header className="ai-credits-head">
               <div className="ai-credits-brand">
                 <span className="ai-credits-brand-icon" aria-hidden>
-                  <Sparkles size={18} strokeWidth={2.3} />
+                  <Wallet size={18} strokeWidth={2.3} />
                 </span>
                 <div>
-                  <h3 className="ai-credits-title">AI Credits</h3>
-                  <p className="ai-credits-sub">Power your menu with AI</p>
+                  <h3 className="ai-credits-title">Credits</h3>
+                  <p className="ai-credits-sub">Your usage this month</p>
                 </div>
               </div>
-              {resetLabel ? (
-                <p className="ai-credits-reset">
-                  <CalendarDays size={14} strokeWidth={2.2} aria-hidden />
-                  Resets on <strong>{resetLabel}</strong>
-                </p>
-              ) : null}
             </header>
 
-            <div className="ai-credits-section">
-              <p className="ai-credits-section-label">Usage</p>
-              <div className="ai-credits-used">
-                <div className="ai-credits-used-main">
-                  <p className="ai-credits-used-label">Credits used</p>
-                  <p className="ai-credits-used-value">
-                    <span>{fmt(planUsage.used)}</span>
-                    {" / "}
-                    {fmt(planUsage.limit)}
-                  </p>
-                  <p className="ai-credits-used-avail">
-                    {fmt(planUsage.available)} available
-                    {planUsage.purchasedRemaining > 0
-                      ? ` · ${fmt(planUsage.purchasedRemaining)} purchased`
-                      : ""}
-                  </p>
+            <div className="ai-credits-body">
+              <div className="ai-credits-monthly">
+                <p className="ai-credits-badge">Monthly allowance</p>
+                <div className="ai-credits-monthly-main">
+                  <div className="ai-credits-monthly-copy">
+                    <p className="ai-credits-monthly-label">
+                      Monthly credits remaining
+                    </p>
+                    <p className="ai-credits-monthly-value">
+                      <span>{fmt(creditStats.monthlyRemaining)}</span>
+                      <small>
+                        of {fmt(creditStats.monthlyTotal)} monthly credits
+                      </small>
+                    </p>
+                    <div
+                      className="ai-credits-bar"
+                      role="img"
+                      aria-label={`${creditStats.remainingPct}% of monthly credits remaining`}
+                    >
+                      <span
+                        className="ai-credits-bar-fill"
+                        style={{ width: `${creditStats.remainingPct}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="ai-credits-ring" aria-hidden>
+                    <svg viewBox="0 0 88 88" width="88" height="88">
+                      <circle
+                        className="ai-credits-ring-track"
+                        cx="44"
+                        cy="44"
+                        r={ringRadius}
+                        fill="none"
+                        strokeWidth="8"
+                      />
+                      <circle
+                        className="ai-credits-ring-progress"
+                        cx="44"
+                        cy="44"
+                        r={ringRadius}
+                        fill="none"
+                        strokeWidth="8"
+                        strokeLinecap="round"
+                        strokeDasharray={ringCircumference}
+                        strokeDashoffset={ringOffset}
+                        transform="rotate(-90 44 44)"
+                      />
+                    </svg>
+                    <div className="ai-credits-ring-label">
+                      <strong>{creditStats.remainingPct}%</strong>
+                      <span>remaining</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="ai-credits-used-side">
+                <div className="ai-credits-monthly-meta">
                   <p>
-                    {fmt(planUsage.used)} ({creditsPct.toFixed(2)}%) used
+                    <TrendingUp size={15} strokeWidth={2.3} aria-hidden />
+                    <span>
+                      <strong>{fmt(creditStats.monthlyUsed)}</strong> used this
+                      month
+                    </span>
                   </p>
-                  <p>{fmt(planUsage.limit)} total</p>
+                  <span className="ai-credits-monthly-meta-divider" aria-hidden />
+                  {creditStats.resetLabel ? (
+                    <p>
+                      <CalendarDays size={15} strokeWidth={2.3} aria-hidden />
+                      <span>
+                        {creditStats.daysUntilReset != null ? (
+                          <>
+                            <strong>
+                              Resets in {creditStats.daysUntilReset}{" "}
+                              {creditStats.daysUntilReset === 1 ? "day" : "days"}
+                            </strong>{" "}
+                            on {creditStats.resetLabel}
+                          </>
+                        ) : (
+                          <>
+                            <strong>Resets</strong> on {creditStats.resetLabel}
+                          </>
+                        )}
+                      </span>
+                    </p>
+                  ) : (
+                    <p />
+                  )}
                 </div>
               </div>
 
-              <div
-                className="ai-credits-segments"
-                role="img"
-                aria-label={`AI Credits: ${planUsage.used} of ${planUsage.limit}`}
-              >
-                {segmentBar.segments.map((seg) => (
-                  <span
-                    key={seg.key}
-                    className="ai-credits-segment"
-                    style={{
-                      width: `${Math.max(seg.pct, seg.credits > 0 ? 0.35 : 0)}%`,
-                      background: seg.color,
-                    }}
-                    title={`${seg.label}: ${fmt(seg.credits)}`}
-                  />
-                ))}
-                <span
-                  className="ai-credits-segment ai-credits-segment--rest"
-                  style={{ width: `${Math.max(segmentBar.availablePct, 0)}%` }}
-                />
-              </div>
-
-              <ul className="ai-credits-legend">
-                {segmentBar.segments.map((seg) => (
-                  <li key={seg.key}>
-                    <span
-                      className="ai-credits-legend-dot"
-                      style={{ background: seg.color }}
-                      aria-hidden
-                    />
-                    {seg.label} {fmt(seg.credits)} ({seg.pct.toFixed(2)}%)
-                  </li>
-                ))}
-                <li>
-                  <span
-                    className="ai-credits-legend-dot ai-credits-legend-dot--rest"
+              {canUpgrade ? (
+                <button
+                  type="button"
+                  className="ai-credits-purchased"
+                  onClick={() => setBuyOpen(true)}
+                >
+                  <span className="ai-credits-purchased-icon" aria-hidden>
+                    <ShoppingBag size={16} strokeWidth={2.2} />
+                  </span>
+                  <span className="ai-credits-purchased-copy">
+                    <strong>Purchased credits</strong>
+                    <span>Available to use anytime</span>
+                  </span>
+                  <span className="ai-credits-purchased-value">
+                    <strong>{fmt(creditStats.purchasedRemaining)}</strong>
+                    <span>credits available</span>
+                  </span>
+                  <ChevronRight
+                    className="ai-credits-purchased-chevron"
+                    size={18}
+                    strokeWidth={2.2}
                     aria-hidden
                   />
-                  Available {fmt(planUsage.available)} (
-                  {segmentBar.availablePct.toFixed(2)}%)
-                </li>
-              </ul>
+                </button>
+              ) : (
+                <div className="ai-credits-purchased ai-credits-purchased--static">
+                  <span className="ai-credits-purchased-icon" aria-hidden>
+                    <ShoppingBag size={16} strokeWidth={2.2} />
+                  </span>
+                  <span className="ai-credits-purchased-copy">
+                    <strong>Purchased credits</strong>
+                    <span>Available to use anytime</span>
+                  </span>
+                  <span className="ai-credits-purchased-value">
+                    <strong>{fmt(creditStats.purchasedRemaining)}</strong>
+                    <span>credits available</span>
+                  </span>
+                </div>
+              )}
+
+              <p className="ai-credits-note">
+                <Info size={14} strokeWidth={2.3} aria-hidden />
+                <span>
+                  Monthly unused credits don’t roll over · Purchased credits
+                  never expire
+                </span>
+              </p>
             </div>
+
+            {canUpgrade ? (
+              <div className="ai-credits-section ai-credits-section--actions">
+                <div className="ai-credits-actions">
+                  <button
+                    type="button"
+                    className="ai-credits-upgrade"
+                    onClick={() => onPurchaseProduct("menu")}
+                  >
+                    <ArrowUpRight size={16} strokeWidth={2.4} aria-hidden />
+                    Upgrade Plan
+                  </button>
+                  <button
+                    type="button"
+                    className="cta-btn merchant-cta-accent ai-credits-buy-btn"
+                    onClick={() => setBuyOpen(true)}
+                  >
+                    <Wallet size={16} strokeWidth={2.2} aria-hidden />
+                    Buy AI Credits
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             <div className="ai-credits-section">
               <p className="ai-credits-section-label">Recent usage</p>
@@ -405,8 +478,11 @@ export function MenuHomeScreen() {
                           </span>
                         </div>
                         <span className="ai-credits-history-cost">
-                          −{fmt(row.creditsUsed)}{" "}
-                          {row.creditsUsed === 1 ? "credit" : "credits"}
+                          {row.creditsUsed < 0 ? "+" : "−"}
+                          {fmt(Math.abs(row.creditsUsed))}{" "}
+                          {Math.abs(row.creditsUsed) === 1
+                            ? "credit"
+                            : "credits"}
                         </span>
                       </li>
                     );
@@ -414,29 +490,6 @@ export function MenuHomeScreen() {
                 </ul>
               )}
             </div>
-
-            {canUpgrade ? (
-              <div className="ai-credits-section ai-credits-section--actions">
-                <div className="ai-credits-actions">
-                  <button
-                    type="button"
-                    className="ai-credits-upgrade"
-                    onClick={() => onPurchaseProduct("menu")}
-                  >
-                    <ArrowUpRight size={16} strokeWidth={2.4} aria-hidden />
-                    Upgrade Plan
-                  </button>
-                  <button
-                    type="button"
-                    className="cta-btn merchant-cta-accent ai-credits-buy-btn"
-                    onClick={() => setBuyOpen(true)}
-                  >
-                    <Wallet size={16} strokeWidth={2.2} aria-hidden />
-                    Buy AI Credits
-                  </button>
-                </div>
-              </div>
-            ) : null}
           </div>
         </section>
       ) : null}

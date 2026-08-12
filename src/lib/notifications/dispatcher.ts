@@ -173,12 +173,21 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
         partySize: d.partySize ?? 1,
         reservationToken: d.reservationToken,
       });
+      const menuSlug = d.menuSlug?.trim();
+      if (!menuSlug) {
+        throw new Error(
+          "reservation_confirmed_menu requires menuSlug for Meta URL /menu/{{1}}.",
+        );
+      }
+      const { buildMenuGuestUrlSuffix } = await import(
+        "@/lib/whatsapp/templates/menu-url"
+      );
       await sendWhatsAppTemplate({
         templateName: template,
         mobile: customer.phone,
         bodyParams: [...vars.body],
-        // Meta template base is /m/{{1}} — same guest token as queue menu CTAs.
-        publicToken: customer.publicToken,
+        // Meta: https://froq.io/menu/{{1}} → {slug}?guest={frq_…}
+        urlButtonSuffix: buildMenuGuestUrlSuffix(menuSlug, customer.publicToken),
       });
       return;
     }
@@ -283,12 +292,19 @@ async function sendWhatsAppForTemplate<T extends CustomerNotificationTemplate>(
     }
     case "seated_menu": {
       const d = data as CustomerNotificationDataMap["seated_menu"];
+      const menuSlug = d.menuSlug?.trim();
+      if (!menuSlug) {
+        throw new Error(
+          "seated_menu requires menuSlug for Meta URL /menu/{{1}}.",
+        );
+      }
       await sendSeatedMenu({
         mobile: customer.phone,
         customerName: customer.name,
         businessName: d.businessName,
         bookingSize: d.bookingSize,
         publicToken: customer.publicToken,
+        merchantSlug: menuSlug,
       });
       return;
     }

@@ -34,7 +34,7 @@ export function LoyaltyScanSpotlight() {
           <li>Works for cafés, shops, salons, and more</li>
         </ul>
         <a href="#pricing" className="lp-btn lp-btn--accent am-ask-cta">
-          Try Froq free for 7 days
+          Get started — 7-day money-back
           <ArrowRight size={17} strokeWidth={2.4} />
         </a>
       </div>
@@ -66,7 +66,7 @@ export function LoyaltySetupSpotlight() {
           <li>Customer list and visit insights built in</li>
         </ul>
         <a href="#pricing" className="lp-btn lp-btn--accent am-ask-cta">
-          Try Froq free for 7 days
+          Get started — 7-day money-back
           <ArrowRight size={17} strokeWidth={2.4} />
         </a>
       </div>
@@ -253,11 +253,11 @@ function TileVisual({ id }: { id: string }) {
 
 export function LoyaltyCapabilities() {
   return (
-    <div className="am-bento">
+    <div className="am-bento am-bento--loyalty">
       {CAPABILITIES.map(({ id, tone, Icon, title, desc, cta }, i) => (
         <Reveal
           key={id}
-          className={`am-tile am-tile--${tone}`}
+          className={`am-tile am-tile--${tone} am-tile--${id}`}
           delay={i * 50}
         >
           <span className="am-tile-icon" aria-hidden="true">

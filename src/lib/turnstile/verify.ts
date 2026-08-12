@@ -54,11 +54,17 @@ export async function verifyTurnstileToken(
   const secret = secretKey();
   const source = options?.source;
 
-  // Unconfigured environment (local dev, previews): stay usable rather than
-  // blocking every public form behind a check that can't succeed.
+  // Local/dev without a secret stays usable. Production must fail closed so
+  // a missing TURNSTILE_SECRET cannot disable bot checks on SMS/OTP routes.
   if (!secret) {
     if (process.env.NODE_ENV === "production") {
-      console.warn("turnstile_secret_missing: skipping captcha verification");
+      console.error("turnstile_secret_missing: rejecting captcha in production");
+      recordTurnstileVerify({
+        status: "error",
+        errorCodes: ["secret_missing"],
+        source,
+      });
+      return { ok: false, error: TURNSTILE_REJECTED_MESSAGE };
     }
     recordTurnstileVerify({ status: "skipped", source });
     return { ok: true };

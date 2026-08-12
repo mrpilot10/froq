@@ -47,7 +47,6 @@ import {
   entitlementsFromRows,
   isProductEnabled,
   isTrialActive,
-  TRIAL_DAYS,
   type Entitlements,
 } from "@/lib/merchant/entitlements";
 import {
@@ -57,6 +56,10 @@ import {
 import { grantMenuAiCreditsOnPlanApply } from "@/lib/menu/ai-credits";
 import { FREE_PLAN } from "@/lib/merchant/pricing";
 import { cancelRazorpaySubscription } from "@/lib/payments/razorpay";
+import {
+  verifyPaidPlanPayment,
+  type PlanPaymentProof,
+} from "@/lib/payments/verify-plan-payment";
 import { userIsMerchantAccount } from "@/lib/merchant/account";
 import { verifyTurnstileToken } from "@/lib/turnstile/verify";
 import { TURNSTILE_REJECTED_MESSAGE, isCaptchaAuthError } from "@/lib/turnstile/config";
@@ -2647,12 +2650,12 @@ export async function markMerchantOnboarding(
 
 /**
  * Adds a product entitlement for an existing merchant (second-product purchase).
- * The row starts un-onboarded so the per-product onboarding gate can run.
+ * Requires a captured Razorpay payment; plan/product come from payment notes.
  */
 export async function purchaseProduct(
   product: MerchantProduct,
-  planId?: string,
-  opts?: { razorpaySubscriptionId?: string | null },
+  _planId: string | undefined,
+  proof: PlanPaymentProof,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const supabase = await createClient();
@@ -2668,13 +2671,19 @@ export async function purchaseProduct(
       .maybeSingle();
     if (!merchant) return { ok: false, error: "Merchant account not found." };
 
-    const periodEnd = planId ? defaultPeriodEnd(planId).toISOString() : null;
-    const hasSubOpt = Boolean(opts && "razorpaySubscriptionId" in opts);
-    const nextSubId = hasSubOpt
-      ? opts?.razorpaySubscriptionId?.trim() || null
-      : undefined;
+    const paid = await verifyPaidPlanPayment({
+      userId: user.id,
+      product,
+      proof,
+    });
+    if (!paid.ok) return { ok: false, error: paid.error };
 
-    const { data: existing } = await supabase
+    const planId = paid.planId;
+    const nextSubId = paid.subscriptionId;
+    const periodEnd = defaultPeriodEnd(planId).toISOString();
+    const admin = createAdminClient();
+
+    const { data: existing } = await admin
       .from("merchant_products")
       .select("id, plan_id, razorpay_subscription_id")
       .eq("merchant_id", merchant.id)
@@ -2688,74 +2697,64 @@ export async function purchaseProduct(
           : null;
       const fromPlanId =
         typeof existing.plan_id === "string" ? existing.plan_id : null;
-      if (
-        nextSubId !== undefined &&
-        previousSubId &&
-        previousSubId !== nextSubId
-      ) {
+      if (previousSubId && nextSubId && previousSubId !== nextSubId) {
         await cancelRazorpaySubscription(previousSubId, { cancelAtCycleEnd: false });
       }
 
-      const { error } = await supabase
+      const { error } = await admin
         .from("merchant_products")
         .update({
-          plan_id: planId ?? null,
+          plan_id: planId,
           status: "active",
           pending_plan_id: null,
           cancel_at_period_end: false,
           current_period_end: periodEnd,
-          ...(nextSubId !== undefined
-            ? { razorpay_subscription_id: nextSubId }
-            : {}),
+          razorpay_subscription_id: nextSubId,
         })
         .eq("id", existing.id);
       if (error) return { ok: false, error: error.message };
-      if (planId) {
-        await grantMenuAiCreditsOnPlanApply({
-          merchantId: merchant.id as string,
-          product,
-          fromPlanId,
-          toPlanId: planId,
-        });
-        after(() =>
-          notifyPlanUpgraded({
-            merchantId: merchant.id as string,
-            product,
-            fromPlanId,
-            toPlanId: planId,
-            effectiveOn: new Date().toISOString(),
-          }),
-        );
-      }
-      return { ok: true };
-    }
-
-    const { error } = await supabase.from("merchant_products").insert({
-      merchant_id: merchant.id,
-      product,
-      plan_id: planId ?? null,
-      status: "active",
-      current_period_end: periodEnd,
-      ...(nextSubId !== undefined ? { razorpay_subscription_id: nextSubId } : {}),
-    });
-    if (error) return { ok: false, error: error.message };
-    if (planId) {
       await grantMenuAiCreditsOnPlanApply({
         merchantId: merchant.id as string,
         product,
-        fromPlanId: null,
+        fromPlanId,
         toPlanId: planId,
       });
       after(() =>
         notifyPlanUpgraded({
           merchantId: merchant.id as string,
           product,
-          fromPlanId: null,
+          fromPlanId,
           toPlanId: planId,
           effectiveOn: new Date().toISOString(),
         }),
       );
+      return { ok: true };
     }
+
+    const { error } = await admin.from("merchant_products").insert({
+      merchant_id: merchant.id,
+      product,
+      plan_id: planId,
+      status: "active",
+      current_period_end: periodEnd,
+      razorpay_subscription_id: nextSubId,
+    });
+    if (error) return { ok: false, error: error.message };
+    await grantMenuAiCreditsOnPlanApply({
+      merchantId: merchant.id as string,
+      product,
+      fromPlanId: null,
+      toPlanId: planId,
+    });
+    after(() =>
+      notifyPlanUpgraded({
+        merchantId: merchant.id as string,
+        product,
+        fromPlanId: null,
+        toPlanId: planId,
+        effectiveOn: new Date().toISOString(),
+      }),
+    );
     return { ok: true };
   } catch (error) {
     return {
@@ -2766,72 +2765,18 @@ export async function purchaseProduct(
 }
 
 /**
- * Starts the free trial for a product. One per merchant per product, forever —
- * `trial_started_at` survives the trial lapsing, so a merchant can't restart it
- * by letting it expire.
- *
- * The row is left with plan_id null and onboarded_at null: access is granted by
- * `trial_ends_at` alone, and the merchant drops into the product's setup wizard
- * on their way in.
+ * Free trials are discontinued. Merchants subscribe via checkout and are
+ * covered by the 7-day money-back guarantee on first-time subscriptions.
+ * Kept as a no-op endpoint so any stale clients get a clear error.
  */
 export async function startProductTrial(
-  product: MerchantProduct,
+  _product: MerchantProduct,
 ): Promise<{ ok: boolean; error?: string; trialEndsAt?: string }> {
-  try {
-    if (product !== "queue" && product !== "reservation") {
-      return { ok: false, error: "A free trial isn't available for this product." };
-    }
-
-    const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return { ok: false, error: "Not authenticated" };
-
-    const { data: merchant } = await supabase
-      .from("merchants")
-      .select("id")
-      .eq("owner_user_id", user.id)
-      .maybeSingle();
-    if (!merchant) return { ok: false, error: "Only the owner can start a free trial." };
-
-    const { data: existing } = await supabase
-      .from("merchant_products")
-      .select("id, plan_id, trial_started_at")
-      .eq("merchant_id", merchant.id)
-      .eq("product", product)
-      .maybeSingle();
-
-    if (existing?.plan_id) {
-      return { ok: false, error: "You already have a plan for this product." };
-    }
-    if (existing?.trial_started_at) {
-      return { ok: false, error: "You've already used your free trial." };
-    }
-
-    const startedAt = new Date();
-    const endsAt = new Date(startedAt.getTime() + TRIAL_DAYS * 86_400_000);
-    const patch = {
-      status: "active" as const,
-      plan_id: null,
-      trial_started_at: startedAt.toISOString(),
-      trial_ends_at: endsAt.toISOString(),
-    };
-
-    const { error } = existing
-      ? await supabase.from("merchant_products").update(patch).eq("id", existing.id)
-      : await supabase
-          .from("merchant_products")
-          .insert({ merchant_id: merchant.id, product, ...patch });
-
-    if (error) return { ok: false, error: error.message };
-    return { ok: true, trialEndsAt: endsAt.toISOString() };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Could not start the free trial.",
-    };
-  }
+  return {
+    ok: false,
+    error:
+      "Free trials are no longer available. Subscribe to a plan — first subscriptions include a 7-day money-back guarantee.",
+  };
 }
 
 type ProductBillingRow = {
@@ -2961,14 +2906,10 @@ const PRODUCT_BILLING_COLUMNS =
   "id, product, plan_id, status, onboarded_at, pending_plan_id, cancel_at_period_end, current_period_end, purchased_at, trial_started_at, trial_ends_at, razorpay_subscription_id";
 
 /**
- * Resolves the merchant's billing row for a product. `createIfMissing` is for
- * first-time purchases made from the plan page, where the merchant is buying a
- * product they don't own yet.
+ * Resolves the merchant's billing row for a product. Never creates an unpaid
+ * active row — first-time grants go through verifyPaidPlanPayment.
  */
-async function requireOwnedProduct(
-  product: MerchantProduct,
-  opts?: { createIfMissing?: boolean },
-) {
+async function requireOwnedProduct(product: MerchantProduct) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -2982,22 +2923,12 @@ async function requireOwnedProduct(
     .maybeSingle();
   if (!merchant) return { ok: false as const, error: "Merchant account not found." };
 
-  let { data: existing } = await supabase
+  const { data: existing } = await supabase
     .from("merchant_products")
     .select(PRODUCT_BILLING_COLUMNS)
     .eq("merchant_id", merchant.id)
     .eq("product", product)
     .maybeSingle();
-
-  if (!existing && opts?.createIfMissing) {
-    const { data: created, error: createError } = await supabase
-      .from("merchant_products")
-      .insert({ merchant_id: merchant.id, product, status: "active" })
-      .select(PRODUCT_BILLING_COLUMNS)
-      .maybeSingle();
-    if (createError) return { ok: false as const, error: createError.message };
-    existing = created;
-  }
 
   if (!existing) {
     return { ok: false as const, error: "This product is not active on your account." };
@@ -3006,6 +2937,7 @@ async function requireOwnedProduct(
   return {
     ok: true as const,
     supabase,
+    userId: user.id,
     merchantId: merchant.id as string,
     existing: existing as ProductBillingRow,
   };
@@ -3018,37 +2950,76 @@ async function requireOwnedProduct(
  */
 export async function updateProductPlan(
   product: MerchantProduct,
-  planId: string,
-  opts?: { razorpaySubscriptionId?: string | null },
+  _planId: string,
+  proof: PlanPaymentProof,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    const ctx = await requireOwnedProduct(product, { createIfMissing: true });
-    if (!ctx.ok) return { ok: false, error: ctx.error };
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "Not authenticated" };
 
-    const nextSubId =
-      opts && "razorpaySubscriptionId" in opts
-        ? opts.razorpaySubscriptionId?.trim() || null
-        : undefined;
-    const previousSubId = ctx.existing.razorpay_subscription_id?.trim() || null;
+    const { data: merchant } = await supabase
+      .from("merchants")
+      .select("id")
+      .eq("owner_user_id", user.id)
+      .maybeSingle();
+    if (!merchant) return { ok: false, error: "Merchant account not found." };
 
-    if (nextSubId !== undefined && previousSubId && previousSubId !== nextSubId) {
+    const paid = await verifyPaidPlanPayment({
+      userId: user.id,
+      product,
+      proof,
+    });
+    if (!paid.ok) return { ok: false, error: paid.error };
+
+    const planId = paid.planId;
+    const nextSubId = paid.subscriptionId;
+    const admin = createAdminClient();
+    const { data: existing } = await admin
+      .from("merchant_products")
+      .select(PRODUCT_BILLING_COLUMNS)
+      .eq("merchant_id", merchant.id)
+      .eq("product", product)
+      .maybeSingle();
+
+    const previousSubId =
+      typeof existing?.razorpay_subscription_id === "string"
+        ? existing.razorpay_subscription_id.trim()
+        : null;
+    if (previousSubId && nextSubId && previousSubId !== nextSubId) {
       await cancelRazorpaySubscription(previousSubId, { cancelAtCycleEnd: false });
     }
 
     const periodEnd = defaultPeriodEnd(planId).toISOString();
-    const fromPlanId = ctx.existing.plan_id;
-    const { error } = await ctx.supabase
-      .from("merchant_products")
-      .update({
-        plan_id: planId,
-        status: "active",
-        pending_plan_id: null,
-        cancel_at_period_end: false,
-        current_period_end: periodEnd,
-        ...(nextSubId !== undefined ? { razorpay_subscription_id: nextSubId } : {}),
-      })
-      .eq("id", ctx.existing.id);
+    const fromPlanId =
+      typeof existing?.plan_id === "string" ? existing.plan_id : null;
+
+    const row = {
+      plan_id: planId,
+      status: "active" as const,
+      pending_plan_id: null,
+      cancel_at_period_end: false,
+      current_period_end: periodEnd,
+      razorpay_subscription_id: nextSubId,
+    };
+
+    const { error } = existing
+      ? await admin.from("merchant_products").update(row).eq("id", existing.id)
+      : await admin.from("merchant_products").insert({
+          merchant_id: merchant.id,
+          product,
+          ...row,
+        });
     if (error) return { ok: false, error: error.message };
+
+    const ctx = {
+      merchantId: merchant.id as string,
+      existing: (existing ?? {
+        plan_id: fromPlanId,
+      }) as ProductBillingRow,
+    };
 
     const kind = classifyPlanChange(fromPlanId, planId);
     if (kind === "upgrade" || !fromPlanId || fromPlanId === FREE_PLAN.id) {
@@ -3111,12 +3082,18 @@ export async function schedulePlanChange(
     if (kind === "same") {
       return { ok: false, error: "You're already on that plan." };
     }
+    if (kind !== "downgrade") {
+      return {
+        ok: false,
+        error: "Upgrades require a new payment. Choose the plan to pay now.",
+      };
+    }
 
     const periodEnd =
       ctx.existing.current_period_end ??
       defaultPeriodEnd(ctx.existing.plan_id, new Date(ctx.existing.purchased_at)).toISOString();
 
-    const { error } = await ctx.supabase
+    const { error } = await createAdminClient()
       .from("merchant_products")
       .update({
         pending_plan_id: planId,
@@ -3176,7 +3153,7 @@ export async function cancelProductPlan(
       });
     }
 
-    const { error } = await ctx.supabase
+    const { error } = await createAdminClient()
       .from("merchant_products")
       .update({
         cancel_at_period_end: true,
@@ -3212,7 +3189,7 @@ export async function resumeProductPlan(
     const ctx = await requireOwnedProduct(product);
     if (!ctx.ok) return { ok: false, error: ctx.error };
 
-    const { error } = await ctx.supabase
+    const { error } = await createAdminClient()
       .from("merchant_products")
       .update({
         pending_plan_id: null,
@@ -3255,7 +3232,7 @@ export async function completeProductOnboarding(
       if (!assigned.ok) return assigned;
     }
 
-    const { error } = await supabase
+    const { error } = await createAdminClient()
       .from("merchant_products")
       .update({ onboarded_at: new Date().toISOString() })
       .eq("merchant_id", merchant.id)
@@ -3408,15 +3385,16 @@ export async function createMerchant(input: {
       if (!error && inserted) {
         // Seed the first product entitlement, already onboarded (this wizard
         // just finished the global + product blocks).
-        await supabase.from("merchant_products").upsert(
+        await createAdminClient().from("merchant_products").upsert(
           {
             merchant_id: inserted.id,
             product,
-            status: "active",
             onboarded_at: new Date().toISOString(),
-            // Loyalty is granted Starter at signup so plan meters and
-            // restrictions match enforcement from day one.
-            ...(product === "loyalty" ? { plan_id: "starter" } : {}),
+            // Loyalty Starter is included at signup. Other products stay
+            // inactive until a captured Razorpay payment grants a plan.
+            ...(product === "loyalty"
+              ? { plan_id: "starter", status: "active" }
+              : { status: "canceled" }),
           },
           { onConflict: "merchant_id,product" },
         );
@@ -3465,6 +3443,7 @@ export async function createMerchant(input: {
             role: "owner",
             name: ownerMemberName,
             email: user.email ?? null,
+            accepted_at: new Date().toISOString(),
           },
           { onConflict: "merchant_id,user_id" },
         );
@@ -5072,7 +5051,7 @@ export async function inviteMember(input: {
     const inviteToken = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
     const inviteExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const { error } = await supabase.from("merchant_members").upsert(
+    const { error } = await admin.from("merchant_members").upsert(
       {
         merchant_id: ctx.id,
         user_id: invitedUserId,

@@ -213,9 +213,9 @@ export function aiCreditsLimitError(
   wanted = 1,
 ): string {
   if (remaining <= 0) {
-    return `You've used all your AI Credits for this billing period (${monthlyTotal.toLocaleString("en-IN")}). Upgrade your plan or buy more credits.`;
+    return `You've used all your AI Credits. Upgrade your plan or buy more credits — purchased packs have no limit and never expire while Menu is active.`;
   }
-  return `Not enough AI Credits — need ${wanted.toLocaleString("en-IN")}, only ${remaining.toLocaleString("en-IN")} of ${monthlyTotal.toLocaleString("en-IN")} left. Upgrade your plan or buy more credits.`;
+  return `Not enough AI Credits — need ${wanted.toLocaleString("en-IN")}, only ${remaining.toLocaleString("en-IN")} left. Upgrade your plan or buy more credits.`;
 }
 
 /** @deprecated Prefer aiCreditsLimitError. */

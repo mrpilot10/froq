@@ -5,6 +5,7 @@ import {
   GUEST_MENU_TEMPLATE,
 } from "@/lib/menu/guest-app/bundle.generated";
 import { buildGuestMenuApp } from "@/lib/menu/guest-app/data";
+import { renderGuestMenuSkeleton } from "@/lib/menu/guest-app/skeleton";
 import { renderSpecialOffersSheet } from "@/lib/menu/guest-app/special-offers-sheet";
 import { guestCookieHeader } from "@/lib/menu/ai-replies";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -17,6 +18,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * runtime, fonts and React, with the merchant's live dishes handed over in
  * `window.__FROQ_MENU__`. That is why this is a route handler and not a page —
  * the artifact owns the whole document, so nothing from the app shell applies.
+ *
+ * A brand skeleton paints over SoftUI boot and fades once the artifact UI is
+ * ready. SoftUI tips stay deferred until Verify Your Details finishes.
  */
 
 function escapeAttribute(value: string): string {
@@ -52,6 +56,7 @@ export async function GET(
 ) {
   const { slug } = await params;
   const url = new URL(request.url);
+
   // The whole page is rendered in the guest's language rather than swapped in
   // the browser, so nothing can be left behind in English. Picking a language
   // reloads with `?lang=`.
@@ -110,22 +115,32 @@ export async function GET(
   }
 
   const title = `${page.merchant.businessName} — Menu`;
+  const accent = String(app.props.accent ?? "#16593F");
+  const accentSoft = String(app.props.accentSoft ?? "#E4F0E8");
   const head = [
     `<title>${escapeText(title)}</title>`,
     `<meta name="description" content="${escapeAttribute(
       `Browse the menu at ${page.merchant.businessName}.`,
     )}">`,
-    `<meta name="theme-color" content="${escapeAttribute(String(app.props.accent))}">`,
+    `<meta name="theme-color" content="${escapeAttribute(accent)}">`,
+    // Paint a calm page colour before SoftUI CSS lands.
+    `<style>html,body{margin:0;background:#F5F7F5;}</style>`,
     `<script>window.__FROQ_MENU__=${inlineJson(app.data)};</script>`,
   ].join("");
+
+  const skeleton = renderGuestMenuSkeleton({
+    businessName: page.merchant.businessName,
+    accent,
+    accentSoft,
+  });
 
   const offersSheet = renderSpecialOffersSheet({
     slug: page.merchant.slug,
     branchId: page.branchId,
     tableNumber: page.tableNumber,
     businessName: page.merchant.businessName,
-    accent: String(app.props.accent ?? "#16593F"),
-    delayMs: 400,
+    accent,
+    delayMs: 250,
     skipVerifyToken,
   });
 
@@ -133,6 +148,9 @@ export async function GET(
     escapeAttribute(JSON.stringify(props)),
   )
     .replace("<!--FROQ_HEAD-->", () => head)
+    // Skeleton must be the first body child so it paints before the SoftUI
+    // script block is parsed/executed.
+    .replace(/<body(\s[^>]*)?>/i, (open) => `${open}${skeleton}`)
     .replace("</body>", `${offersSheet}</body>`);
 
   const headers = new Headers({

@@ -131,6 +131,8 @@ export async function countMenuUsedForPlanMeter(): Promise<{
   maxConversations: number;
   generationsRemaining: number;
   available: number;
+  /** Plan monthly allotment for the current cycle. */
+  monthlyTotal: number;
   cycleEndsAt: string | null;
   breakdown: Array<{ bucket: string; label: string; credits: number }>;
   purchasedRemaining: number;
@@ -152,6 +154,7 @@ export async function countMenuUsedForPlanMeter(): Promise<{
     maxConversations: 0,
     generationsRemaining: 0,
     available: 0,
+    monthlyTotal: 0,
     cycleEndsAt: null as string | null,
     breakdown: [] as Array<{ bucket: string; label: string; credits: number }>,
     purchasedRemaining: 0,
@@ -184,6 +187,7 @@ export async function countMenuUsedForPlanMeter(): Promise<{
       maxConversations: dash.limitDisplay,
       generationsRemaining: dash.balance.available,
       available: dash.balance.available,
+      monthlyTotal: dash.balance.monthlyTotal,
       cycleEndsAt: dash.balance.cycleEndsAt,
       breakdown: dash.breakdown.map((row) => ({
         bucket: row.bucket,
@@ -956,6 +960,7 @@ export async function getMenuAnalytics(input?: {
 export async function applyPurchasedAiCreditPack(input: {
   packId: string;
   paymentId: string;
+  orderId: string;
 }): Promise<{ ok: boolean; credits?: number; available?: number; error?: string }> {
   try {
     const ctx = await requireMerchantContext();
@@ -963,20 +968,57 @@ export async function applyPurchasedAiCreditPack(input: {
     if (ctx.role !== "owner") {
       return { ok: false, error: "Only the owner can buy AI Credits." };
     }
+
+    const paymentId = input.paymentId?.trim();
+    const orderId = input.orderId?.trim();
+    if (!paymentId || !orderId) {
+      return { ok: false, error: "Missing payment details." };
+    }
+
+    const { fetchRazorpayOrder, fetchRazorpayPayment, toPaise } = await import(
+      "@/lib/payments/razorpay"
+    );
+    const [order, payment] = await Promise.all([
+      fetchRazorpayOrder(orderId),
+      fetchRazorpayPayment(paymentId),
+    ]);
+    const notes = (order.notes ?? {}) as Record<string, string>;
+    if (notes.kind !== "ai_credit_pack") {
+      return { ok: false, error: "This payment is not an AI Credits pack." };
+    }
+    if (!notes.merchant_id || notes.merchant_id !== ctx.merchantId) {
+      return { ok: false, error: "Payment does not belong to this business." };
+    }
+    if (String(payment.order_id ?? "") !== orderId) {
+      return { ok: false, error: "Payment does not match this order." };
+    }
+    const paymentStatus = String(payment.status ?? "");
+    if (paymentStatus !== "captured") {
+      return { ok: false, error: "Payment has not been captured yet." };
+    }
+
     const { getAiCreditPack } = await import("@/lib/ai/credits-config");
-    const pack = getAiCreditPack(input.packId);
+    const packId = (notes.pack_id || input.packId).trim();
+    const pack = getAiCreditPack(packId);
     if (!pack) return { ok: false, error: "Unknown credit pack." };
+
+    const paidPaise = Number(payment.amount);
+    if (!Number.isFinite(paidPaise) || paidPaise < toPaise(pack.priceInr)) {
+      return { ok: false, error: "Payment amount does not match this pack." };
+    }
+
+    const credits = pack.credits;
 
     const { addPurchasedAiCredits } = await import("@/lib/ai/credits");
     const balance = await addPurchasedAiCredits({
       merchantId: ctx.merchantId,
-      credits: pack.credits,
+      credits,
       packId: pack.id,
-      paymentId: input.paymentId,
+      paymentId,
     });
     return {
       ok: true,
-      credits: pack.credits,
+      credits,
       available: balance.available,
     };
   } catch (error) {

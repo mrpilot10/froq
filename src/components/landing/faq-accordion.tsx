@@ -10,7 +10,7 @@ const FAQS = [
   { q: "Is there a contract?", a: "No." },
   {
     q: "What if Froq isn't right for my business?",
-    a: "First-time subscriptions include an optional 7-day money-back guarantee. After that, payments are non-refundable. To request a refund, go to /help. You can cancel anytime to stop future renewals.",
+    a: "First-time subscriptions include a 7-day money-back guarantee. After that, payments are non-refundable. To request a refund, go to /help. You can cancel anytime to stop future renewals.",
   },
   { q: "What businesses can use Froq?", a: "Any business that benefits from repeat customers." },
 ];

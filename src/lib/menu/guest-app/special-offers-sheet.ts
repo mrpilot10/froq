@@ -37,35 +37,124 @@ export function renderSpecialOffersSheet(config: SpecialOffersSheetConfig): stri
   };
 
   return `<style id="froq-so-style">
-#froq-so-root{position:fixed;inset:0;z-index:95;display:none;align-items:flex-end;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;color:#0C1A14}
+#froq-so-root{position:fixed;inset:0;z-index:95;display:none;align-items:flex-end;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;color:#1b1b1d;--froq-so-line:#ececee;--froq-so-bg:#f5f4f1;--froq-so-paper:#fff;--froq-so-ink:#1b1b1d;--froq-so-ink-soft:#6e6e73;--froq-so-ink-faint:#a8a8ad}
 #froq-so-root.is-open{display:flex}
 #froq-so-bg{position:absolute;inset:0;background:rgba(8,22,16,.55)}
-#froq-so-sheet{position:relative;width:100%;max-width:460px;max-height:min(94vh,780px);overflow:auto;background:#fff;border-radius:26px 26px 0 0;padding:10px 18px 22px;animation:froqSoUp .26s cubic-bezier(.22,.9,.3,1);box-sizing:border-box;-webkit-overflow-scrolling:touch}
+#froq-so-sheet{position:relative;width:100%;max-width:460px;max-height:min(94vh,780px);overflow:auto;background:var(--froq-so-paper);border-radius:26px 26px 0 0;padding:10px 18px 22px;animation:froqSoUp .26s cubic-bezier(.22,.9,.3,1);box-sizing:border-box;-webkit-overflow-scrolling:touch}
 #froq-so-handle{width:40px;height:4px;border-radius:999px;background:#DCE5DF;margin:0 auto 10px}
 #froq-so-head{margin:0 0 6px}
 #froq-so-title{font-size:21px;font-weight:800;letter-spacing:-.5px;line-height:1.2;margin:0}
-#froq-so-sub{margin:0 0 14px;font-size:13.5px;font-weight:500;line-height:1.4;color:#5A6E62}
-#froq-so-form{display:flex;flex-direction:column;gap:10px}
-.froq-so-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.froq-so-field{display:flex;flex-direction:column;gap:5px}
-.froq-so-field label{font-size:11.5px;font-weight:700;color:#5A6E62;letter-spacing:.02em}
-.froq-so-field input,.froq-so-field select{height:48px;border-radius:14px;border:1.5px solid #E1E9E4;padding:0 13px;font:inherit;font-size:16px;font-weight:600;color:#0C1A14;background:#F7FAF8;outline:none;width:100%;box-sizing:border-box}
-.froq-so-field input:focus,.froq-so-field select:focus{border-color:var(--froq-so-accent,#16593F);background:#fff}
-.froq-so-phone{display:flex;align-items:center;gap:0;height:48px;border-radius:14px;border:1.5px solid #E1E9E4;overflow:hidden;background:#F7FAF8}
-.froq-so-phone:focus-within{border-color:var(--froq-so-accent,#16593F);background:#fff}
-.froq-so-phone span{flex:none;padding:0 12px;font-size:14px;font-weight:700;color:#5A6E62;background:#EEF3F0;border-right:1px solid #E1E9E4;height:100%;display:flex;align-items:center}
-.froq-so-phone input{border:0;height:100%;border-radius:0;flex:1;min-width:0;background:transparent}
-#froq-so-error{display:none;margin:2px 0 0;padding:9px 12px;border-radius:12px;background:#FEF2F2;color:#B91C1C;font-size:13px;font-weight:600;line-height:1.35}
+#froq-so-sub{margin:0 0 14px;font-size:13.5px;font-weight:500;line-height:1.4;color:var(--froq-so-ink-soft)}
+#froq-so-form{display:flex;flex-direction:column;gap:0}
+.froq-so-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.froq-so-field{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.froq-so-row .froq-so-field{margin-bottom:0}
+.froq-so-field label{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--froq-so-ink-soft)}
+.froq-so-field input,.froq-so-field select{
+  width:100%;
+  box-sizing:border-box;
+  border:1.5px solid var(--froq-so-line);
+  border-radius:16px;
+  background:var(--froq-so-bg);
+  color:var(--froq-so-ink);
+  font:inherit;
+  font-size:16px;
+  font-weight:650;
+  padding:15px 16px;
+  outline:none;
+  transition:border-color .2s ease,background .2s ease,box-shadow .2s ease;
+  -webkit-appearance:none;
+  appearance:none;
+}
+.froq-so-field input::placeholder{color:var(--froq-so-ink-faint);font-weight:500}
+.froq-so-field input:focus,.froq-so-field select:focus{
+  border-color:color-mix(in srgb,var(--froq-so-accent,#16593F) 55%,var(--froq-so-line));
+  background:var(--froq-so-paper);
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--froq-so-accent,#16593F) 12%,transparent);
+}
+.froq-so-field select{
+  cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 14px center;
+  padding-right:40px;
+}
+.froq-so-field--date input{
+  width:min(100%,11.75rem);
+  min-width:0;
+  max-width:100%;
+}
+.froq-so-phone{
+  display:flex;
+  align-items:stretch;
+  gap:10px;
+}
+.froq-so-phone-prefix{
+  flex-shrink:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-width:58px;
+  border-radius:16px;
+  background:color-mix(in srgb,var(--froq-so-accent,#16593F) 12%,var(--froq-so-paper));
+  color:color-mix(in srgb,var(--froq-so-accent,#16593F) 72%,#0C1A14);
+  font-size:15px;
+  font-weight:800;
+  border:1.5px solid color-mix(in srgb,var(--froq-so-accent,#16593F) 18%,var(--froq-so-line));
+}
+.froq-so-phone input{
+  flex:1;
+  min-width:0;
+}
+#froq-so-error{display:none;margin:2px 0 14px;font-size:13px;font-weight:650;color:#c0392b;text-align:center;line-height:1.35}
 #froq-so-error.is-on{display:block}
-#froq-so-cta{margin-top:12px;width:100%;height:52px;border:0;border-radius:15px;background:var(--froq-so-accent,#16593F);color:#fff;font:inherit;font-size:15.5px;font-weight:800;cursor:pointer}
+#froq-so-cta{
+  margin-top:6px;
+  width:100%;
+  border:none;
+  border-radius:18px;
+  background:var(--froq-so-accent,#16593F);
+  color:#fff;
+  font:inherit;
+  font-size:16px;
+  font-weight:700;
+  letter-spacing:-.01em;
+  padding:17px 18px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  box-shadow:0 1px 2px rgba(0,0,0,.06);
+  transition:transform .15s ease,opacity .15s ease;
+}
+#froq-so-cta:active{transform:scale(.98);opacity:.9}
 #froq-so-cta:disabled{opacity:.55;cursor:not-allowed}
-#froq-so-back{display:none;width:100%;margin-top:6px;padding:10px;border:0;background:transparent;font:inherit;font-size:13.5px;font-weight:650;color:#5A6E62;cursor:pointer}
+#froq-so-back{display:none;width:100%;margin-top:6px;padding:10px;border:0;background:transparent;font:inherit;font-size:13.5px;font-weight:650;color:var(--froq-so-ink-soft);cursor:pointer}
 #froq-so-back.is-on{display:block}
-.froq-so-otp{display:flex;gap:8px;justify-content:center;margin:4px 0 2px}
-.froq-so-otp input{width:44px;height:50px;text-align:center;font-size:20px;font-weight:800;border-radius:14px;border:1.5px solid #E1E9E4;background:#F7FAF8;outline:none}
-.froq-so-otp input:focus{border-color:var(--froq-so-accent,#16593F);background:#fff}
+.froq-so-otp{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:4px 0 18px}
+.froq-so-otp input{
+  width:100%;
+  aspect-ratio:1;
+  height:auto;
+  text-align:center;
+  font-size:20px;
+  font-weight:800;
+  border-radius:16px;
+  border:1.5px solid var(--froq-so-line);
+  background:var(--froq-so-bg);
+  color:var(--froq-so-ink);
+  outline:none;
+  box-sizing:border-box;
+  transition:border-color .2s ease,background .2s ease,box-shadow .2s ease,transform .15s ease;
+}
+.froq-so-otp input:focus{
+  border-color:color-mix(in srgb,var(--froq-so-accent,#16593F) 55%,var(--froq-so-line));
+  background:var(--froq-so-paper);
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--froq-so-accent,#16593F) 12%,transparent);
+  transform:scale(1.03);
+}
 @keyframes froqSoUp{from{transform:translateY(28px);opacity:.6}to{transform:translateY(0);opacity:1}}
-@media (max-width:420px){.froq-so-row{grid-template-columns:1fr}}
+@media (max-width:420px){.froq-so-row{grid-template-columns:1fr}.froq-so-field--date input{width:100%}}
 </style>
 <div id="froq-so-root" aria-hidden="true">
   <div id="froq-so-bg" aria-hidden="true"></div>
@@ -88,6 +177,12 @@ export function renderSpecialOffersSheet(config: SpecialOffersSheetConfig): stri
   var root = document.getElementById("froq-so-root");
   if (!root || !CFG.slug) return;
 
+  function signalVerified() {
+    try {
+      window.dispatchEvent(new CustomEvent("froq-menu-verified"));
+    } catch (e) {}
+  }
+
   function rememberDone() {
     try { localStorage.setItem(STORAGE_KEY, "1"); } catch (e) {}
   }
@@ -95,11 +190,15 @@ export function renderSpecialOffersSheet(config: SpecialOffersSheetConfig): stri
   // Queue guests arrive with ?guest=frq_… — reuse queue identity, no OTP sheet.
   if (CFG.skipVerifyToken) {
     rememberDone();
+    signalVerified();
     return;
   }
 
   try {
-    if (localStorage.getItem(STORAGE_KEY) === "1") return;
+    if (localStorage.getItem(STORAGE_KEY) === "1") {
+      signalVerified();
+      return;
+    }
   } catch (e) {}
 
   var step = "form";
@@ -129,6 +228,7 @@ export function renderSpecialOffersSheet(config: SpecialOffersSheetConfig): stri
     root.classList.remove("is-open");
     root.setAttribute("aria-hidden", "true");
     document.documentElement.style.overflow = "";
+    if (step === "done") signalVerified();
   }
 
   function showError(msg) {
@@ -212,10 +312,10 @@ export function renderSpecialOffersSheet(config: SpecialOffersSheetConfig): stri
         '<div class="froq-so-field"><label for="froq-so-first">First name</label><input id="froq-so-first" name="given-name" autocomplete="given-name" maxlength="60" value="' + escAttr(form.firstName) + '" /></div>' +
         '<div class="froq-so-field"><label for="froq-so-last">Last name</label><input id="froq-so-last" name="family-name" autocomplete="family-name" maxlength="60" value="' + escAttr(form.lastName) + '" /></div>' +
         "</div>" +
-        '<div class="froq-so-field"><label for="froq-so-phone">Phone</label><div class="froq-so-phone"><span>+91</span><input id="froq-so-phone" name="tel" inputmode="numeric" autocomplete="tel-national" maxlength="10" placeholder="98765 43210" value="' + escAttr(form.phone) + '" /></div></div>' +
+        '<div class="froq-so-field"><label for="froq-so-phone">Phone</label><div class="froq-so-phone"><span class="froq-so-phone-prefix">+91</span><input id="froq-so-phone" name="tel" inputmode="numeric" autocomplete="tel-national" maxlength="10" placeholder="98765 43210" value="' + escAttr(form.phone) + '" /></div></div>' +
         '<div class="froq-so-field"><label for="froq-so-email">Email</label><input id="froq-so-email" type="email" name="email" autocomplete="email" maxlength="120" value="' + escAttr(form.email) + '" /></div>' +
         '<div class="froq-so-row">' +
-        '<div class="froq-so-field"><label for="froq-so-dob">Date of birth</label><input id="froq-so-dob" type="date" name="bday" autocomplete="bday" value="' + escAttr(form.birthdate) + '" /></div>' +
+        '<div class="froq-so-field froq-so-field--date"><label for="froq-so-dob">Date of birth</label><input id="froq-so-dob" type="date" name="bday" autocomplete="bday" value="' + escAttr(form.birthdate) + '" /></div>' +
         '<div class="froq-so-field"><label for="froq-so-party">Table for</label><select id="froq-so-party">' + partyOptions() + "</select></div>" +
         "</div></form>";
       cta.textContent = busy ? "Sending…" : "Send OTP";

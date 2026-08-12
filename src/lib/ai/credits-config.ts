@@ -35,7 +35,10 @@ export const AI_CREDIT_COSTS: Record<AiCreditFeature, number> = {
   other: 1,
 };
 
-/** Monthly AI Credits included with each Menu plan (billing cycle). */
+/**
+ * Monthly AI Credits included with each Menu plan (billing cycle).
+ * Unused monthly credits do not roll over into the next cycle.
+ */
 export const MENU_AI_CREDITS_PER_MONTH = {
   "menu-starter": 5_000,
   "menu-growth": 20_000,
@@ -44,7 +47,10 @@ export const MENU_AI_CREDITS_PER_MONTH = {
   menu: 20_000,
 } as const;
 
-/** One-time AI Credit packs (INR). Rollover while subscription/active Menu remains. */
+/**
+ * One-time AI Credit packs (INR).
+ * Purchased credits have no balance cap and never expire while Menu remains active.
+ */
 export const AI_CREDIT_PACKS = [
   {
     id: "credits-5k",
@@ -98,10 +104,10 @@ export function labelForAiFeature(feature: string): string {
 }
 
 export const AI_CREDITS_EXHAUSTED_MESSAGE =
-  "You've used all your AI Credits for this billing period.";
+  "You've used all your AI Credits. Upgrade your plan or buy a credit pack — purchased credits have no limit and never expire while Menu is active.";
 
 export const AI_CREDITS_TOOLTIP =
-  "AI Credits power customer chat, menu import, descriptions, dish images, marketing, and more. Different features use different amounts — for example, importing a dish costs 2 credits.";
+  "AI Credits power customer chat, menu import, descriptions, dish images, marketing, and more. Your plan's monthly credits reset each billing cycle (unused don't roll over). Purchased packs have no balance limit and never expire while Menu is active.";
 
 /** Group features for dashboard breakdown. */
 export type AiCreditBreakdownBucket =

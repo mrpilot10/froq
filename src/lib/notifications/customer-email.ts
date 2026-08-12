@@ -441,6 +441,11 @@ export function buildCustomerNotificationEmail<
       }
       if (template === "reservation_confirmed_menu") {
         const subject = `✅ Table locked at ${d.businessName}`;
+        const menuCta = toPublicEmailUrl(
+          d.menuSlug?.trim()
+            ? merchantMenuUrl(d.menuSlug.trim(), customer.publicToken)
+            : customerMenuUrl(customer.publicToken),
+        );
         return {
           subject,
           html: brandedEmailHtml({
@@ -456,14 +461,14 @@ export function buildCustomerNotificationEmail<
                 `Reservation page: <a href="${rUrl}">${rUrl}</a>`,
               ),
             ctaLabel: "🍽️ Explore Our AI Menu",
-            ctaUrl: menuLink,
+            ctaUrl: menuCta,
           }),
           text: plainBody([
             greet.text,
             "",
             `Confirmed at ${d.businessName} for ${d.when}${partyLabel}.`,
             "",
-            `Menu: ${menuLink}`,
+            `Menu: ${menuCta}`,
             `Reservation: ${rUrl}`,
           ]),
         };
@@ -660,7 +665,13 @@ export function buildCustomerNotificationEmail<
       const size = formatBookingSize(d.bookingSize);
       const subject = `🪑 You're in at ${d.businessName}!`;
       const menuCta = template === "seated_menu";
-      const ctaUrl = menuCta ? menuLink : hub;
+      const ctaUrl = menuCta
+        ? toPublicEmailUrl(
+            d.menuSlug?.trim()
+              ? merchantMenuUrl(d.menuSlug.trim(), customer.publicToken)
+              : customerMenuUrl(customer.publicToken),
+          )
+        : hub;
       return {
         subject,
         html: brandedEmailHtml({

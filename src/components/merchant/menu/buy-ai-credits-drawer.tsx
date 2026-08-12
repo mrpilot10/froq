@@ -48,6 +48,7 @@ export function BuyAiCreditsDrawer({
       const applied = await applyPurchasedAiCreditPack({
         packId: payment.packId,
         paymentId: payment.paymentId,
+        orderId: payment.orderId,
       });
       if (!applied.ok) {
         toast.error(
@@ -90,8 +91,9 @@ export function BuyAiCreditsDrawer({
               Buy AI Credits
             </h3>
             <p className="buy-ai-credits-sub">
-              Top-up credits never expire while your Menu plan is active. Used
-              after your monthly allowance runs out.
+              Purchased credits have no limit and never expire while Menu is
+              active. Monthly plan credits reset each cycle — unused don’t roll
+              over. Top-ups are used after your monthly allowance.
             </p>
           </div>
         </header>

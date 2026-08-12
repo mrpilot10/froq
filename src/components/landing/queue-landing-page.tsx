@@ -160,7 +160,7 @@ const FAQS = [
   },
   {
     q: "What if it isn’t right for us?",
-    a: "Try it with confidence. You’re covered by our 7-Day Money Back Guarantee.",
+    a: "Subscribe with confidence. First-time plans include a 7-day money-back guarantee — full refund if it isn’t a fit.",
   },
 ];
 
@@ -327,7 +327,7 @@ export function QueueLandingPage() {
           <PricingTable
             product="queue"
             title="Simple pricing. No surprises."
-            subtitle="Start with a 7-day free trial. No credit card required. Cancel anytime."
+            subtitle="Subscribe with a 7-day money-back guarantee. Cancel anytime."
           />
           <p className="am-pricing-guarantee">
             <ShieldCheck size={16} strokeWidth={2.3} aria-hidden="true" />

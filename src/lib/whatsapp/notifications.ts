@@ -731,6 +731,10 @@ export type SendQueueJoinedMenuInput = SendQueueJoinedInput & {
   merchantSlug: string;
 };
 export type SendQueuePartyInput = QueueSendBase & QueuePartyTemplateInput;
+export type SendSeatedMenuInput = SendQueuePartyInput & {
+  /** Merchant slug for Meta URL https://froq.io/menu/{{1}}. */
+  merchantSlug: string;
+};
 
 async function sendFromQueuePayload(
   mobile: string,
@@ -836,11 +840,24 @@ export async function sendQueueCustomerSeated(
   return sendFromQueuePayload(input.mobile, buildQueueCustomerSeatedTemplate(input));
 }
 
-/** seated_menu — party seated with AI Menu CTA. */
+/** seated_menu — party seated; CTA → /menu/{slug}?guest={frq_…}. */
 export async function sendSeatedMenu(
-  input: SendQueuePartyInput,
+  input: SendSeatedMenuInput,
 ): Promise<ApitxtSendWaResponse> {
-  return sendFromQueuePayload(input.mobile, buildSeatedMenuTemplate(input));
+  const payload = buildSeatedMenuTemplate(input);
+  const menuSuffix = payload.buttons?.[0]?.parameters[0];
+  if (!menuSuffix) {
+    throw new WhatsAppTemplateValidationError(
+      "seated_menu requires a menu URL button.",
+      "merchantSlug",
+    );
+  }
+  return sendWhatsAppTemplate({
+    templateName: payload.templateName,
+    mobile: input.mobile,
+    bodyParams: payload.body,
+    urlButtonSuffix: menuSuffix,
+  });
 }
 
 export interface SendBirthdayBonusStampsInput {

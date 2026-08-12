@@ -27,6 +27,8 @@ export type ReservationTemplate =
 /** Everything a background send needs — never re-query inside `after()`. */
 export interface ReservationNotifyTarget {
   businessName: string;
+  /** Merchant public slug — for reservation_confirmed_menu /menu/{{1}}. */
+  menuSlug: string | null;
   /** Merchant's WhatsApp notifications toggle. */
   enabled: boolean;
   customer: Pick<
@@ -132,6 +134,7 @@ export async function sendReservationNotification(input: {
     partySize: input.partySize,
     reservationToken: input.reservationToken,
     reason: input.declineReason?.trim() || undefined,
+    ...(target.menuSlug ? { menuSlug: target.menuSlug } : {}),
   };
 
   try {
@@ -180,7 +183,7 @@ export async function resolveReservationTarget(input: {
   const [merchantRes, customerRes] = await Promise.all([
     admin
       .from("merchants")
-      .select("business_name, reservation_whatsapp_enabled")
+      .select("business_name, slug, reservation_whatsapp_enabled")
       .eq("id", input.merchantId)
       .maybeSingle(),
     input.customerId
@@ -195,6 +198,7 @@ export async function resolveReservationTarget(input: {
   const customerRow = customerRes.data;
   return {
     businessName: merchantRes.data?.business_name ?? "the restaurant",
+    menuSlug: merchantRes.data?.slug?.trim() || null,
     enabled: merchantRes.data?.reservation_whatsapp_enabled !== false,
     customer:
       customerRow && customerRow.public_token

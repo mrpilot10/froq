@@ -420,20 +420,20 @@ export function ReservationStatusScreen({
                 <div className="pass-avatar">{guestInitials(reservation.name)}</div>
               </div>
             </div>
+
+            {(status === "confirmed" || status === "completed") &&
+            reservation.aiMenuEnabled &&
+            reservation.customerPublicToken ? (
+              <a
+                className="rpass-ai-menu"
+                href={`/m/${encodeURIComponent(reservation.customerPublicToken)}`}
+              >
+                <UtensilsCrossed size={16} strokeWidth={2.3} aria-hidden="true" />
+                Explore Our AI Menu
+              </a>
+            ) : null}
           </div>
         </div>
-
-        {(status === "confirmed" || status === "completed") &&
-        reservation.aiMenuEnabled &&
-        reservation.customerPublicToken ? (
-          <a
-            className="qjoin-ai-menu rpass-ai-menu"
-            href={`/m/${encodeURIComponent(reservation.customerPublicToken)}`}
-          >
-            <UtensilsCrossed size={16} strokeWidth={2.3} aria-hidden="true" />
-            Explore Our AI Menu
-          </a>
-        ) : null}
 
         {open && !proposed ? (
           <div className="rpass-actions">

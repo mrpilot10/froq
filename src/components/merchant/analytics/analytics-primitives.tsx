@@ -10,6 +10,8 @@ export type ChartSegment = {
   id: string;
   label: string;
   value: number;
+  /** Optional legend text (falls back to `value`). */
+  display?: string | number;
   tone?: (typeof SEGMENT_TONES)[number];
 };
 
@@ -119,11 +121,14 @@ export function DonutChart({
   centerValue,
   centerLabel,
   size = 148,
+  stacked = false,
 }: {
   segments: ChartSegment[];
   centerValue: string | number;
   centerLabel: string;
   size?: number;
+  /** Force chart on top with labels below (never side-by-side). */
+  stacked?: boolean;
 }) {
   const total = segments.reduce((sum, s) => sum + Math.max(0, s.value), 0);
   const stroke = 16;
@@ -147,7 +152,7 @@ export function DonutChart({
         });
 
   return (
-    <div className="ax-donut">
+    <div className={`ax-donut${stacked ? " ax-donut--stacked" : ""}`}>
       <div className="ax-donut-viz" style={{ width: size, height: size }}>
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
           <circle
@@ -188,7 +193,9 @@ export function DonutChart({
               aria-hidden
             />
             <span className="ax-donut-legend-label">{segment.label}</span>
-            <span className="ax-donut-legend-value">{segment.value}</span>
+            <span className="ax-donut-legend-value">
+              {segment.display ?? segment.value}
+            </span>
           </li>
         ))}
       </ul>

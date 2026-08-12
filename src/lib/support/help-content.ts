@@ -175,14 +175,14 @@ export const HELP_CATEGORIES: HelpCategory[] = [
   {
     id: "billing",
     label: "Plans & billing",
-    blurb: "Trials, upgrades, cancellation and refunds.",
+    blurb: "Upgrades, cancellation and refunds.",
     articles: [
       {
-        id: "free-trial",
-        question: "How does the free trial work?",
+        id: "money-back",
+        question: "How does the 7-day money-back guarantee work?",
         body: [
-          "Smart Queue comes with a 7-day free trial. No card is required to start it, and it converts to nothing — if you don't pick a plan, the product simply locks at the end of the week.",
-          "Your sessions, guests and history are kept, so choosing a plan later picks up exactly where you left off. The trial is available once per business.",
+          "First-time subscriptions include a 7-day money-back guarantee. If Froq isn't right for your business, raise a help ticket within seven days of your first payment and we'll refund it.",
+          "There is no free trial period — you subscribe to unlock a product, try it with that guarantee, and can cancel anytime to stop future renewals.",
         ],
       },
       {

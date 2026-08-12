@@ -195,6 +195,11 @@ export async function fetchRazorpayOrder(orderId: string) {
   return razorpay.orders.fetch(orderId);
 }
 
+export async function fetchRazorpayPayment(paymentId: string) {
+  const razorpay = getRazorpayClient();
+  return razorpay.payments.fetch(paymentId);
+}
+
 export async function fetchRazorpaySubscription(subscriptionId: string) {
   const razorpay = getRazorpayClient();
   return razorpay.subscriptions.fetch(subscriptionId);

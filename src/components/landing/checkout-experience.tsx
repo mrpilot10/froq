@@ -6,7 +6,20 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowLeft, Check, CreditCard, Eye, EyeOff, Lock, Store } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  CreditCard,
+  Eye,
+  EyeOff,
+  Lock,
+  ShieldCheck,
+  Sparkles,
+  Star,
+  Store,
+  Zap,
+} from "lucide-react";
 import { isValidEmail, isValidPassword, isValidPhone } from "@/lib/auth/format";
 import { INDIA_CITIES, stateForCity } from "@/lib/geo/india-cities";
 import { readCheckoutDraft, writeCheckoutAccount, writeCheckoutDraft } from "@/lib/merchant/checkout";
@@ -22,6 +35,7 @@ import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { TurnstileField } from "@/components/turnstile/turnstile-field";
 import { useTurnstile } from "@/lib/turnstile/use-turnstile";
 import { type PricingPlan } from "@/lib/merchant/pricing";
+import type { MerchantProduct } from "@/lib/merchant/types";
 import { FeatureText } from "@/components/landing/feature-text";
 import {
   payWithRazorpay,
@@ -32,6 +46,357 @@ type Step = "account" | "payment" | "loading";
 
 interface CheckoutExperienceProps {
   plan: PricingPlan;
+}
+
+interface CheckoutTestimonial {
+  quote: string;
+  name: string;
+  initials: string;
+  role: string;
+  place: string;
+}
+
+const PRODUCT_COPY: Record<
+  MerchantProduct,
+  {
+    label: string;
+    pricingHref: string;
+    outcome: string;
+    socialProof: string;
+    testimonials: CheckoutTestimonial[];
+  }
+> = {
+  loyalty: {
+    label: "Loyalty Stamps",
+    pricingHref: "/loyalty-stamps#pricing",
+    outcome: "Collect your first stamp today",
+    socialProof: "Loved by cafés and shops launching loyalty",
+    testimonials: [
+      {
+        quote:
+          "We dropped plastic cards. Guests scan once and keep coming back for the free coffee — stamps just work.",
+        name: "Meera Shah",
+        initials: "MS",
+        role: "Owner, Bloom Counter",
+        place: "Ahmedabad",
+      },
+      {
+        quote:
+          "Setup took an afternoon. Now we can see who is returning without chasing spreadsheets after close.",
+        name: "Dev Patel",
+        initials: "DP",
+        role: "Ops, Crumb & Co.",
+        place: "Surat",
+      },
+      {
+        quote:
+          "The reward is simple and guests actually remember it. Repeat visits are up without running loud discounts.",
+        name: "Sana Kapoor",
+        initials: "SK",
+        role: "Founder, Salt Studio",
+        place: "Delhi",
+      },
+    ],
+  },
+  queue: {
+    label: "Smart Queue",
+    pricingHref: "/queue-management#pricing",
+    outcome: "Open your live queue today",
+    socialProof: "Built for busy doors and Friday rushes",
+    testimonials: [
+      {
+        quote:
+          "The entrance stays clear now. Guests wander, get a WhatsApp when ready, and we seat without shouting names.",
+        name: "Rahul Mehra",
+        initials: "RM",
+        role: "Ops Lead, Oven Theory",
+        place: "Pune",
+      },
+      {
+        quote:
+          "Party size on every ticket changed how we match tables. Less guesswork during the Friday rush.",
+        name: "Ananya Desai",
+        initials: "AD",
+        role: "Owner, Coast & Crumb",
+        place: "Mumbai",
+      },
+      {
+        quote:
+          "Hosts run the door from one list. Call, seat, done — paper clipboards are gone for good.",
+        name: "Karthik Iyer",
+        initials: "KI",
+        role: "Founder, Green Bowl",
+        place: "Bengaluru",
+      },
+    ],
+  },
+  reservation: {
+    label: "Reservations",
+    pricingHref: "/loyalty-stamps#pricing",
+    outcome: "Take bookings today",
+    socialProof: "Trusted by teams managing busy service",
+    testimonials: [
+      {
+        quote:
+          "Party size on every ticket changed how we match tables. Less guesswork during the Friday rush.",
+        name: "Ananya Desai",
+        initials: "AD",
+        role: "Owner, Coast & Crumb",
+        place: "Mumbai",
+      },
+      {
+        quote:
+          "Hosts run the door from one list. Call, seat, done — paper clipboards are gone for good.",
+        name: "Karthik Iyer",
+        initials: "KI",
+        role: "Founder, Green Bowl",
+        place: "Bengaluru",
+      },
+      {
+        quote:
+          "Setup took an afternoon. Now we can see who is returning without chasing spreadsheets after close.",
+        name: "Dev Patel",
+        initials: "DP",
+        role: "Ops, Crumb & Co.",
+        place: "Surat",
+      },
+    ],
+  },
+  menu: {
+    label: "AI Digital Menu",
+    pricingHref: "/ai-digital-menu#pricing",
+    outcome: "Publish your menu today",
+    socialProof: "Chosen by restaurants upgrading guest ordering",
+    testimonials: [
+      {
+        quote:
+          "Guests ask the menu in Marathi and Hindi now. Our staff spend less time explaining every dish.",
+        name: "Ananya Desai",
+        initials: "AD",
+        role: "Owner, Coast & Crumb",
+        place: "Mumbai",
+      },
+      {
+        quote:
+          "We uploaded our old printed menu and had descriptions and AI images ready the same afternoon.",
+        name: "Rahul Mehra",
+        initials: "RM",
+        role: "Ops Lead, Oven Theory",
+        place: "Pune",
+      },
+      {
+        quote:
+          "The cart suggestions show pairings we used to miss. Our average ticket improved without constantly pushing discounts.",
+        name: "Karthik Iyer",
+        initials: "KI",
+        role: "Founder, Green Bowl",
+        place: "Bengaluru",
+      },
+    ],
+  },
+};
+
+const HIGHLIGHT_COUNT = 5;
+
+function StarRow({ compact = false }: { compact?: boolean }) {
+  return (
+    <span
+      className={`checkout-stars${compact ? " checkout-stars--compact" : ""}`}
+      aria-label="5 out of 5 stars"
+    >
+      {Array.from({ length: 5 }, (_, i) => (
+        <Star key={i} size={compact ? 11 : 13} strokeWidth={2.2} fill="currentColor" aria-hidden />
+      ))}
+    </span>
+  );
+}
+
+function RazorpayBadge({ className }: { className?: string }) {
+  return (
+    <Image
+      src="/checkout/powered-by-razorpay.png"
+      alt="Payments powered by Razorpay"
+      width={226}
+      height={91}
+      className={`checkout-razorpay-badge${className ? ` ${className}` : ""}`}
+    />
+  );
+}
+
+function CheckoutSteps({ step }: { step: Step }) {
+  const activeIndex = step === "payment" ? 1 : step === "loading" ? 2 : 0;
+  const items = [
+    { id: "account", label: "Account" },
+    { id: "payment", label: "Payment" },
+    { id: "live", label: "Go live" },
+  ] as const;
+
+  return (
+    <ol className="checkout-steps" aria-label="Checkout progress">
+      {items.map((item, index) => {
+        const state =
+          index < activeIndex ? "is-done" : index === activeIndex ? "is-active" : "";
+        return (
+          <li key={item.id} className={`checkout-step ${state}`.trim()}>
+            <span className="checkout-step-dot" aria-hidden="true">
+              {index < activeIndex ? <Check size={12} strokeWidth={2.8} /> : index + 1}
+            </span>
+            <span className="checkout-step-label">{item.label}</span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function CheckoutSummary({
+  plan,
+  productLabel,
+  outcome,
+  featured,
+}: {
+  plan: PricingPlan;
+  productLabel: string;
+  outcome: string;
+  featured: CheckoutTestimonial;
+}) {
+  const highlights = plan.features.slice(0, HIGHLIGHT_COUNT);
+  const moreCount = Math.max(0, plan.features.length - highlights.length);
+  const billedLabel = plan.billing === "yearly" ? "Billed yearly" : "Billed monthly";
+
+  return (
+    <aside className="panel-card checkout-summary">
+      <div className="checkout-summary-top">
+        <span className="checkout-summary-product">{productLabel}</span>
+        {plan.highlighted ? <span className="checkout-summary-badge">Most popular</span> : null}
+      </div>
+
+      <h1 className="checkout-summary-plan">{plan.name}</h1>
+      <p className="checkout-summary-desc">{plan.description}</p>
+
+      <div className="checkout-summary-price-block">
+        <div className="checkout-summary-price">
+          {plan.listPriceLabel ? (
+            <s className="checkout-summary-list">{plan.listPriceLabel}</s>
+          ) : null}
+          {plan.priceLabel}
+          <span>{plan.cycle}</span>
+        </div>
+        {plan.monthlyEquivalentLabel ? (
+          <p className="checkout-summary-equiv">
+            ≈ {plan.monthlyEquivalentLabel}/month
+            {plan.freeMonthsLabel ? ` · ${plan.freeMonthsLabel}` : ""}
+          </p>
+        ) : (
+          <p className="checkout-summary-equiv">{billedLabel} · cancel anytime</p>
+        )}
+        {plan.saveLabel ? (
+          <p className="checkout-summary-save">You save {plan.saveLabel}</p>
+        ) : null}
+      </div>
+
+      <ul className="checkout-summary-features">
+        {highlights.map((feature) => (
+          <li key={feature}>
+            <Check size={14} strokeWidth={2.5} aria-hidden />
+            <FeatureText text={feature} />
+          </li>
+        ))}
+      </ul>
+      {moreCount > 0 ? (
+        <p className="checkout-summary-more">+{moreCount} more included</p>
+      ) : null}
+
+      <div className="checkout-summary-next">
+        <p className="checkout-summary-next-title">What happens next</p>
+        <ul>
+          <li>
+            <Zap size={14} strokeWidth={2.4} aria-hidden />
+            Pay securely in under a minute
+          </li>
+          <li>
+            <Store size={14} strokeWidth={2.4} aria-hidden />
+            Set up your shop right after checkout
+          </li>
+          <li>
+            <Sparkles size={14} strokeWidth={2.4} aria-hidden />
+            {outcome}
+          </li>
+        </ul>
+      </div>
+
+      <figure className="checkout-featured-quote">
+        <StarRow compact />
+        <blockquote>{featured.quote}</blockquote>
+        <figcaption>
+          <span className="checkout-quote-avatar" aria-hidden="true">
+            {featured.initials}
+          </span>
+          <span>
+            <strong>{featured.name}</strong>
+            <em>
+              {featured.role} · {featured.place}
+            </em>
+          </span>
+        </figcaption>
+      </figure>
+
+      <div className="checkout-guarantee">
+        <ShieldCheck size={18} strokeWidth={2.2} aria-hidden />
+        <div>
+          <strong>7-day guaranteed refund</strong>
+          <span>First subscription · full refund if it isn&apos;t a fit · cancel anytime</span>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function CheckoutTestimonials({
+  testimonials,
+  socialProof,
+}: {
+  testimonials: CheckoutTestimonial[];
+  socialProof: string;
+}) {
+  return (
+    <section className="checkout-testimonials" aria-label="Customer stories">
+      <div className="checkout-testimonials-head">
+        <div className="checkout-testimonials-proof">
+          <span className="checkout-avatar-stack" aria-hidden="true">
+            {testimonials.map((t) => (
+              <i key={t.initials}>{t.initials}</i>
+            ))}
+          </span>
+          <div>
+            <StarRow compact />
+            <p>{socialProof}</p>
+          </div>
+        </div>
+        <h2>Restaurants switching to Froq</h2>
+      </div>
+
+      <div className="checkout-testimonial-grid">
+        {testimonials.map((t) => (
+          <article key={t.name} className="checkout-testimonial-card">
+            <StarRow compact />
+            <p className="checkout-testimonial-quote">{t.quote}</p>
+            <div className="checkout-testimonial-meta">
+              <span className="checkout-quote-avatar" aria-hidden="true">
+                {t.initials}
+              </span>
+              <span>
+                <strong>{t.name}</strong>
+                <em>
+                  {t.role} · {t.place}
+                </em>
+              </span>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
@@ -53,6 +418,8 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
 
   const ownerName = [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
   const checkoutPath = `/checkout?plan=${encodeURIComponent(plan.id)}`;
+  const product = PRODUCT_COPY[plan.product];
+  const billVerb = plan.billing === "yearly" ? "year" : "month";
 
   /**
    * Switches the form over to a Google-verified account: the email comes from
@@ -253,54 +620,47 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
     <div className="checkout-page merchant-theme">
       <div className="checkout-screen">
         <header className="checkout-header">
-          <Link href="/loyalty-stamps#pricing" className="checkout-back">
+          <Link href={product.pricingHref} className="checkout-back">
             <ArrowLeft size={16} strokeWidth={2.2} />
             Back to plans
           </Link>
           <div className="checkout-brand">
-            <Image src={FROQ_LOGO_SRC} alt="Froq" width={32} height={32} />
+            <Image src={FROQ_LOGO_SRC} alt="Froq" width={48} height={48} priority />
             <span>Froq</span>
+          </div>
+          <div className="checkout-header-trust">
+            <RazorpayBadge className="checkout-razorpay-badge--header" />
           </div>
         </header>
 
-        <div className="checkout-layout">
-          <aside className="panel-card checkout-summary">
-            <span className="checkout-summary-label">Your plan</span>
-            <h1 className="checkout-summary-plan">{plan.name}</h1>
-            <div className="checkout-summary-price">
-              {plan.priceLabel}
-              <span>{plan.cycle}</span>
-            </div>
-            <ul className="checkout-summary-features">
-              {plan.features.map((feature) => (
-                <li key={feature}>
-                  <Check size={14} strokeWidth={2.5} aria-hidden />
-                  <FeatureText text={feature} />
-                </li>
-              ))}
-            </ul>
-            <p className="checkout-summary-note">
-              Account created during checkout. Store setup starts right after payment.
-            </p>
-          </aside>
+        <CheckoutSteps step={step} />
 
+        <div className="checkout-layout">
           <div className="auth-card checkout-card">
             {step === "account" && (
               <>
-                <div className="auth-head">
+                <div className="auth-head checkout-form-head">
                   <div className="auth-badge merchant-auth-badge" aria-hidden="true">
                     <Store size={24} strokeWidth={2} />
                   </div>
-                  <h2 className="auth-title">Create your account</h2>
+                  <h2 className="auth-title">Start your {plan.name} plan</h2>
                   <p className="auth-sub">
                     {googleEmail
-                      ? `Signed in as ${googleEmail}. Confirm your details to continue.`
-                      : "Continue with Google, or use email and password to access your Froq business dashboard."}
+                      ? `Signed in as ${googleEmail}. Confirm a few details — then pay ${plan.priceLabel}${plan.cycle}.`
+                      : `Create your business account in about a minute. Then pay ${plan.priceLabel}${plan.cycle} and ${product.outcome.toLowerCase()}.`}
                   </p>
+                  <div className="checkout-social-inline">
+                    <StarRow compact />
+                    <span>{product.socialProof}</span>
+                  </div>
                 </div>
 
                 {!googleEmail && (
-                  <>
+                  <div className="checkout-google">
+                    <p className="checkout-google-label">
+                      <Zap size={13} strokeWidth={2.5} aria-hidden />
+                      Fastest way to continue
+                    </p>
                     <GoogleIdentityProvider
                       next={checkoutPath}
                       flow="signup"
@@ -313,9 +673,9 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                       <GoogleSignInButton text="signup_with" fallbackLabel="Sign up with Google" />
                     </GoogleIdentityProvider>
                     <div className="auth-divider">
-                      <span>or</span>
+                      <span>or use email</span>
                     </div>
-                  </>
+                  </div>
                 )}
 
                 <div className="checkout-field-row">
@@ -460,12 +820,36 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
 
                 <button
                   type="button"
-                  className="cta-btn merchant-cta-accent auth-submit"
+                  className="cta-btn merchant-cta-accent auth-submit checkout-submit"
                   onClick={handleCreateAccount}
                   disabled={!googleEmail && !captcha.ready}
                 >
-                  Continue
+                  Continue to payment
+                  <span className="checkout-submit-price">
+                    {plan.priceLabel}
+                    {plan.cycle}
+                  </span>
+                  <ArrowRight size={16} strokeWidth={2.5} aria-hidden />
                 </button>
+
+                <ul className="checkout-trust-strip" aria-label="Checkout assurances">
+                  <li>
+                    <ShieldCheck size={14} strokeWidth={2.3} aria-hidden />
+                    7-day guaranteed refund
+                  </li>
+                  <li>
+                    <Lock size={14} strokeWidth={2.3} aria-hidden />
+                    Secure payment
+                  </li>
+                  <li>
+                    <Zap size={14} strokeWidth={2.3} aria-hidden />
+                    Live today
+                  </li>
+                </ul>
+
+                <div className="checkout-razorpay-wrap">
+                  <RazorpayBadge />
+                </div>
 
                 <p className="merchant-auth-note">
                   Already have an account?{" "}
@@ -490,29 +874,51 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
                   Edit details
                 </button>
 
-                <div className="auth-head">
+                <div className="auth-head checkout-form-head">
                   <div className="auth-badge merchant-auth-badge" aria-hidden="true">
                     <CreditCard size={24} strokeWidth={2} />
                   </div>
-                  <h2 className="auth-title">Complete payment</h2>
+                  <h2 className="auth-title">Confirm &amp; pay</h2>
                   <p className="auth-sub">
-                    You&apos;re subscribing to Froq {plan.name} at {plan.priceLabel}
-                    {plan.cycle}.
+                    You&apos;re one step from launching {product.label}. Card, UPI, and netbanking
+                    via Razorpay.
                   </p>
                 </div>
 
                 <div className="checkout-pay-box">
                   <div className="checkout-pay-row">
-                    <span>Froq {plan.name}</span>
+                    <span>
+                      Froq {plan.name}
+                      <em className="checkout-pay-product">{product.label}</em>
+                    </span>
                     <strong>{plan.priceLabel}</strong>
                   </div>
                   <div className="checkout-pay-row checkout-pay-row--muted">
-                    <span>Billed monthly</span>
+                    <span>{plan.billing === "yearly" ? "Billed yearly" : "Billed monthly"}</span>
                     <span>INR</span>
+                  </div>
+                  {plan.saveLabel ? (
+                    <div className="checkout-pay-row checkout-pay-row--save">
+                      <span>Yearly savings</span>
+                      <span>{plan.saveLabel}</span>
+                    </div>
+                  ) : null}
+                  <div className="checkout-pay-row checkout-pay-row--total">
+                    <span>Due today</span>
+                    <strong>{plan.priceLabel}</strong>
                   </div>
                 </div>
 
-                <p className="checkout-pay-demo">You&apos;ll complete payment securely via Razorpay.</p>
+                <div className="checkout-guarantee checkout-guarantee--inline">
+                  <ShieldCheck size={18} strokeWidth={2.2} aria-hidden />
+                  <div>
+                    <strong>Risk-free for 7 days</strong>
+                    <span>
+                      Pay today, then try Froq live. If it isn&apos;t right, request a full
+                      refund within a week of your first subscription.
+                    </span>
+                  </div>
+                </div>
 
                 {error && (
                   <p className="auth-error" role="alert">
@@ -522,15 +928,20 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
 
                 <button
                   type="button"
-                  className="cta-btn merchant-cta-accent auth-submit"
+                  className="cta-btn merchant-cta-accent auth-submit checkout-submit"
                   onClick={completeCheckout}
                 >
-                  Pay {plan.priceLabel}
+                  Pay {plan.priceLabel} securely
+                  <ArrowRight size={16} strokeWidth={2.5} aria-hidden />
                 </button>
+
+                <div className="checkout-razorpay-wrap">
+                  <RazorpayBadge />
+                </div>
 
                 <p className="merchant-auth-note">
                   <Lock size={13} strokeWidth={2.2} />
-                  Secure checkout · 7-day money-back on first subscription
+                  Encrypted checkout · cancel anytime · renews each {billVerb}
                 </p>
               </>
             )}
@@ -543,7 +954,19 @@ export function CheckoutExperience({ plan }: CheckoutExperienceProps) {
               </div>
             )}
           </div>
+
+          <CheckoutSummary
+            plan={plan}
+            productLabel={product.label}
+            outcome={product.outcome}
+            featured={product.testimonials[0]}
+          />
         </div>
+
+        <CheckoutTestimonials
+          testimonials={product.testimonials}
+          socialProof={product.socialProof}
+        />
       </div>
     </div>
   );

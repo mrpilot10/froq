@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { loyaltyHubRedirectPath } from "@/lib/customer/hub";
 import { JoinScreen } from "@/components/loyalty/join-screen";
 import { BrandThemeStyle } from "@/components/shared/brand-theme-style";
@@ -22,8 +22,7 @@ export default async function JoinPage({
 
   const merchant = await (async () => {
     try {
-      const supabase = await createClient();
-      const { data } = await supabase
+      const { data } = await createAdminClient()
         .from("merchants")
         .select(
           "business_name, brand_color, logo_url, reward_title, reward_name, total_stamps, slug",

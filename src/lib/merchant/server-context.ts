@@ -17,6 +17,7 @@ export async function resolveMerchantId(
       .from("merchant_members")
       .select("merchant_id")
       .eq("user_id", userId)
+      .not("accepted_at", "is", null)
       .maybeSingle(),
   ]);
   if (ownedRes.data?.id) return ownedRes.data.id;

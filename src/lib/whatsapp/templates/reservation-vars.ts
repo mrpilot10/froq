@@ -23,8 +23,8 @@
  *   ({{5}} guests). See you then!
  *
  * reservation_confirmed_menu
- *   Same body as reservation_confirmed; URL button → https://froq.io/m/{{1}}
- *   (customer publicToken) instead of /r/{{1}}.
+ *   Same body as reservation_confirmed; URL button → https://froq.io/menu/{{1}}
+ *   where {{1}} = `{merchantSlug}?guest={publicToken}`.
  *
  * reservation_declined
  *   Hi {{1}}, sorry — {{2}} can't take your booking for {{3}} at {{4}}

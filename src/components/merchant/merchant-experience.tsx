@@ -75,7 +75,6 @@ import { MerchantProfileEditScreen } from "./profile-edit-screen";
 import { MerchantWorkspaceProvider, type MerchantWorkspaceValue } from "./merchant-workspace-context";
 import { BranchSwitcher } from "./branch-switcher";
 import {
-  hasUsedTrial,
   isProductEnabled,
   isTrialActive,
   isTrialExpired,
@@ -1445,12 +1444,7 @@ export function MerchantExperience({
                 product={lockedProduct}
                 tab={activeTab}
                 canPurchase={role === "owner"}
-                canStartTrial={
-                  (lockedProduct === "queue" || lockedProduct === "reservation") &&
-                  !hasUsedTrial(entitlements[lockedProduct])
-                }
                 trialExpired={isTrialExpired(entitlements[lockedProduct])}
-                onTrialStarted={onRefresh}
               />
             ) : (
               children

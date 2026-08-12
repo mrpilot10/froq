@@ -483,13 +483,18 @@ export const ALL_PLANS: PricingPlan[] = [
   ...YEARLY_MENU_PLANS,
 ];
 
-export function getPlanById(id: string) {
+/** Exact catalog lookup. Returns undefined for unknown / unmapped ids. */
+export function findCatalogPlan(id: string): PricingPlan | undefined {
   if (id === FREE_PLAN.id) return FREE_PLAN;
   // Legacy single-tier product checkout links still land on Growth.
   if (id === "queue") return QUEUE_PLANS[1];
   if (id === "reservation") return RESERVATION_PLANS[1];
   if (id === "menu") return MENU_PLANS[1];
-  return ALL_PLANS.find((plan) => plan.id === id) ?? PRICING_PLANS[1];
+  return ALL_PLANS.find((plan) => plan.id === id);
+}
+
+export function getPlanById(id: string) {
+  return findCatalogPlan(id) ?? PRICING_PLANS[1];
 }
 
 /** Resolve the plan for a base id + billing cycle (landing → checkout). */

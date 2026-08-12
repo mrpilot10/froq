@@ -1310,6 +1310,84 @@ function bindPhotoSlots(template) {
     return scope ? `<sc-if value="{{ ${scope}.noPhoto }}">${span}</sc-if>` : span;
   });
   if (seen !== captioned.length) throw new Error("artifact template photo captions moved");
+  return scaleListDishThumbnails(out);
+}
+
+/** List-card dish thumbs — larger photos with matching column width and gap. */
+function scaleListDishThumbnails(template) {
+  let out = template;
+
+  const sizes = [
+    {
+      from: "width: 66px; height: 66px; flex: none; border-radius: 16px; background-color: #ECF1ED; background-image: {{ item.photo }}",
+      to: "width: 80px; height: 80px; flex: none; border-radius: 20px; background-color: #ECF1ED; background-image: {{ item.photo }}",
+    },
+    {
+      from: "width: 72px; height: 72px; flex: none; border-radius: 18px; background-color: #ECF1ED; background-image: {{ item.photo }}",
+      to: "width: 80px; height: 80px; flex: none; border-radius: 20px; background-color: #ECF1ED; background-image: {{ item.photo }}",
+    },
+  ];
+  const scaledPhoto =
+    "width: 80px; height: 80px; flex: none; border-radius: 20px; background-color: #ECF1ED; background-image: {{ item.photo }}";
+  let photoScaled = out.includes(scaledPhoto);
+  if (!photoScaled) {
+    for (const { from, to } of sizes) {
+      if (out.includes(from)) {
+        out = out.replaceAll(from, to);
+        photoScaled = true;
+        break;
+      }
+    }
+  }
+  if (!photoScaled) {
+    if (out.includes("background-image: {{ item.photo }}")) return out;
+    throw new Error("artifact template has no list dish thumbnail to scale");
+  }
+
+  // Photo column must match thumb width on every list card (artifact left 66px).
+  out = out.replaceAll(
+    '<div style="width: 66px; flex: none; display: flex; flex-direction: column;">',
+    '<div style="width: 80px; flex: none; display: flex; flex-direction: column; gap: 0;">',
+  );
+  out = out.replaceAll(
+    '<div style="width: 72px; flex: none; display: flex; flex-direction: column;">',
+    '<div style="width: 80px; flex: none; display: flex; flex-direction: column; gap: 0;">',
+  );
+  out = out.replaceAll(
+    '<div style="width: 80px; flex: none; display: flex; flex-direction: column;">',
+    '<div style="width: 80px; flex: none; display: flex; flex-direction: column; gap: 0;">',
+  );
+
+  // Row rhythm for an 80px thumb: start-aligned, tighter gap, steadier vertical padding.
+  for (const from of [
+    '<div style="display: flex; gap: 14px; padding: 18px 0 4px;">',
+    '<div style="display: flex; gap: 16px; padding: 20px 0 6px;">',
+    '<div style="display: flex; align-items: flex-start; gap: 14px; padding: 18px 0 4px;">',
+    '<div style="display: flex; align-items: flex-start; gap: 16px; padding: 20px 0 6px;">',
+  ]) {
+    out = out.replaceAll(
+      from,
+      '<div style="display: flex; align-items: flex-start; gap: 14px; padding: 14px 0 12px;">',
+    );
+  }
+
+  // Diet badges sit on the photo corner — pull them tighter over the larger thumb.
+  for (const from of [
+    "height: 20px; display: flex; justify-content: flex-end; gap: 4px; margin: 0 -6px -12px 0; position: relative; z-index: 1;",
+    "height: 20px; display: flex; justify-content: flex-end; gap: 4px; margin: 0 -4px -10px 0; position: relative; z-index: 1;",
+  ]) {
+    out = out.replaceAll(
+      from,
+      "height: 20px; display: flex; justify-content: flex-end; gap: 3px; margin: 2px 0 -10px; position: relative; z-index: 1;",
+    );
+  }
+
+  // Give the copy stack a little more vertical room next to the taller photo.
+  out = out.replaceAll(
+    '<div style="flex: 1; min-width: 0;">\n              <div style="display: flex; align-items: baseline; gap: 9px;">',
+    '<div style="flex: 1; min-width: 0; padding-top: 2px;">\n              <div style="display: flex; align-items: baseline; gap: 9px;">',
+  );
+
   return out;
 }
 
@@ -1439,6 +1517,9 @@ function bindMenuOpenedEvent(script) {
 /**
  * Coaching tips (language, ask-AI, "tap again to add") only fire once per
  * browser — not on every reload or every third Add tap.
+ *
+ * Lang / Ask tips wait until Verify Your Details finishes (`froq-menu-verified`
+ * or froq-menu-verify-{slug} in localStorage) so they never sit under the sheet.
  */
 function bindOnceTips(script) {
   let out = script;
@@ -1486,6 +1567,66 @@ function bindOnceTips(script) {
         "      }), 9000);",
       ].join("\n"),
     );
+  }
+
+  // Defer SoftUI tip timers until verify is done; shorten the fake loading beat.
+  const mountTips =
+    "this._tip = setTimeout(() => {\n" +
+    "      if (!(() => { try { return localStorage.getItem('froq-menu-tip-lang') === '1'; } catch (e) { return false; } })()) {\n" +
+    "      try { localStorage.setItem('froq-menu-tip-lang', '1'); } catch (e) {}\n" +
+    "      this.setState({ langTip: true });\n" +
+    "    }\n" +
+    "      this._tipOff = setTimeout(() => this.setState(s => (s.langTip ? { langTip: false, askTip: true } : {})), 9000);\n" +
+    "    }, 2600);\n" +
+    "    this._load = setTimeout(() => this.setState({ loading: false }), 750);";
+  // After bindOnceTips asks replacements, the askTip line may already be expanded.
+  const mountTipsBound =
+    "this._tip = setTimeout(() => {\n" +
+    "      if (!(() => { try { return localStorage.getItem('froq-menu-tip-lang') === '1'; } catch (e) { return false; } })()) {\n" +
+    "      try { localStorage.setItem('froq-menu-tip-lang', '1'); } catch (e) {}\n" +
+    "      this.setState({ langTip: true });\n" +
+    "    }\n" +
+    "      this._tipOff = setTimeout(() => this.setState(s => {\n" +
+    "        if (!s.langTip) return {};\n" +
+    "        const askSeen = (() => { try { return localStorage.getItem('froq-menu-tip-ask') === '1'; } catch (e) { return false; } })();\n" +
+    "        if (!askSeen) { try { localStorage.setItem('froq-menu-tip-ask', '1'); } catch (e) {} }\n" +
+    "        return { langTip: false, askTip: !askSeen };\n" +
+    "      }), 9000);\n" +
+    "    }, 2600);\n" +
+    "    this._load = setTimeout(() => this.setState({ loading: false }), 750);";
+
+  const deferredMount =
+    "this._load = setTimeout(() => this.setState({ loading: false }), 180);\n" +
+    "    const __menuSlug = (window.__FROQ_MENU__ && window.__FROQ_MENU__.context && window.__FROQ_MENU__.context.slug) || '';\n" +
+    "    const __verified = () => { try { return !__menuSlug || localStorage.getItem('froq-menu-verify-' + __menuSlug) === '1'; } catch (e) { return true; } };\n" +
+    "    const __startTips = () => {\n" +
+    "      if (this._tipsStarted) return;\n" +
+    "      this._tipsStarted = true;\n" +
+    "      this._tip = setTimeout(() => {\n" +
+    "        if (!(() => { try { return localStorage.getItem('froq-menu-tip-lang') === '1'; } catch (e) { return false; } })()) {\n" +
+    "          try { localStorage.setItem('froq-menu-tip-lang', '1'); } catch (e) {}\n" +
+    "          this.setState({ langTip: true });\n" +
+    "        }\n" +
+    "        this._tipOff = setTimeout(() => this.setState(s => {\n" +
+    "          if (!s.langTip) return {};\n" +
+    "          const askSeen = (() => { try { return localStorage.getItem('froq-menu-tip-ask') === '1'; } catch (e) { return false; } })();\n" +
+    "          if (!askSeen) { try { localStorage.setItem('froq-menu-tip-ask', '1'); } catch (e) {} }\n" +
+    "          return { langTip: false, askTip: !askSeen };\n" +
+    "        }), 9000);\n" +
+    "      }, 700);\n" +
+    "    };\n" +
+    "    if (__verified()) __startTips();\n" +
+    "    else {\n" +
+    "      const __onVerified = () => { window.removeEventListener('froq-menu-verified', __onVerified); __startTips(); };\n" +
+    "      window.addEventListener('froq-menu-verified', __onVerified);\n" +
+    "    }";
+
+  if (out.includes(mountTipsBound)) {
+    out = out.replace(mountTipsBound, deferredMount);
+  } else if (out.includes(mountTips)) {
+    out = out.replace(mountTips, deferredMount);
+  } else if (!out.includes("froq-menu-verified")) {
+    throw new Error("artifact script tip mount block moved — update bindOnceTips");
   }
 
   return out;
@@ -4204,7 +4345,7 @@ function bindSheetBodyScrollLock(script) {
 
 /** Apply mobile guest-menu fixes to an already-generated template document. */
 function applyGuestMenuMobileFixes(template) {
-  let out = useIosInputZoomFix(useMobileSheetChrome(template));
+  let out = scaleListDishThumbnails(useIosInputZoomFix(useMobileSheetChrome(template)));
   const scriptOpen = out.match(/<script type="text\/x-dc"[^>]*>/);
   if (!scriptOpen) throw new Error("template has no SoftUI script for mobile fixes");
   const scriptStart = scriptOpen.index + scriptOpen[0].length;

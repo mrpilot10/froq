@@ -98,7 +98,7 @@ export function PricingTable({
           {subtitle ??
             (isManage
               ? "Switch plans anytime. You only pay when you confirm checkout."
-              : "Start with a 7-day free trial. No credit card required. Cancel anytime.")}
+              : "Subscribe with a 7-day money-back guarantee. Cancel anytime.")}
         </p>
       </div>
 
@@ -139,6 +139,7 @@ export function PricingTable({
             selecting={selectingPlanId === plan.id}
             disabled={Boolean(selectingPlanId)}
             actionLabel={planActionLabel?.(plan)}
+            landingCtaLabel="Get started"
             onSelectPlan={onSelectPlan}
             onViewPlan={onViewPlan}
           />
@@ -165,6 +166,7 @@ function PricingCard({
   selecting,
   disabled,
   actionLabel,
+  landingCtaLabel,
   onSelectPlan,
   onViewPlan,
 }: {
@@ -175,6 +177,7 @@ function PricingCard({
   selecting: boolean;
   disabled: boolean;
   actionLabel?: string;
+  landingCtaLabel: string;
   onSelectPlan?: (plan: PricingPlan) => void | Promise<void>;
   onViewPlan?: () => void;
 }) {
@@ -267,7 +270,7 @@ function PricingCard({
           href={ctaHref}
           className={`cta-btn landing-plan-cta${plan.highlighted ? " merchant-cta-accent" : " landing-plan-cta--ghost"}`}
         >
-          Start 7-Day Free Trial
+          {landingCtaLabel}
         </Link>
       )}
     </article>

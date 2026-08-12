@@ -16,7 +16,7 @@ export const CustomerNotificationTemplate = {
   WaitlistCalled: "waitlist_called",
   ReservationRequestReceived: "reservation_request_received",
   ReservationConfirmed: "reservation_confirmed",
-  /** Confirmed booking with AI Menu CTA → /m/{{1}}. */
+  /** Confirmed booking with AI Menu CTA → /menu/{slug}?guest={frq_…}. */
   ReservationConfirmedMenu: "reservation_confirmed_menu",
   ReservationDeclined: "reservation_declined",
   ReservationUpdated: "reservation_updated",
@@ -118,6 +118,11 @@ export type ReservationData = {
   time: string;
   partySize?: number | string;
   reservationToken: string;
+  /**
+   * Merchant slug for `reservation_confirmed_menu` Meta CTA:
+   * https://froq.io/menu/{{1}} → `{slug}?guest={frq_…}`.
+   */
+  menuSlug?: string;
 };
 
 export type ReservationDeclinedData = ReservationData & {
@@ -129,16 +134,16 @@ export type ReservationDeclinedData = ReservationData & {
 export type QueuePartyData = {
   businessName: string;
   bookingSize: number;
+  /**
+   * Merchant slug for `seated_menu` Meta CTA:
+   * https://froq.io/menu/{{1}} → `{slug}?guest={frq_…}`.
+   */
+  menuSlug?: string;
 };
 
 export type QueueJoinedData = QueuePartyData & {
   queuePosition: number | string;
   estimatedWaitMinutes: number;
-  /**
-   * Merchant slug for `queue_first_notify_menu` Meta CTA:
-   * https://froq.io/menu/{{1}}. Required when that template is selected.
-   */
-  menuSlug?: string;
 };
 
 export type BirthdayBonusStampsData = {
@@ -280,7 +285,9 @@ export function buildSmsBody(
     case "reservation_confirmed_menu": {
       const d = data as ReservationData;
       const party = d.partySize != null ? `, party of ${d.partySize}` : "";
-      const menu = customerMenuUrl(customer.publicToken);
+      const menu = d.menuSlug?.trim()
+        ? merchantMenuUrl(d.menuSlug.trim(), customer.publicToken)
+        : customerMenuUrl(customer.publicToken);
       return `Hi ${name}, reservation confirmed at ${d.businessName} for ${d.when}${party}. View reservation: ${reservationUrl(d.reservationToken)} · Menu: ${menu}`;
     }
     case "reservation_declined": {
@@ -325,7 +332,11 @@ export function buildSmsBody(
     case "seated_menu": {
       const d = data as QueuePartyData;
       const size = formatBookingSize(d.bookingSize);
-      return `Hi ${name}, you're seated at ${d.businessName} (${size}). Details: ${hub}`;
+      const link =
+        template === "seated_menu" && d.menuSlug?.trim()
+          ? merchantMenuUrl(d.menuSlug.trim(), customer.publicToken)
+          : hub;
+      return `Hi ${name}, you're seated at ${d.businessName} (${size}). Details: ${link}`;
     }
     case "birthday_bonus_stamps": {
       const d = data as BirthdayBonusStampsData;

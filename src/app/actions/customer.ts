@@ -97,19 +97,20 @@ function toBusinessInfo(m: MerchantRow, branch?: BranchRow | null): BusinessInfo
  * else where the customer signed up, else the merchant's main branch.
  */
 async function resolveCustomerBranch(
-  supabase: Awaited<ReturnType<typeof createClient>>,
   merchantId: string,
   branchId: string | null | undefined,
 ): Promise<BranchRow | null> {
+  const admin = createAdminClient();
   if (branchId) {
-    const { data } = await supabase
+    const { data } = await admin
       .from("branches")
       .select("*")
       .eq("id", branchId)
+      .eq("merchant_id", merchantId)
       .maybeSingle();
     if (data) return data as BranchRow;
   }
-  const { data } = await supabase
+  const { data } = await admin
     .from("branches")
     .select("*")
     .eq("merchant_id", merchantId)
@@ -247,7 +248,6 @@ async function buildReadyHome(
   const history: HistoryEntry[] = historyRows.map(({ at: _at, ...entry }) => entry);
 
   const branch = await resolveCustomerBranch(
-    supabase,
     merchant.id,
     card?.branch_id ?? customer.branch_id,
   );
@@ -293,7 +293,11 @@ async function loadCustomerHomeBySlug(slug: string): Promise<CustomerHome> {
   } = await supabase.auth.getUser();
   if (!user) return { status: "unauthenticated", slug };
 
-  const { data: merchant } = await supabase.from("merchants").select("*").eq("slug", slug).maybeSingle();
+  const { data: merchant } = await createAdminClient()
+    .from("merchants")
+    .select("*")
+    .eq("slug", slug)
+    .maybeSingle();
   if (!merchant) return { status: "no_membership", slug };
 
   const { data: customer } = await supabase
@@ -440,7 +444,11 @@ export async function checkShopMembership(slug: string): Promise<ShopMembershipC
 
     const phone = user.phone || undefined;
 
-    const { data: merchant } = await supabase.from("merchants").select("id").eq("slug", slug).maybeSingle();
+    const { data: merchant } = await createAdminClient()
+      .from("merchants")
+      .select("id")
+      .eq("slug", slug)
+      .maybeSingle();
     if (!merchant) return { isMember: false, isAuthenticated: true, phone };
 
     const { data: customer } = await supabase

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ChevronDown, LayoutDashboard, LifeBuoy, LogOut } from "lucide-react";
 import { FROQ_LOGO_SRC } from "@/lib/brand";
 import { createClient } from "@/lib/supabase/client";
 import { SiteFooter } from "./site-footer";
@@ -39,9 +40,116 @@ function navIsActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+function headerUserFromAuth(authUser: {
+  email?: string | null;
+  user_metadata?: Record<string, unknown> | null;
+}): HeaderUser {
+  const meta = authUser.user_metadata ?? {};
+  const fromMeta =
+    (typeof meta.full_name === "string" && meta.full_name.trim()) ||
+    [meta.first_name, meta.last_name].filter((v) => typeof v === "string" && v.trim()).join(" ") ||
+    "";
+  const name = fromMeta || authUser.email?.split("@")[0] || "Account";
+  return { name, initials: initialsFrom(name, authUser.email) };
+}
+
+function NavAccountMenu({ user }: { user: HeaderUser }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onDocClick = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  async function handleLogout() {
+    setOpen(false);
+    const supabase = createClient();
+    await supabase.auth.signOut();
+  }
+
+  return (
+    <div className="lp-nav-account" ref={rootRef}>
+      <button
+        type="button"
+        className={`lp-nav-avatar${open ? " is-open" : ""}`}
+        aria-label={`Account menu for ${user.name}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
+        title={user.name}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="lp-nav-avatar-mark" aria-hidden="true">
+          {user.initials}
+        </span>
+        <ChevronDown
+          size={14}
+          strokeWidth={2.4}
+          className="lp-nav-avatar-caret"
+          aria-hidden="true"
+        />
+      </button>
+
+      {open ? (
+        <div id={menuId} role="menu" className="lp-nav-account-menu" aria-label="Account">
+          <div className="lp-nav-account-head">
+            <span className="lp-nav-account-name">{user.name}</span>
+            <span className="lp-nav-account-sub">Signed in</span>
+          </div>
+
+          <Link
+            href="/merchant"
+            role="menuitem"
+            className="lp-nav-account-item"
+            onClick={() => setOpen(false)}
+          >
+            <LayoutDashboard size={15} strokeWidth={2.2} aria-hidden="true" />
+            Dashboard
+          </Link>
+          <Link
+            href="/help"
+            role="menuitem"
+            className="lp-nav-account-item"
+            onClick={() => setOpen(false)}
+          >
+            <LifeBuoy size={15} strokeWidth={2.2} aria-hidden="true" />
+            Help
+          </Link>
+          <button
+            type="button"
+            role="menuitem"
+            className="lp-nav-account-item lp-nav-account-item--danger"
+            onClick={() => void handleLogout()}
+          >
+            <LogOut size={15} strokeWidth={2.2} aria-hidden="true" />
+            Log out
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Marketing header shared by the homepage, product landings and help.
- * Logged-out: Log in + Get started. Logged-in: avatar that opens the dashboard.
+ * Logged-out: Log in + Get started. Logged-in: avatar menu with dashboard + logout.
  */
 export function SiteHeader() {
   const pathname = usePathname() || "/";
@@ -64,14 +172,7 @@ export function SiteHeader() {
         return;
       }
 
-      const meta = authUser.user_metadata ?? {};
-      const fromMeta =
-        (typeof meta.full_name === "string" && meta.full_name.trim()) ||
-        [meta.first_name, meta.last_name].filter((v) => typeof v === "string" && v.trim()).join(" ") ||
-        "";
-      const name = fromMeta || authUser.email?.split("@")[0] || "Account";
-
-      setUser({ name, initials: initialsFrom(name, authUser.email) });
+      setUser(headerUserFromAuth(authUser));
       setReady(true);
     }
 
@@ -87,13 +188,7 @@ export function SiteHeader() {
         setReady(true);
         return;
       }
-      const meta = authUser.user_metadata ?? {};
-      const fromMeta =
-        (typeof meta.full_name === "string" && meta.full_name.trim()) ||
-        [meta.first_name, meta.last_name].filter((v) => typeof v === "string" && v.trim()).join(" ") ||
-        "";
-      const name = fromMeta || authUser.email?.split("@")[0] || "Account";
-      setUser({ name, initials: initialsFrom(name, authUser.email) });
+      setUser(headerUserFromAuth(authUser));
       setReady(true);
     });
 
@@ -129,16 +224,7 @@ export function SiteHeader() {
 
         <div className="lp-nav-actions">
           {ready && user ? (
-            <Link
-              href="/merchant"
-              className="lp-nav-avatar"
-              aria-label={`${user.name} — open dashboard`}
-              title={user.name}
-            >
-              <span className="lp-nav-avatar-mark" aria-hidden="true">
-                {user.initials}
-              </span>
-            </Link>
+            <NavAccountMenu user={user} />
           ) : (
             <>
               <Link href="/merchant" className="lp-nav-login">
