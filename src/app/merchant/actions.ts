@@ -1243,7 +1243,9 @@ async function establishMerchantAccess(
       .order("created_at", { ascending: true }),
     supabase
       .from("merchant_members")
-      .select("*")
+      .select(
+        "id, user_id, name, first_name, last_name, email, role, branch_id, branch_ids, product_ids, accepted_at",
+      )
       .eq("merchant_id", merchantId)
       .order("created_at", { ascending: true }),
     // Entitlements are merchant-scoped; staff RLS historically blocked this
@@ -3436,7 +3438,7 @@ export async function createMerchant(input: {
           [input.ownerFirstName?.trim(), input.ownerLastName?.trim()]
             .filter(Boolean)
             .join(" ") || null;
-        await supabase.from("merchant_members").upsert(
+        await createAdminClient().from("merchant_members").upsert(
           {
             merchant_id: inserted.id,
             user_id: user.id,
